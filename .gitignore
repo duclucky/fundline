@@ -1,0 +1,26 @@
+# Fundline local secrets
+.env
+*.env
+!*.env.example
+*.local
+*.secret
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Fundline local runtime state
+data/
+server.out.log
+server.err.log
+*.log
+
+# Dependencies and package-manager cache
+node_modules/
+.npm-cache/
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

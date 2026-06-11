@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fundline | USDC invoices on Arc</title>
+    <link rel="stylesheet" href="/home.css" />
+  </head>
+  <body>
+    <main class="home-shell">
+      <header class="home-nav">
+        <a class="home-brand" href="/" aria-label="Fundline home">
+          <span class="brand-symbol" aria-hidden="true"></span>
+          <span class="brand-word">Fundline</span>
+          <span class="testnet-pill">TESTNET</span>
+        </a>
+        <div class="nav-actions">
+          <a class="nav-button secondary" href="/docs.html">Docs</a>
+          <a class="nav-button primary" href="/app.html">Launch App</a>
+        </div>
+      </header>
+
+      <section class="hero-section">
+        <div class="live-pill"><span></span> PaymentRouter live on Arc Testnet</div>
+        <h1>
+          USDC invoices.
+          <br />
+          Paid directly.
+          <br />
+          <span>No escrow.</span>
+        </h1>
+        <p class="hero-copy">
+          Create professional invoices, send a public payment link, let clients pay USDC on Arc, then verify the
+          transaction, send alerts and issue receipts without holding customer funds.
+        </p>
+        <div class="hero-actions">
+          <a class="launch-cta" href="/app.html">Create invoice</a>
+          <a class="docs-cta" href="/docs.html">Read docs</a>
+        </div>
+        <div class="hero-stats" aria-label="Product highlights">
+          <article>
+            <strong>0%</strong>
+            <span>Custody risk</span>
+          </article>
+          <article>
+            <strong>USDC</strong>
+            <span>Native payment</span>
+          </article>
+          <article>
+            <strong>~1 tx</strong>
+            <span>Direct settlement</span>
+          </article>
+          <article>
+            <strong>API</strong>
+            <span>Agent ready</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="marquee-band" aria-label="Fundline ecosystem">
+        <div class="marquee-track">
+          <span>Arc Testnet</span>
+          <span>Circle USDC</span>
+          <span>PaymentRouter</span>
+          <span>PDF Receipts</span>
+          <span>Telegram Alerts</span>
+          <span>Agent API</span>
+          <span>invoice.paid Webhooks</span>
+          <span>Arc Testnet</span>
+          <span>Circle USDC</span>
+          <span>PaymentRouter</span>
+          <span>PDF Receipts</span>
+          <span>Telegram Alerts</span>
+          <span>Agent API</span>
+          <span>invoice.paid Webhooks</span>
+        </div>
+      </section>
+
+      <section class="product-section" id="product">
+        <div class="section-copy">
+          <p class="eyebrow">Product</p>
+          <h2>Built for freelancers, indie teams and service agents.</h2>
+          <p>
+            Fundline turns stablecoin payment collection into a clean invoice workflow: create, share, pay, verify,
+            alert, receipt and export.
+          </p>
+        </div>
+        <div class="workflow-panel">
+          <article>
+            <span>01</span>
+            <strong>Create invoice</strong>
+            <p>Client details, due date, notes and line items with automatic USDC total.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <strong>Share payment link</strong>
+            <p>Public <code>/pay/:id</code> page with QR code and receiving wallet details.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <strong>Verify payment</strong>
+            <p>Arcscan checks payer wallet, merchant wallet, amount and transaction hash.</p>
+          </article>
+          <article>
+            <span>04</span>
+            <strong>Send receipt</strong>
+            <p>Paid invoices can generate PDF receipts and CSV records.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="feature-grid" id="payments">
+        <article>
+          <p class="eyebrow">Payments</p>
+          <h3>Direct wallet settlement</h3>
+          <p>PaymentRouter transfers USDC from payer wallet to merchant wallet. The contract does not hold funds.</p>
+        </article>
+        <article id="agents">
+          <p class="eyebrow">Agents</p>
+          <h3>API-first invoice creation</h3>
+          <p>Backends and AI agents can create invoices through protected endpoints and receive payment links.</p>
+        </article>
+        <article id="security">
+          <p class="eyebrow">Security</p>
+          <h3>Verify before paid</h3>
+          <p>The paid state is only saved after a matching on-chain payment is found and persisted on the server.</p>
+        </article>
+      </section>
+    </main>
+    <script src="/home.js"></script>
+  </body>
+</html>

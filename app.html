@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fundline USDC</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="side">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"></div>
+          <div>
+            <strong>Fundline</strong>
+            <span>USDC invoices</span>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Invoice navigation">
+          <button class="nav-item is-active" data-view="dashboard" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+            Dashboard
+          </button>
+          <button class="nav-item" data-view="create" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
+            New invoice
+          </button>
+          <button class="nav-item" data-view="settings" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8h12M6 16h12M9 5v6M15 13v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+            Settings
+          </button>
+          <button class="nav-item nav-item-disabled" type="button" disabled aria-disabled="true" title="Agent settings coming soon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10M8 15h8M10 4h4l1 3h3v11H6V7h3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            <span class="nav-item-copy">
+              Agent settings
+              <span class="soon-badge">Coming soon</span>
+            </span>
+          </button>
+        </nav>
+        <div class="network-pill">
+          <span></span>
+          Arc Testnet
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="pageEyebrow">Non-custodial billing</p>
+            <h1 id="pageTitle">USDC invoice dashboard</h1>
+          </div>
+          <div class="top-actions">
+            <div class="wallet-control" id="walletControl">
+              <button class="ghost-action wallet-action" id="walletButton" type="button" aria-expanded="false" aria-controls="walletMenu">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM16 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                <span id="walletButtonText">Connect wallet</span>
+              </button>
+              <div class="wallet-menu" id="walletMenu" hidden>
+                <div class="wallet-menu-head">
+                  <span>Wallet</span>
+                  <strong id="walletMenuStatus">Connected</strong>
+                </div>
+                <div class="wallet-menu-row">
+                  <span>Address</span>
+                  <strong id="walletMenuAddress">-</strong>
+                </div>
+                <div class="wallet-menu-row">
+                  <span>Balance</span>
+                  <strong id="walletMenuBalance">Checking...</strong>
+                </div>
+                <div class="wallet-menu-actions">
+                  <button class="ghost-action" id="walletRefreshBalance" type="button">Refresh</button>
+                  <button class="danger-action" id="walletDisconnect" type="button">Logout</button>
+                </div>
+              </div>
+            </div>
+            <button class="primary-action" data-view="create" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
+              New invoice
+            </button>
+          </div>
+        </header>
+
+        <section class="pay-page" id="payPage" hidden></section>
+
+        <section class="app-page" id="appPage">
+          <section class="stats-grid">
+            <article class="stat">
+              <span>Paid revenue</span>
+              <strong id="paidRevenue">0.00 USDC</strong>
+            </article>
+            <article class="stat">
+              <span>Open invoices</span>
+              <strong id="openCount">0</strong>
+            </article>
+            <article class="stat">
+              <span>Paid invoices</span>
+              <strong id="paidCount">0</strong>
+            </article>
+            <article class="stat">
+              <span>Expired</span>
+              <strong id="overdueCount">0</strong>
+            </article>
+          </section>
+
+          <section class="view is-active" data-panel="dashboard">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Invoices</p>
+                <h2>Recent invoices</h2>
+              </div>
+              <div class="dashboard-tools">
+                <div class="filters" role="group" aria-label="Invoice filter">
+                  <button class="filter is-active" data-filter="all" type="button">All</button>
+                  <button class="filter" data-filter="open" type="button">Open</button>
+                  <button class="filter" data-filter="paid" type="button">Paid</button>
+                </div>
+                <button class="ghost-action" id="exportCsv" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  Export CSV
+                </button>
+              </div>
+            </div>
+            <div class="invoice-list" id="invoiceList"></div>
+          </section>
+
+          <section class="view" data-panel="create" hidden>
+            <div class="wallet-gate" id="walletGate">
+              <div>
+                <p class="eyebrow">Wallet required</p>
+                <h2 id="walletGateTitle">Connect wallet before creating invoice</h2>
+                <p id="walletGateText">The connected wallet becomes your USDC receiving wallet for this invoice.</p>
+              </div>
+              <button class="primary-action" id="walletGateConnect" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM16 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                Connect wallet
+              </button>
+            </div>
+            <form class="invoice-form" id="invoiceForm">
+              <div class="form-grid">
+                <label>
+                  <span class="field-label">
+                    Client name
+                    <span class="help-tip" tabindex="0" data-help="Name of the person or company receiving this invoice. Use the same name from your agreement or email thread." aria-label="Client name help">?</span>
+                  </span>
+                  <input name="clientName" required placeholder="Acme Labs" />
+                </label>
+                <label>
+                  <span class="field-label">
+                    Client email
+                    <span class="help-tip" tabindex="0" data-help="Email address used to send the payment link or receipt. Optional in the local demo." aria-label="Client email help">?</span>
+                  </span>
+                  <input name="clientEmail" type="email" placeholder="billing@client.com" />
+                </label>
+                <label>
+                  <span class="field-label">
+                    Due date
+                    <span class="help-tip" tabindex="0" data-help="Date you expect the client to pay by. Unpaid invoices after this date are counted as overdue." aria-label="Due date help">?</span>
+                  </span>
+                  <input name="dueDate" type="date" required />
+                </label>
+                <label>
+                  <span class="field-label">
+                    Invoice note
+                    <span class="help-tip" tabindex="0" data-help="Short note for the client, such as work scope, payment terms, or a thank-you message." aria-label="Invoice note help">?</span>
+                  </span>
+                  <input name="note" placeholder="Thank you for your business" />
+                </label>
+              </div>
+
+              <div class="line-items">
+                <div class="line-head">
+                  <div>
+                    <p class="eyebrow">Line items</p>
+                    <h2>Services and products</h2>
+                  </div>
+                  <button class="ghost-action" id="addLineItem" type="button">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
+                    Add item
+                  </button>
+                </div>
+                <div class="items-table" id="lineItems"></div>
+              </div>
+
+              <div class="form-footer">
+                <div>
+                  <span>Total</span>
+                  <strong id="invoiceTotal">0.00 USDC</strong>
+                </div>
+                <button class="primary-action" type="submit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  Create invoice
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <section class="view" data-panel="settings" hidden>
+            <form class="settings-panel" id="settingsForm">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Receiving wallet</p>
+                  <h2>Merchant profile</h2>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>
+                  <span class="field-label">
+                    Display name
+                    <span class="help-tip" tabindex="0" data-help="Your name, studio, or company name shown on invoices and receipts." aria-label="Display name help">?</span>
+                  </span>
+                  <input name="merchantName" placeholder="Your studio or name" />
+                </label>
+                <label>
+                  <span class="field-label">
+                    USDC receiving wallet
+                    <span class="help-tip" tabindex="0" data-help="Filled automatically from the connected wallet. This prevents sending invoice payments to the wrong address." aria-label="USDC receiving wallet help">?</span>
+                  </span>
+                  <input name="merchantWallet" placeholder="Connect wallet to fill automatically" readonly />
+                </label>
+              </div>
+              <div class="settings-note" id="walletSettingsNote">Connect wallet to set the USDC receiving address.</div>
+
+              <div class="section-head section-head-inline">
+                <div>
+                  <p class="eyebrow">Notifications</p>
+                  <h2>Telegram alerts</h2>
+                </div>
+              </div>
+              <div class="form-grid">
+                <label>
+                  <span class="field-label">
+                    Telegram chat ID
+                    <span class="help-tip" tabindex="0" data-help="Your Telegram chat ID. The bot sends payment success alerts to this chat after an invoice is marked paid." aria-label="Telegram chat ID help">?</span>
+                  </span>
+                  <input name="telegramChatId" inputmode="numeric" placeholder="8436047896" />
+                </label>
+                <label class="toggle-field">
+                  <input name="telegramEnabled" type="checkbox" />
+                  <span>
+                    <strong>Notify when paid</strong>
+                    <small>Send a Telegram message after successful payment.</small>
+                  </span>
+                </label>
+              </div>
+              <div class="settings-actions">
+                <button class="ghost-action" id="connectWalletSettings" type="button">Connect wallet</button>
+                <button class="ghost-action" id="sendTelegramTest" type="button">Send test alert</button>
+                <button class="primary-action" type="submit">Save settings</button>
+              </div>
+              <p class="muted">Payments are designed to move directly from the payer wallet to this merchant wallet. The app does not hold funds.</p>
+            </form>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="invoice-dialog" id="invoiceDialog">
+      <div class="dialog-body" id="invoiceDialogBody"></div>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

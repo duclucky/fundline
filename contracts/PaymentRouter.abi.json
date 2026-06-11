@@ -1,0 +1,57 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [{ "name": "usdc_", "type": "address" }],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "usdc",
+    "inputs": [],
+    "outputs": [{ "name": "", "type": "address" }],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "payInvoice",
+    "inputs": [
+      { "name": "invoiceId", "type": "bytes32" },
+      { "name": "merchant", "type": "address" },
+      { "name": "amount", "type": "uint256" }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "InvoicePaid",
+    "inputs": [
+      { "name": "invoiceId", "type": "bytes32", "indexed": true },
+      { "name": "payer", "type": "address", "indexed": true },
+      { "name": "merchant", "type": "address", "indexed": true },
+      { "name": "amount", "type": "uint256", "indexed": false },
+      { "name": "token", "type": "address", "indexed": false }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "error",
+    "name": "InvalidInvoice",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMerchant",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidAmount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TransferFailed",
+    "inputs": []
+  }
+]

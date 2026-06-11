@@ -1,0 +1,14 @@
+{
+  "name": "fundline-usdc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "deploy:payment-router": "node scripts/deploy-payment-router.js"
+  },
+  "dependencies": {
+    "ethers": "^6.13.5",
+    "solc": "^0.8.30"
+  }
+}

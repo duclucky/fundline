@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fundline Documentation</title>
+    <link rel="stylesheet" href="/docs.css" />
+  </head>
+  <body>
+    <header class="docs-topbar">
+      <a class="docs-brand" href="/">
+        <span class="docs-mark" aria-hidden="true"></span>
+        <span>
+          <strong>Fundline</strong>
+          <small>Docs</small>
+        </span>
+      </a>
+      <nav class="docs-topnav" aria-label="Top navigation">
+        <a href="#quick-start">Quick start</a>
+        <a href="#payment-flow">Payment</a>
+        <a href="#agent-api">API</a>
+        <a href="#contracts">Contracts</a>
+      </nav>
+      <div class="docs-actions">
+        <a class="ghost-link" href="https://testnet.arcscan.app" target="_blank" rel="noreferrer">Arcscan</a>
+        <a class="primary-link" href="/app.html">Launch App</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="docs-sidebar" aria-label="Documentation navigation">
+        <p class="nav-label">// Getting started</p>
+        <a class="side-link is-active" href="#introduction">Introduction</a>
+        <a class="side-link" href="#architecture">Architecture</a>
+        <a class="side-link" href="#quick-start">Quick start</a>
+        <a class="side-link" href="#wallet-setup">Wallet setup</a>
+
+        <p class="nav-label">// Product</p>
+        <a class="side-link" href="#create-invoice">Create invoice</a>
+        <a class="side-link" href="#payment-flow">Payment flow</a>
+        <a class="side-link" href="#receipts">Receipts and export</a>
+        <a class="side-link" href="#telegram">Telegram alerts</a>
+
+        <p class="nav-label">// Developers and agents</p>
+        <a class="side-link" href="#agent-api">Agent API</a>
+        <a class="side-link" href="#webhooks">Webhooks</a>
+        <a class="side-link" href="#webhook-logs">Webhook logs</a>
+
+        <p class="nav-label">// Reference</p>
+        <a class="side-link" href="#network">Network</a>
+        <a class="side-link" href="#contracts">Contracts</a>
+        <a class="side-link" href="#configuration">Configuration</a>
+        <a class="side-link" href="#security">Security</a>
+        <a class="side-link" href="#faq">FAQ</a>
+      </aside>
+
+      <main class="docs-main">
+        <section class="hero-doc" id="introduction">
+          <p class="breadcrumb"><a href="/">Home</a><span>/</span><span>Documentation</span></p>
+          <h1>Fundline Documentation</h1>
+          <p class="lead">
+            The operating guide for non-custodial USDC invoices on Arc. Fundline helps freelancers, service providers,
+            SaaS tools and agents create invoices, send payment links, verify on-chain payments, issue receipts and
+            trigger Telegram or webhook alerts when a customer pays.
+          </p>
+          <div class="status-row" aria-label="Project status">
+            <span><i></i>Arc Testnet</span>
+            <span>Non-custodial</span>
+            <span>PaymentRouter live</span>
+            <span>Agent API ready</span>
+          </div>
+          <div class="doc-cards">
+            <a class="doc-card" href="#quick-start">
+              <strong>Quick start</strong>
+              <span>Create an invoice and send a payment link in a few steps.</span>
+            </a>
+            <a class="doc-card" href="#payment-flow">
+              <strong>Payment flow</strong>
+              <span>Let payers approve USDC, pay with wallet and verify through Arcscan.</span>
+            </a>
+            <a class="doc-card" href="#agent-api">
+              <strong>Agent API</strong>
+              <span>Create invoices from a backend, AI agent, or SaaS workflow.</span>
+            </a>
+            <a class="doc-card" href="#webhooks">
+              <strong>Webhooks</strong>
+              <span>Receive an <code>invoice.paid</code> event when a payment is verified.</span>
+            </a>
+          </div>
+        </section>
+
+        <section class="doc-section" id="architecture">
+          <p class="eyebrow">Architecture</p>
+          <h2>How Fundline works</h2>
+          <p>
+            Fundline separates invoice creation, payment execution and payment verification. The app never holds
+            customer funds. PaymentRouter transfers USDC directly from the payer wallet to the merchant wallet.
+          </p>
+          <div class="surface-grid">
+            <article>
+              <span>Browser app</span>
+              <strong>Invoice UI and payment page</strong>
+              <p>Create invoices, connect wallet, view payment status and download receipts.</p>
+            </article>
+            <article>
+              <span>Local server</span>
+              <strong>Storage, alerts and API</strong>
+              <p>Stores invoices, verifies Arcscan payments, sends Telegram alerts and dispatches webhooks.</p>
+            </article>
+            <article>
+              <span>Arc contracts</span>
+              <strong>USDC and PaymentRouter</strong>
+              <p>Approves exact USDC spend, calls <code>payInvoice</code>, emits a clear payment event.</p>
+            </article>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Layer</th>
+                <th>Responsibility</th>
+                <th>Custody</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Merchant wallet</td>
+                <td>Receives USDC directly</td>
+                <td>User-controlled</td>
+              </tr>
+              <tr>
+                <td>Payer wallet</td>
+                <td>Approves and sends USDC</td>
+                <td>User-controlled</td>
+              </tr>
+              <tr>
+                <td>PaymentRouter</td>
+                <td>Routes payment and emits <code>InvoicePaid</code></td>
+                <td>Does not hold funds</td>
+              </tr>
+              <tr>
+                <td>Server</td>
+                <td>Stores invoice state and alerts</td>
+                <td>No token custody</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="quick-start">
+          <p class="eyebrow">Quick start</p>
+          <h2>From invoice to paid status</h2>
+          <ol class="steps">
+            <li><strong>Start the app server.</strong><span>Open <code>run-arc-invoice-server.bat</code> and visit <code>http://127.0.0.1:5190</code>.</span></li>
+            <li><strong>Connect merchant wallet.</strong><span>The connected wallet becomes the USDC receiving wallet for new invoices.</span></li>
+            <li><strong>Create an invoice.</strong><span>Add client details, due date, note and line items. Fundline calculates total USDC.</span></li>
+            <li><strong>Send the payment link.</strong><span>Share the public <code>/pay/:invoiceId</code> link or QR code with the customer.</span></li>
+            <li><strong>Customer pays.</strong><span>The customer can use the wallet payment button or pay manually and verify the transaction.</span></li>
+            <li><strong>Receive alerts and receipt.</strong><span>After verification, the invoice becomes paid, Telegram/webhooks run and PDF receipt becomes available.</span></li>
+          </ol>
+        </section>
+
+        <section class="doc-section" id="wallet-setup">
+          <p class="eyebrow">Wallet setup</p>
+          <h2>Merchant and payer wallets</h2>
+          <p>
+            The merchant must sign in before creating invoices. This signature proves wallet control and fills the
+            receiving wallet automatically. Payers only need to connect when they want to pay directly through the
+            app. If they pay outside the app, they can paste the payer wallet and transaction hash for verification.
+          </p>
+          <div class="note">
+            <strong>Important</strong>
+            <span>Signing in does not move funds. Actual token movement only happens when the payer approves USDC and confirms the payment transaction.</span>
+          </div>
+        </section>
+
+        <section class="doc-section" id="create-invoice">
+          <p class="eyebrow">Product</p>
+          <h2>Create invoice</h2>
+          <p>
+            An invoice contains client name, client email, due date, note and line items. The server stores invoices in
+            <code>data/invoices.json</code> for local demo usage. Production should move this storage to Supabase,
+            Postgres, or another durable database.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Purpose</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Client name</td>
+                <td>Name shown on invoice, receipt and dashboard.</td>
+              </tr>
+              <tr>
+                <td>Client email</td>
+                <td>Reference for sending the payment link or receipt.</td>
+              </tr>
+              <tr>
+                <td>Due date</td>
+                <td>Used to flag unpaid invoices as expired.</td>
+              </tr>
+              <tr>
+                <td>Line items</td>
+                <td>Services or products with quantity, unit price and total.</td>
+              </tr>
+              <tr>
+                <td>Payment reference ID</td>
+                <td>Offchain bytes32 reference created with the invoice. It is written onchain only when PaymentRouter emits InvoicePaid.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="payment-flow">
+          <p class="eyebrow">Payment</p>
+          <h2>On-chain payment flow</h2>
+          <p>
+            When PaymentRouter is configured, the public payment page shows a wallet payment button. The payer approves
+            the exact USDC amount, then calls <code>payInvoice(bytes32,address,uint256)</code>.
+          </p>
+          <div class="flow">
+            <span>Payer opens link</span>
+            <span>Approve exact USDC</span>
+            <span>Pay invoice</span>
+            <span>Verify on Arcscan</span>
+            <span>Mark paid</span>
+          </div>
+          <div class="code-card">
+            <div class="code-head"><span>PaymentRouter call</span><button data-copy="#pay-router-call" type="button">Copy</button></div>
+            <pre id="pay-router-call"><code>payInvoice(bytes32 invoiceId, address merchant, uint256 amount)</code></pre>
+          </div>
+          <p>
+            If PaymentRouter is not configured, the payment page keeps the wallet payment button disabled and still
+            supports manual USDC transfer plus Arcscan verification.
+          </p>
+        </section>
+
+        <section class="doc-section" id="receipts">
+          <p class="eyebrow">Receipts</p>
+          <h2>PDF receipt and CSV export</h2>
+          <p>
+            Paid invoices can generate a professional PDF receipt. The receipt includes invoice number, payer wallet,
+            receiving wallet, transaction hash, verification source and paid timestamp. Merchants can also export CSV
+            for bookkeeping.
+          </p>
+        </section>
+
+        <section class="doc-section" id="telegram">
+          <p class="eyebrow">Alerts</p>
+          <h2>Telegram payment alerts</h2>
+          <p>
+            Merchants can add a Telegram chat ID in Settings. After a payment is verified, Fundline sends a message
+            with invoice number, amount, payer wallet, receiving wallet and transaction link.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>Telegram env</span><button data-copy="#telegram-env" type="button">Copy</button></div>
+            <pre id="telegram-env"><code>TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token</code></pre>
+          </div>
+        </section>
+
+        <section class="doc-section" id="agent-api">
+          <p class="eyebrow">Developers and agents</p>
+          <h2>Agent API</h2>
+          <p>
+            Agent API endpoints let a SaaS backend or AI agent create invoices without using the browser dashboard.
+            All Agent API requests require a server-side API key. Use <code>Idempotency-Key</code> when an
+            agent may retry the same create request, so retries return the same invoice instead of creating duplicates.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>Auth headers</span><button data-copy="#api-auth" type="button">Copy</button></div>
+            <pre id="api-auth"><code>Authorization: Bearer $FUNDLINE_API_KEY
+x-api-key: $FUNDLINE_API_KEY</code></pre>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Method</th>
+                <th>Endpoint</th>
+                <th>Use</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>GET</td>
+                <td><code>/api/agent/invoices?merchantWallet=:wallet&amp;status=open&amp;limit=100</code></td>
+                <td>List invoices with optional wallet, status and limit filters.</td>
+              </tr>
+              <tr>
+                <td>POST</td>
+                <td><code>/api/agent/invoices</code></td>
+                <td>Create an invoice and receive <code>paymentLink</code>.</td>
+              </tr>
+              <tr>
+                <td>GET</td>
+                <td><code>/api/agent/invoices/:id</code></td>
+                <td>Fetch one invoice.</td>
+              </tr>
+              <tr>
+                <td>GET</td>
+                <td><code>/api/agent/webhooks</code></td>
+                <td>List webhook subscriptions.</td>
+              </tr>
+              <tr>
+                <td>POST</td>
+                <td><code>/api/agent/webhooks</code></td>
+                <td>Create or replace a webhook subscription.</td>
+              </tr>
+              <tr>
+                <td>PATCH</td>
+                <td><code>/api/agent/webhooks/:id</code></td>
+                <td>Update webhook URL, secret or enabled state.</td>
+              </tr>
+              <tr>
+                <td>GET</td>
+                <td><code>/api/agent/webhook-logs</code></td>
+                <td>Review webhook delivery attempts.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="code-card">
+            <div class="code-head"><span>Create invoice example</span><button data-copy="#create-invoice-api" type="button">Copy</button></div>
+            <pre id="create-invoice-api"><code>curl -X POST http://127.0.0.1:5190/api/agent/invoices \
+  -H "Authorization: Bearer $FUNDLINE_API_KEY" \
+  -H "Idempotency-Key: client-ltd-2026-06-retainer" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchantWallet": "0x8124ca3f0ca935e6beb69f2857e33d32fa3b54ea",
+    "merchantName": "Fundline Studio",
+    "clientName": "Client Ltd",
+    "clientEmail": "billing@client.com",
+    "dueDate": "2026-06-30",
+    "items": [
+      { "description": "Consulting package", "quantity": 1, "unitPrice": 250 }
+    ]
+  }'</code></pre>
+          </div>
+        </section>
+
+        <section class="doc-section" id="webhooks">
+          <p class="eyebrow">Webhooks</p>
+          <h2>Payment events for external systems</h2>
+          <p>
+            Webhooks notify your backend when an invoice becomes paid. A webhook can be signed with
+            <code>X-Fundline-Signature</code> using HMAC SHA-256.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>Register webhook</span><button data-copy="#register-webhook" type="button">Copy</button></div>
+            <pre id="register-webhook"><code>curl -X POST http://127.0.0.1:5190/api/agent/webhooks \
+  -H "Authorization: Bearer $FUNDLINE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchantWallet": "0x8124ca3f0ca935e6beb69f2857e33d32fa3b54ea",
+    "url": "https://example.com/webhooks/fundline",
+    "event": "invoice.paid",
+    "secret": "optional_shared_secret"
+  }'</code></pre>
+          </div>
+          <div class="code-card">
+            <div class="code-head"><span>Event payload</span><button data-copy="#webhook-payload" type="button">Copy</button></div>
+            <pre id="webhook-payload"><code>{
+  "event": "invoice.paid",
+  "sentAt": "2026-06-11T00:00:00.000Z",
+  "invoice": {
+    "id": "37f1cdd4727c0d85d32b",
+    "number": "INV-2026-0001",
+    "status": "paid",
+    "total": 250,
+    "merchantWallet": "0x...",
+    "payerWallet": "0x...",
+    "txHash": "0x...",
+    "paymentLink": "http://127.0.0.1:5190/pay/37f1cdd4727c0d85d32b"
+  }
+}</code></pre>
+          </div>
+        </section>
+
+        <section class="doc-section" id="webhook-logs">
+          <p class="eyebrow">Delivery audit</p>
+          <h2>Webhook logs</h2>
+          <p>
+            Each webhook delivery attempt is stored on the server with delivery ID, invoice ID, target URL,
+            success state, HTTP status, error preview and duration. Secrets are never returned in log responses.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>Read delivery logs</span><button data-copy="#webhook-logs-api" type="button">Copy</button></div>
+            <pre id="webhook-logs-api"><code>curl "http://127.0.0.1:5190/api/agent/webhook-logs?merchantWallet=0x8124ca3f0ca935e6beb69f2857e33d32fa3b54ea&amp;limit=20" \
+  -H "Authorization: Bearer $FUNDLINE_API_KEY"</code></pre>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Filter</th>
+                <th>Use</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>merchantWallet</code></td>
+                <td>Show logs for one merchant receiving wallet.</td>
+              </tr>
+              <tr>
+                <td><code>webhookId</code></td>
+                <td>Debug one webhook endpoint.</td>
+              </tr>
+              <tr>
+                <td><code>invoiceId</code></td>
+                <td>Check delivery attempts for one invoice.</td>
+              </tr>
+              <tr>
+                <td><code>ok=true|false</code></td>
+                <td>Separate successful and failed delivery attempts.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="network">
+          <p class="eyebrow">Reference</p>
+          <h2>Network</h2>
+          <table>
+            <tbody>
+              <tr>
+                <th>Network</th>
+                <td>Arc Testnet</td>
+              </tr>
+              <tr>
+                <th>Chain ID</th>
+                <td><code>5042002</code></td>
+              </tr>
+              <tr>
+                <th>RPC</th>
+                <td><code>https://rpc.testnet.arc.network</code></td>
+              </tr>
+              <tr>
+                <th>Explorer</th>
+                <td><a href="https://testnet.arcscan.app" target="_blank" rel="noreferrer">testnet.arcscan.app</a></td>
+              </tr>
+              <tr>
+                <th>USDC</th>
+                <td><code>0x3600000000000000000000000000000000000000</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="contracts">
+          <p class="eyebrow">Contracts</p>
+          <h2>PaymentRouter</h2>
+          <p>
+            PaymentRouter was deployed to Arc Testnet to enable direct USDC invoice payments from payer wallet to
+            merchant wallet.
+          </p>
+          <table>
+            <tbody>
+              <tr>
+                <th>Contract</th>
+                <td><code>0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</code></td>
+              </tr>
+              <tr>
+                <th>Deploy tx</th>
+                <td><code>0x56d6f6d33bffb02c862239bdcce8f7c2c5129786396bda7efdbf248e89ddb92d</code></td>
+              </tr>
+              <tr>
+                <th>Block</th>
+                <td><code>46561912</code></td>
+              </tr>
+              <tr>
+                <th>Source</th>
+                <td><code>contracts/PaymentRouter.sol</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="configuration">
+          <p class="eyebrow">Configuration</p>
+          <h2>Server environment</h2>
+          <p>All secrets stay on the server. Do not expose private keys, Telegram bot token or API key in browser code.</p>
+          <div class="code-card">
+            <div class="code-head"><span>.env template</span><button data-copy="#env-template" type="button">Copy</button></div>
+            <pre id="env-template"><code>TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token
+FUNDLINE_API_KEY=replace_with_a_long_random_agent_api_key
+ARC_DEPLOYER_PRIVATE_KEY=replace_with_testnet_deployer_private_key
+ARCSCAN_API_BASE=https://testnet.arcscan.app/api/v2
+ARCSCAN_EXPLORER_BASE=https://testnet.arcscan.app
+ARC_CHAIN_ID=5042002
+ARC_RPC_URL=https://rpc.testnet.arc.network
+ARC_NETWORK_NAME=Arc Testnet
+ARC_USDC_TOKEN_ADDRESS=0x3600000000000000000000000000000000000000
+ARC_NATIVE_USDC_DECIMALS=18
+ARC_PAYMENT_ROUTER_ADDRESS=0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</code></pre>
+          </div>
+        </section>
+
+        <section class="doc-section" id="security">
+          <p class="eyebrow">Security</p>
+          <h2>Security baseline</h2>
+          <ul class="checks">
+            <li>PaymentRouter is non-custodial and does not hold USDC.</li>
+            <li>The payer approves only the invoice amount required by the payment page.</li>
+            <li>Paid status is set only after Arcscan returns a matching payment.</li>
+            <li>Telegram bot token, API key and deployer private key stay in server-side environment files.</li>
+            <li>Webhook signatures should be verified by production receivers before trusting payloads.</li>
+          </ul>
+        </section>
+
+        <section class="doc-section" id="faq">
+          <p class="eyebrow">FAQ</p>
+          <h2>Common questions</h2>
+          <details open>
+            <summary>Does Fundline hold customer money?</summary>
+            <p>No. PaymentRouter transfers USDC from payer wallet directly to merchant wallet.</p>
+          </details>
+          <details>
+            <summary>Can a payer pay without connecting wallet?</summary>
+            <p>Yes. They can send USDC manually and then provide payer wallet plus optional transaction hash for verification.</p>
+          </details>
+          <details>
+            <summary>Is local JSON storage production ready?</summary>
+            <p>No. It is useful for demo and local development. Production should use a database.</p>
+          </details>
+          <details>
+            <summary>What should be built next?</summary>
+            <p>Direct PaymentRouter event indexing, hosted database, invoice email delivery, and a hosted admin UI for webhook delivery logs.</p>
+          </details>
+        </section>
+      </main>
+
+      <aside class="on-page" aria-label="On this page">
+        <p class="nav-label">On this page</p>
+        <a href="#introduction">Introduction</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#quick-start">Quick start</a>
+        <a href="#wallet-setup">Wallet setup</a>
+        <a href="#create-invoice">Create invoice</a>
+        <a href="#payment-flow">Payment flow</a>
+        <a href="#receipts">Receipts</a>
+        <a href="#telegram">Telegram</a>
+        <a href="#agent-api">Agent API</a>
+        <a href="#webhooks">Webhooks</a>
+        <a href="#webhook-logs">Webhook logs</a>
+        <a href="#network">Network</a>
+        <a href="#contracts">Contracts</a>
+        <a href="#configuration">Configuration</a>
+        <a href="#security">Security</a>
+        <a href="#faq">FAQ</a>
+      </aside>
+    </div>
+
+    <div class="copy-toast" id="copyToast" role="status" aria-live="polite">Copied</div>
+    <script src="/docs.js"></script>
+  </body>
+</html>
