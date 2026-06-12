@@ -15,6 +15,7 @@ Non-custodial USDC invoice app for freelancers, indie developers, and service pr
 - Verify payment on Arcscan before marking an invoice as `paid`.
 - Let payers provide the wallet address that sent payment when they do not connect a wallet.
 - Send a Telegram alert after an invoice is marked paid.
+- Build and start a CCTP testnet transfer for moving native USDC from Ethereum Sepolia or Base Sepolia to Arc Testnet.
 - Track `open`, `paid`, and `overdue` invoices.
 - Download a simple PDF receipt after payment.
 - Export invoices as CSV.
@@ -75,6 +76,35 @@ If the payer does not connect a wallet in the app, they must enter the wallet ad
 When verification starts, the invoice briefly moves to `verifying`. If Arcscan does not return a valid match, the invoice returns to `open`. If the due date has passed and no payment is verified, the UI shows `expired`.
 
 Paid invoices store payer wallet, transaction hash, verification source, and verification time. Those fields are included in CSV export, Telegram alerts, and PDF receipts.
+
+## Cross-chain payment pilot
+
+The public payment page prepares the next product direction: native USDC settlement across chains, without wrapped bridge tokens. Payers choose where their USDC is when paying an invoice. Arc USDC pays directly; supported source testnets can bridge first and then pay.
+
+Current testnet scope:
+
+```text
+Source chain 1: Ethereum Sepolia
+USDC:          0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238
+CCTP domain:   0
+
+Source chain 2: Base Sepolia
+USDC:          0x036CbD53842c5426634e7929541eC2318f3dCF7e
+CCTP domain:   6
+
+Destination:   Arc Testnet
+USDC:          0x3600000000000000000000000000000000000000
+CCTP domain:   26
+
+TokenMessengerV2:     0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA
+MessageTransmitterV2: 0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275
+```
+
+The current app checks payer USDC balance on the selected chain. If Arc has enough USDC, it pays directly. If Base Sepolia or Ethereum Sepolia has enough USDC, it starts a bridge-and-pay flow: approve TokenMessengerV2, burn source USDC, fetch Circle attestation, mint on Arc, then pay the invoice.
+
+The next production step is hardening the bridge worker and adding hosted logs/retries so users do not need to keep the browser open during the full CCTP flow.
+
+Circle Wallets should be added after this pilot so non-crypto users can create or access an embedded wallet before paying or receiving invoices.
 
 ## Server invoice storage
 
@@ -151,7 +181,7 @@ curl -X POST http://127.0.0.1:5190/api/agent/invoices \
     "items": [
       { "description": "Consulting package", "quantity": 1, "unitPrice": 250 }
     ],
-    "telegramChatId": "8436047896",
+    "telegramChatId": "123456789",
     "telegramEnabled": true
   }'
 ```

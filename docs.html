@@ -18,6 +18,7 @@
       <nav class="docs-topnav" aria-label="Top navigation">
         <a href="#quick-start">Quick start</a>
         <a href="#payment-flow">Payment</a>
+        <a href="#settlement">Settlement</a>
         <a href="#agent-api">API</a>
         <a href="#contracts">Contracts</a>
       </nav>
@@ -40,6 +41,7 @@
         <a class="side-link" href="#payment-flow">Payment flow</a>
         <a class="side-link" href="#receipts">Receipts and export</a>
         <a class="side-link" href="#telegram">Telegram alerts</a>
+        <a class="side-link" href="#settlement">Cross-chain settlement</a>
 
         <p class="nav-label">// Developers and agents</p>
         <a class="side-link" href="#agent-api">Agent API</a>
@@ -67,6 +69,7 @@
             <span><i></i>Arc Testnet</span>
             <span>Non-custodial</span>
             <span>PaymentRouter live</span>
+            <span>CCTP pilot</span>
             <span>Agent API ready</span>
           </div>
           <div class="doc-cards">
@@ -85,6 +88,10 @@
             <a class="doc-card" href="#webhooks">
               <strong>Webhooks</strong>
               <span>Receive an <code>invoice.paid</code> event when a payment is verified.</span>
+            </a>
+            <a class="doc-card" href="#settlement">
+              <strong>Settlement</strong>
+              <span>Prepare Sepolia or Base Sepolia USDC settlement into Arc Testnet.</span>
             </a>
           </div>
         </section>
@@ -258,6 +265,57 @@
             <div class="code-head"><span>Telegram env</span><button data-copy="#telegram-env" type="button">Copy</button></div>
             <pre id="telegram-env"><code>TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token</code></pre>
           </div>
+        </section>
+
+        <section class="doc-section" id="settlement">
+          <p class="eyebrow">Settlement</p>
+          <h2>CCTP and Bridge Kit pilot</h2>
+          <p>
+            Fundline's next settlement layer is native USDC movement into Arc Testnet through Circle CCTP. The pilot
+            starts with Ethereum Sepolia and Base Sepolia because they let us test cross-chain USDC without wrapped
+            bridge tokens or custodial routing.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Chain</th>
+                <th>CCTP domain</th>
+                <th>Testnet USDC</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Ethereum Sepolia</td>
+                <td><code>0</code></td>
+                <td><code>0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238</code></td>
+              </tr>
+              <tr>
+                <td>Base Sepolia</td>
+                <td><code>6</code></td>
+                <td><code>0x036CbD53842c5426634e7929541eC2318f3dCF7e</code></td>
+              </tr>
+              <tr>
+                <td>Arc Testnet</td>
+                <td><code>26</code></td>
+                <td><code>0x3600000000000000000000000000000000000000</code></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="code-card">
+            <div class="code-head"><span>CCTP V2 contracts</span><button data-copy="#cctp-contracts" type="button">Copy</button></div>
+            <pre id="cctp-contracts"><code>TokenMessengerV2=0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA
+MessageTransmitterV2=0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275</code></pre>
+          </div>
+          <p>
+            The payment page lets payers choose the network where they already hold USDC. Arc USDC pays directly. If
+            the payer chooses Base Sepolia or Ethereum Sepolia and the balance is sufficient, Fundline starts a
+            bridge-and-pay flow: approve TokenMessengerV2, burn source USDC, fetch Circle attestation, mint on Arc,
+            then pay the invoice through PaymentRouter.
+          </p>
+          <p>
+            Circle Wallets should be layered in after this pilot so non-crypto users can access an embedded wallet
+            before paying or receiving USDC.
+          </p>
         </section>
 
         <section class="doc-section" id="agent-api">
@@ -523,7 +581,7 @@ ARC_PAYMENT_ROUTER_ADDRESS=0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</code></pr
           </details>
           <details>
             <summary>What should be built next?</summary>
-            <p>Direct PaymentRouter event indexing, hosted database, invoice email delivery, and a hosted admin UI for webhook delivery logs.</p>
+            <p>CCTP/Bridge Kit execution, Circle Wallet onboarding, direct PaymentRouter event indexing, hosted database, invoice email delivery, and a hosted admin UI for webhook delivery logs.</p>
           </details>
         </section>
       </main>
@@ -538,6 +596,7 @@ ARC_PAYMENT_ROUTER_ADDRESS=0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</code></pr
         <a href="#payment-flow">Payment flow</a>
         <a href="#receipts">Receipts</a>
         <a href="#telegram">Telegram</a>
+        <a href="#settlement">Settlement</a>
         <a href="#agent-api">Agent API</a>
         <a href="#webhooks">Webhooks</a>
         <a href="#webhook-logs">Webhook logs</a>

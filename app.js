@@ -19,6 +19,53 @@ const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
 const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
 const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
+const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
+const CCTP_GET_MIN_FEE_SELECTOR = "0x516990e3";
+const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
+const CCTP_STANDARD_FINALITY_THRESHOLD = 2000;
+const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
+const CCTP_IRIS_SANDBOX_BASE = "https://iris-api-sandbox.circle.com";
+
+const CCTP_TOKEN_MESSENGER_V2 = "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA";
+const CCTP_MESSAGE_TRANSMITTER_V2 = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
+const CCTP_TESTNET_CHAINS = {
+  arcTestnet: {
+    key: "arcTestnet",
+    name: "Arc Testnet",
+    shortName: "Arc",
+    chainId: 5042002,
+    chainIdHex: "0x4cef52",
+    domain: 26,
+    usdc: "0x3600000000000000000000000000000000000000",
+    explorer: ARC_EXPLORER_URL,
+    rpcUrls: ["https://rpc.testnet.arc.network"],
+    nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+  },
+  ethereumSepolia: {
+    key: "ethereumSepolia",
+    name: "Ethereum Sepolia",
+    shortName: "Ethereum Sepolia",
+    chainId: 11155111,
+    chainIdHex: "0xaa36a7",
+    domain: 0,
+    usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    explorer: "https://sepolia.etherscan.io",
+    rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"],
+    nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+  },
+  baseSepolia: {
+    key: "baseSepolia",
+    name: "Base Sepolia",
+    shortName: "Base Sepolia",
+    chainId: 84532,
+    chainIdHex: "0x14a34",
+    domain: 6,
+    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    explorer: "https://sepolia.basescan.org",
+    rpcUrls: ["https://sepolia.base.org"],
+    nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+  },
+};
 
 const state = {
   invoices: loadInvoices(),
@@ -153,8 +200,14 @@ function renderApp() {
   document.body.classList.remove("payment-mode");
   els.appPage.hidden = false;
   els.payPage.hidden = true;
-  els.pageEyebrow.textContent = state.activeView === "create" ? "Create invoice" : state.activeView === "settings" ? "Merchant settings" : "Non-custodial billing";
-  els.pageTitle.textContent = state.activeView === "create" ? "New USDC invoice" : state.activeView === "settings" ? "Payment settings" : "USDC invoice dashboard";
+  const pageCopy = {
+    dashboard: ["Non-custodial billing", "USDC invoice dashboard"],
+    create: ["Create invoice", "New USDC invoice"],
+    settings: ["Merchant settings", "Payment settings"],
+  };
+  const [eyebrow, title] = pageCopy[state.activeView] || pageCopy.dashboard;
+  els.pageEyebrow.textContent = eyebrow;
+  els.pageTitle.textContent = title;
 
   els.navButtons.forEach((button) => {
     if (!button.dataset.view) return;
@@ -905,9 +958,14 @@ function renderPayPage(invoiceId) {
     </section>
   `;
 
-  document.querySelector("#payWithWallet")?.addEventListener("click", () => payInvoiceWithWallet(invoice.id));
+  document.querySelector("#payWithWallet")?.addEventListener("click", () => handleInvoicePaymentAction(invoice.id));
+  document.querySelector("#paymentSourceChain")?.addEventListener("change", () => refreshPaymentSourceStatus(invoice.id));
+  document.querySelector("#refreshPaymentSource")?.addEventListener("click", () => refreshPaymentSourceStatus(invoice.id));
   document.querySelector("#paymentVerifyForm")?.addEventListener("submit", (event) => verifyPaymentAndMarkPaid(invoice.id, event));
   document.querySelector("#downloadReceipt")?.addEventListener("click", () => downloadReceiptPdf(invoice));
+  if (hasConnectedWallet() && invoice.status !== "paid") {
+    window.setTimeout(() => refreshPaymentSourceStatus(invoice.id, { silent: true }), 0);
+  }
 }
 
 function renderPaymentVerification(invoice) {
@@ -915,29 +973,39 @@ function renderPaymentVerification(invoice) {
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
   const isSelfPayment = Boolean(payerWallet && sameAddress(payerWallet, invoice.merchantWallet));
   const payDisabled = !config.onchainPaymentsEnabled || isSelfPayment;
+  const sourceOptions = getPaymentSourceOptions()
+    .map((source) => `<option value="${escapeHtml(source.key)}">${escapeHtml(source.label)}</option>`)
+    .join("");
   return `
     <div class="onchain-payment">
       <div>
         <p class="eyebrow">Wallet payment</p>
-        <h2>${isSelfPayment ? "Use a different payer wallet" : config.onchainPaymentsEnabled ? "Pay through PaymentRouter" : "PaymentRouter not configured"}</h2>
+        <h2>${isSelfPayment ? "Use a different payer wallet" : config.onchainPaymentsEnabled ? "Choose USDC source" : "PaymentRouter not configured"}</h2>
         <p>${
           isSelfPayment
             ? "The connected wallet is also the receiving wallet. A self-transfer does not settle an invoice."
             :
           config.onchainPaymentsEnabled
-            ? `Your wallet may show a contract interaction. PaymentRouter moves USDC inside that transaction, then Fundline verifies the USDC Transfer log.`
+            ? `Choose where your USDC is. If Arc balance is enough, pay directly. If USDC is on another testnet, Fundline will bridge first, then pay.`
             : "Send USDC manually to the receiving wallet, then use verification below."
         }</p>
       </div>
-      <button class="primary-action" id="payWithWallet" type="button" ${payDisabled ? "disabled" : ""}>
+      <div class="payment-source-box">
+        <label>
+          <span class="field-label">
+            Pay with
+            <span class="help-tip" tabindex="0" data-help="Choose the network where this payer wallet already has USDC. Arc pays directly; other supported testnets bridge first." aria-label="Pay source help">?</span>
+          </span>
+          <select id="paymentSourceChain" ${payDisabled ? "disabled" : ""}>${sourceOptions}</select>
+        </label>
+        <button class="ghost-action" id="refreshPaymentSource" type="button" ${payDisabled ? "disabled" : ""}>Check balance</button>
+      </div>
+      <div class="payment-source-status" id="paymentSourceStatus">${payerWallet ? "Checking selected USDC balance..." : "Connect wallet to check USDC balance."}</div>
+      <button class="primary-action" id="payWithWallet" type="button" data-action="connect" ${payDisabled ? "disabled" : ""}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
-        Pay ${escapeHtml(formatUsdc(invoice.total))} USDC
+        ${payerWallet ? "Checking balance..." : "Connect wallet"}
       </button>
-      ${
-        config.onchainPaymentsEnabled
-          ? `<div class="payment-route"><span>Router</span><strong>${escapeHtml(shortAddress(config.paymentRouterAddress))}</strong><span>USDC</span><strong>${escapeHtml(shortAddress(config.usdcTokenAddress))}</strong></div>`
-          : `<span class="payment-route">Set ARC_PAYMENT_ROUTER_ADDRESS on the server to enable direct wallet payment.</span>`
-      }
+      <div class="bridge-pay-progress" id="bridgePayProgress" hidden></div>
     </div>
     <form class="payment-verify" id="paymentVerifyForm">
       <div>
@@ -978,6 +1046,105 @@ function renderVerifiedPayment(invoice) {
   `;
 }
 
+function getPaymentSourceOptions() {
+  return [
+    { key: "arcTestnet", label: "USDC on Arc", chain: CCTP_TESTNET_CHAINS.arcTestnet },
+    { key: "baseSepolia", label: "USDC on Base Sepolia", chain: CCTP_TESTNET_CHAINS.baseSepolia },
+    { key: "ethereumSepolia", label: "USDC on Ethereum Sepolia", chain: CCTP_TESTNET_CHAINS.ethereumSepolia },
+  ];
+}
+
+function getSelectedPaymentSource() {
+  const key = document.querySelector("#paymentSourceChain")?.value || "arcTestnet";
+  return getPaymentSourceOptions().find((source) => source.key === key) || getPaymentSourceOptions()[0];
+}
+
+async function refreshPaymentSourceStatus(id, options = {}) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice || invoice.status === "paid") return;
+  const status = document.querySelector("#paymentSourceStatus");
+  const button = document.querySelector("#payWithWallet");
+  const wallet = getConnectedWallet();
+  const source = getSelectedPaymentSource();
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  if (!button || !status) return;
+  button.dataset.source = source.key;
+
+  if (!wallet) {
+    button.disabled = false;
+    button.dataset.action = "connect";
+    button.innerHTML = paymentButtonHtml("Connect wallet");
+    status.textContent = "Connect wallet to check USDC balance.";
+    return;
+  }
+  if (sameAddress(wallet, invoice.merchantWallet)) {
+    button.disabled = true;
+    button.dataset.action = "blocked";
+    button.innerHTML = paymentButtonHtml("Use a different wallet");
+    status.textContent = "The payer wallet cannot be the same as the receiving wallet.";
+    return;
+  }
+  if (!config.onchainPaymentsEnabled) {
+    button.disabled = true;
+    button.dataset.action = "blocked";
+    button.innerHTML = paymentButtonHtml("Payment unavailable");
+    status.textContent = "Wallet payment is not configured. Use manual transfer and verification.";
+    return;
+  }
+
+  button.disabled = true;
+  button.dataset.action = "checking";
+  button.innerHTML = paymentButtonHtml("Checking balance...");
+  status.textContent = `Checking ${source.label} balance...`;
+  try {
+    const chain = getPaymentSourceChain(source.key);
+    const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+    const balance = await readUsdcBalanceFromRpc(chain.rpcUrls[0], chain.usdc, wallet);
+    const enough = balance >= amountUnits;
+    const balanceText = `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC`;
+    if (!enough) {
+      button.disabled = true;
+      button.dataset.action = "blocked";
+      button.innerHTML = paymentButtonHtml(source.key === "arcTestnet" ? "Insufficient Arc USDC" : "Insufficient USDC");
+      status.textContent =
+        source.key === "arcTestnet"
+          ? `Insufficient Arc USDC balance (${balanceText}). Add more USDC or choose another chain to bridge from.`
+          : `Insufficient USDC balance on ${chain.shortName} (${balanceText}). Choose another source or add more testnet USDC.`;
+      return;
+    }
+    button.disabled = false;
+    button.dataset.action = source.key === "arcTestnet" ? "pay" : "bridge-pay";
+    button.innerHTML = paymentButtonHtml(source.key === "arcTestnet" ? `Pay ${formatUsdc(invoice.total)} USDC` : `Bridge and pay ${formatUsdc(invoice.total)} USDC`);
+    status.textContent =
+      source.key === "arcTestnet"
+        ? `Arc balance is enough (${balanceText}). You can pay directly.`
+        : `${chain.shortName} balance is enough (${balanceText}). Fundline will bridge to Arc, then pay.`;
+  } catch (error) {
+    button.disabled = false;
+    button.dataset.action = "check";
+    button.innerHTML = paymentButtonHtml("Check again");
+    status.textContent = error?.message || "Could not check balance. Try again.";
+    if (!options.silent) showToast("Could not check selected USDC balance.");
+  }
+}
+
+function paymentButtonHtml(label) {
+  return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>${escapeHtml(label)}`;
+}
+
+function getPaymentSourceChain(key) {
+  if (key === "arcTestnet") {
+    const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+    return {
+      ...CCTP_TESTNET_CHAINS.arcTestnet,
+      usdc: config.usdcTokenAddress || CCTP_TESTNET_CHAINS.arcTestnet.usdc,
+      rpcUrls: [config.rpcUrl || CCTP_TESTNET_CHAINS.arcTestnet.rpcUrls[0]],
+      explorer: config.explorerBase || CCTP_TESTNET_CHAINS.arcTestnet.explorer,
+    };
+  }
+  return CCTP_TESTNET_CHAINS[key] || CCTP_TESTNET_CHAINS.arcTestnet;
+}
+
 function renderPayItems(invoice) {
   return `
     <div class="pay-items">
@@ -996,6 +1163,59 @@ function renderPayItems(invoice) {
         .join("")}
     </div>
   `;
+}
+
+function createBridgePayProgress() {
+  return [
+    { key: "check", label: "Check source balance", status: "pending", detail: "Waiting" },
+    { key: "bridge", label: "Bridge USDC to Arc", status: "pending", detail: "Waiting" },
+    { key: "pay", label: "Pay invoice", status: "pending", detail: "Waiting" },
+    { key: "verify", label: "Verify payment", status: "pending", detail: "Waiting" },
+  ];
+}
+
+function setProgressStep(steps, key, status, detail) {
+  const step = steps.find((item) => item.key === key);
+  if (step) {
+    step.status = status;
+    step.detail = detail || step.detail;
+  }
+  renderBridgePayProgress(steps);
+}
+
+function renderBridgePayProgress(steps) {
+  const container = document.querySelector("#bridgePayProgress");
+  if (!container) return;
+  container.hidden = false;
+  container.innerHTML = steps
+    .map(
+      (step) => `
+        <div class="progress-step progress-${escapeHtml(step.status)}">
+          <span>${escapeHtml(step.label)}</span>
+          <strong>${escapeHtml(step.detail)}</strong>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+async function handleInvoicePaymentAction(id) {
+  const button = document.querySelector("#payWithWallet");
+  const action = button?.dataset.action || "connect";
+  if (action === "connect") {
+    await connectWallet();
+    await refreshPaymentSourceStatus(id);
+    return;
+  }
+  if (action === "bridge-pay") {
+    await bridgeAndPayInvoice(id, button.dataset.source || getSelectedPaymentSource().key);
+    return;
+  }
+  if (action === "pay") {
+    await payInvoiceWithWallet(id);
+    return;
+  }
+  await refreshPaymentSourceStatus(id);
 }
 
 async function payInvoiceWithWallet(id) {
@@ -1032,46 +1252,135 @@ async function payInvoiceWithWallet(id) {
   const button = document.querySelector("#payWithWallet");
   setButtonBusy(button, "Preparing payment...");
   try {
-    await ensurePaymentNetwork(provider, config);
-    const amountUnits = parseTokenUnits(invoice.total, config.usdcDecimals);
-    const balance = await readUsdcBalance(provider, config.usdcTokenAddress, payerWallet);
-    if (balance < amountUnits) {
-      throw new Error(
-        `Insufficient USDC balance. This invoice requires ${formatUsdc(invoice.total)} USDC, but this wallet has ${formatUnits(balance, config.usdcDecimals)} USDC.`,
-      );
-    }
-    const allowance = await readUsdcAllowance(provider, config.usdcTokenAddress, payerWallet, config.paymentRouterAddress);
-    if (allowance < amountUnits) {
-      setButtonBusy(button, "Approving USDC...");
-      const approveTx = await sendUsdcApprove(provider, {
-        from: payerWallet,
-        token: config.usdcTokenAddress,
-        spender: config.paymentRouterAddress,
-        amount: amountUnits,
-      });
-      showToast("USDC approval submitted. Waiting for confirmation...");
-      await waitForTransaction(provider, approveTx);
-    }
-
-    setButtonBusy(button, "Paying invoice...");
-    const txHash = await sendRouterPayment(provider, {
-      from: payerWallet,
-      router: config.paymentRouterAddress,
-      invoiceId: invoice.onchainInvoiceId,
-      merchantWallet: invoice.merchantWallet,
-      amount: amountUnits,
-    });
-
-    const form = document.querySelector("#paymentVerifyForm");
-    if (form?.elements.payerWallet) form.elements.payerWallet.value = payerWallet;
-    if (form?.elements.txHash) form.elements.txHash.value = txHash;
-    showToast("Payment submitted. Verification will start in 10 seconds.");
-    setButtonBusy(button, "Waiting 10 seconds...");
-    await autoVerifySubmittedPayment(id, { payerWallet, txHash, button });
+    await submitArcPayment(invoice, payerWallet, button);
   } catch (error) {
     showToast(error?.message || "Wallet payment failed.");
   } finally {
     resetPayWithWalletButton(button, invoice);
+  }
+}
+
+async function submitArcPayment(invoice, payerWallet, button) {
+  const provider = window.ethereum;
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  await ensurePaymentNetwork(provider, config);
+  const amountUnits = parseTokenUnits(invoice.total, config.usdcDecimals);
+  const balance = await readUsdcBalance(provider, config.usdcTokenAddress, payerWallet);
+  if (balance < amountUnits) {
+    throw new Error(
+      `Insufficient Arc USDC. This invoice requires ${formatUsdc(invoice.total)} USDC, but this wallet has ${formatUnits(balance, config.usdcDecimals)} USDC.`,
+    );
+  }
+  const allowance = await readUsdcAllowance(provider, config.usdcTokenAddress, payerWallet, config.paymentRouterAddress);
+  if (allowance < amountUnits) {
+    setButtonBusy(button, "Approving USDC...");
+    const approveTx = await sendUsdcApprove(provider, {
+      from: payerWallet,
+      token: config.usdcTokenAddress,
+      spender: config.paymentRouterAddress,
+      amount: amountUnits,
+    });
+    showToast("USDC approval submitted. Waiting for confirmation...");
+    await waitForTransaction(provider, approveTx);
+  }
+
+  setButtonBusy(button, "Paying invoice...");
+  const txHash = await sendRouterPayment(provider, {
+    from: payerWallet,
+    router: config.paymentRouterAddress,
+    invoiceId: invoice.onchainInvoiceId,
+    merchantWallet: invoice.merchantWallet,
+    amount: amountUnits,
+  });
+
+  const form = document.querySelector("#paymentVerifyForm");
+  if (form?.elements.payerWallet) form.elements.payerWallet.value = payerWallet;
+  if (form?.elements.txHash) form.elements.txHash.value = txHash;
+  showToast("Payment submitted. Verification will start in 10 seconds.");
+  setButtonBusy(button, "Waiting 10 seconds...");
+  return autoVerifySubmittedPayment(invoice.id, { payerWallet, txHash, button });
+}
+
+async function bridgeAndPayInvoice(id, sourceKey) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) return;
+  const source = getPaymentSourceChain(sourceKey);
+  if (!source || source.key === "arcTestnet") {
+    await payInvoiceWithWallet(id);
+    return;
+  }
+  const provider = window.ethereum;
+  if (!provider?.request) {
+    showToast("No wallet extension found. Install or open an EVM wallet.");
+    return;
+  }
+  let payerWallet = getConnectedWallet();
+  if (!payerWallet) {
+    await connectWallet();
+    payerWallet = getConnectedWallet();
+  }
+  if (!payerWallet) return;
+  if (sameAddress(payerWallet, invoice.merchantWallet)) {
+    showToast("Use a different payer wallet. Paying from the receiving wallet creates a self-transfer and does not settle the invoice.");
+    return;
+  }
+
+  const button = document.querySelector("#payWithWallet");
+  const progress = createBridgePayProgress();
+  renderBridgePayProgress(progress);
+  try {
+    setProgressStep(progress, "check", "active", `Checking ${source.shortName} USDC...`);
+    setButtonBusy(button, "Checking source...");
+    await ensureWalletNetwork(provider, source);
+    const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+    const balance = await readUsdcBalance(provider, source.usdc, payerWallet);
+    if (balance < amountUnits) {
+      throw new Error(`Insufficient USDC on ${source.shortName}.`);
+    }
+    setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
+
+    setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
+    const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, CCTP_TOKEN_MESSENGER_V2);
+    if (allowance < amountUnits) {
+      const approveTx = await sendUsdcApprove(provider, {
+        from: payerWallet,
+        token: source.usdc,
+        spender: CCTP_TOKEN_MESSENGER_V2,
+        amount: amountUnits,
+      });
+      await waitForTransaction(provider, approveTx);
+    }
+
+    setButtonBusy(button, "Starting bridge...");
+    setProgressStep(progress, "bridge", "active", `Moving USDC from ${source.shortName} to Arc...`);
+    const burnTx = await sendCctpBurn(provider, {
+      from: payerWallet,
+      source,
+      destination: CCTP_TESTNET_CHAINS.arcTestnet,
+      amount: amountUnits,
+      recipient: payerWallet,
+    });
+    await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
+    setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
+    const message = await fetchCctpAttestation(source.domain, burnTx);
+
+    setProgressStep(progress, "bridge", "active", "Minting USDC on Arc...");
+    await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
+    const mintTx = await sendCctpMint(provider, { from: payerWallet, message: message.message, attestation: message.attestation });
+    await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
+    setProgressStep(progress, "bridge", "done", "USDC received on Arc");
+
+    setProgressStep(progress, "pay", "active", "Paying invoice on Arc...");
+    const verified = await submitArcPayment(invoice, payerWallet, button);
+    setProgressStep(progress, "pay", "done", "Payment submitted");
+    setProgressStep(progress, "verify", verified ? "done" : "active", verified ? "Payment verified" : "Waiting for Arcscan");
+  } catch (error) {
+    const active = progress.find((step) => step.status === "active");
+    if (active) setProgressStep(progress, active.key, "error", error?.message || "Stopped");
+    showToast(error?.message || "Bridge and pay failed.");
+  } finally {
+    resetPayWithWalletButton(button, invoice);
+    await refreshPaymentSourceStatus(id, { silent: true });
   }
 }
 
@@ -1127,6 +1436,32 @@ async function ensurePaymentNetwork(provider, config) {
   }
 }
 
+async function ensureWalletNetwork(provider, chain) {
+  const expected = String(chain.chainIdHex || "").toLowerCase();
+  const current = String(await provider.request({ method: "eth_chainId" })).toLowerCase();
+  if (current === expected) return;
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: expected }],
+    });
+  } catch (error) {
+    if (Number(error?.code) !== 4902) throw error;
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: expected,
+          chainName: chain.name,
+          nativeCurrency: chain.nativeCurrency,
+          rpcUrls: chain.rpcUrls,
+          blockExplorerUrls: [chain.explorer],
+        },
+      ],
+    });
+  }
+}
+
 async function readUsdcAllowance(provider, token, owner, spender) {
   const data = `${ERC20_ALLOWANCE_SELECTOR}${encodeAddress(owner)}${encodeAddress(spender)}`;
   const result = await provider.request({
@@ -1145,6 +1480,24 @@ async function readUsdcBalance(provider, token, owner) {
   return hexToBigInt(result);
 }
 
+async function readUsdcBalanceFromRpc(rpcUrl, token, owner) {
+  const data = `${ERC20_BALANCE_OF_SELECTOR}${encodeAddress(owner)}`;
+  const result = await rpcCall(rpcUrl, "eth_call", [{ to: token, data }, "latest"]);
+  return hexToBigInt(result);
+}
+
+async function rpcCall(rpcUrl, method, params) {
+  if (!rpcUrl) throw new Error("RPC endpoint is not configured.");
+  const response = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || payload.error) throw new Error(payload.error?.message || "RPC request failed.");
+  return payload.result;
+}
+
 function sendUsdcApprove(provider, { from, token, spender, amount }) {
   const data = `${ERC20_APPROVE_SELECTOR}${encodeAddress(spender)}${encodeUint256(amount)}`;
   return provider.request({
@@ -1160,6 +1513,61 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, 
   return provider.request({
     method: "eth_sendTransaction",
     params: [{ from, to: router, data, value: "0x0" }],
+  });
+}
+
+async function sendCctpBurn(provider, { from, source, destination, amount, recipient }) {
+  const minFeeRaw = await provider
+    .request({
+      method: "eth_call",
+      params: [
+        {
+          to: CCTP_TOKEN_MESSENGER_V2,
+          data: CCTP_GET_MIN_FEE_SELECTOR + encodeUint256(amount),
+        },
+        "latest",
+      ],
+    })
+    .catch(() => "0x0");
+  const data =
+    CCTP_DEPOSIT_FOR_BURN_SELECTOR +
+    encodeUint256(amount) +
+    encodeUint256(destination.domain) +
+    encodeBytes32(addressToBytes32(recipient)) +
+    encodeAddress(source.usdc) +
+    encodeBytes32(ZERO_BYTES32) +
+    encodeUint256(hexToBigInt(minFeeRaw)) +
+    encodeUint256(CCTP_STANDARD_FINALITY_THRESHOLD);
+  return provider.request({
+    method: "eth_sendTransaction",
+    params: [{ from, to: CCTP_TOKEN_MESSENGER_V2, data, value: "0x0" }],
+  });
+}
+
+async function fetchCctpAttestation(sourceDomain, txHash) {
+  const normalizedHash = normalizeTxHash(txHash);
+  if (!normalizedHash) throw new Error("Bridge transaction hash is invalid.");
+  const url = `${CCTP_IRIS_SANDBOX_BASE}/v2/messages/${sourceDomain}?transactionHash=${encodeURIComponent(normalizedHash)}`;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const response = await fetch(url, { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    const message = Array.isArray(payload.messages) ? payload.messages[0] : payload.message ? payload : null;
+    if (message?.message && message?.attestation && String(message.status || "").toLowerCase() === "complete") {
+      return { message: message.message, attestation: message.attestation };
+    }
+    if (message?.message && message?.attestation && !message.status) {
+      return { message: message.message, attestation: message.attestation };
+    }
+    await delay(5000);
+  }
+  throw new Error("Circle attestation is not ready yet. Try again after a few minutes.");
+}
+
+function sendCctpMint(provider, { from, message, attestation }) {
+  const data = CCTP_RECEIVE_MESSAGE_SELECTOR + encodeDynamicBytesPair(message, attestation);
+  return provider.request({
+    method: "eth_sendTransaction",
+    params: [{ from, to: CCTP_MESSAGE_TRANSMITTER_V2, data, value: "0x0" }],
   });
 }
 
@@ -1805,10 +2213,47 @@ function encodeAddress(value) {
   return address.toLowerCase().replace(/^0x/, "").padStart(64, "0");
 }
 
+function addressToBytes32(value) {
+  const address = normalizeAddress(value);
+  if (!address) throw new Error("Invalid wallet address.");
+  return `0x${address.toLowerCase().replace(/^0x/, "").padStart(64, "0")}`;
+}
+
 function encodeBytes32(value) {
   const bytes = normalizeBytes32(value);
   if (!bytes) throw new Error("Invalid bytes32 value.");
   return bytes.replace(/^0x/, "").toLowerCase();
+}
+
+function encodeDynamicBytesPair(first, second) {
+  const firstHex = stripHexPrefix(first);
+  const secondHex = stripHexPrefix(second);
+  if (firstHex.length % 2 || secondHex.length % 2) throw new Error("Invalid byte payload.");
+  const firstBytes = firstHex.length / 2;
+  const secondBytes = secondHex.length / 2;
+  const firstPadded = padHexRight(firstHex);
+  const secondPadded = padHexRight(secondHex);
+  const firstOffset = 64n;
+  const secondOffset = firstOffset + 32n + BigInt(firstPadded.length / 2);
+  return (
+    encodeUint256(firstOffset) +
+    encodeUint256(secondOffset) +
+    encodeUint256(BigInt(firstBytes)) +
+    firstPadded +
+    encodeUint256(BigInt(secondBytes)) +
+    secondPadded
+  );
+}
+
+function stripHexPrefix(value) {
+  const text = String(value || "").trim();
+  if (!/^0x[0-9a-fA-F]*$/.test(text)) throw new Error("Invalid hex payload.");
+  return text.slice(2).toLowerCase();
+}
+
+function padHexRight(hex) {
+  const remainder = hex.length % 64;
+  return remainder ? hex + "0".repeat(64 - remainder) : hex;
 }
 
 function encodeUint256(value) {

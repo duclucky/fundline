@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fundline | USDC invoices on Arc</title>
+    <title>Fundline | USDC invoices and settlement</title>
     <link rel="stylesheet" href="/home.css" />
   </head>
   <body>
@@ -31,7 +31,8 @@
         </h1>
         <p class="hero-copy">
           Create professional invoices, send a public payment link, let clients pay USDC on Arc, then verify the
-          transaction, send alerts and issue receipts without holding customer funds.
+          transaction, send alerts and issue receipts. The settlement pilot prepares native USDC movement from
+          Sepolia or Base Sepolia into Arc without wrapped bridge assets.
         </p>
         <div class="hero-actions">
           <a class="launch-cta" href="/app.html">Create invoice</a>
@@ -47,8 +48,8 @@
             <span>Native payment</span>
           </article>
           <article>
-            <strong>~1 tx</strong>
-            <span>Direct settlement</span>
+            <strong>CCTP</strong>
+            <span>Native bridge</span>
           </article>
           <article>
             <strong>API</strong>
@@ -61,6 +62,8 @@
         <div class="marquee-track">
           <span>Arc Testnet</span>
           <span>Circle USDC</span>
+          <span>CCTP Pilot</span>
+          <span>Base Sepolia</span>
           <span>PaymentRouter</span>
           <span>PDF Receipts</span>
           <span>Telegram Alerts</span>
@@ -68,6 +71,8 @@
           <span>invoice.paid Webhooks</span>
           <span>Arc Testnet</span>
           <span>Circle USDC</span>
+          <span>CCTP Pilot</span>
+          <span>Ethereum Sepolia</span>
           <span>PaymentRouter</span>
           <span>PDF Receipts</span>
           <span>Telegram Alerts</span>
@@ -114,6 +119,11 @@
           <p class="eyebrow">Payments</p>
           <h3>Direct wallet settlement</h3>
           <p>PaymentRouter transfers USDC from payer wallet to merchant wallet. The contract does not hold funds.</p>
+        </article>
+        <article id="settlement">
+          <p class="eyebrow">Settlement</p>
+          <h3>Native USDC across chains</h3>
+          <p>Prepare Sepolia or Base Sepolia USDC settlement into Arc through a CCTP burn-and-mint pilot.</p>
         </article>
         <article id="agents">
           <p class="eyebrow">Agents</p>

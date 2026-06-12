@@ -41,7 +41,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -701,7 +702,8 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   min-height: 43px;
   color: #eef5ff;
@@ -718,9 +720,18 @@ textarea::placeholder {
 }
 
 input:focus,
-textarea:focus {
+textarea:focus,
+select:focus {
   border-color: rgba(43, 215, 255, 0.72);
   box-shadow: 0 0 0 4px rgba(43, 215, 255, 0.12);
+}
+
+select {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, #a8bad4 50%), linear-gradient(135deg, #a8bad4 50%, transparent 50%);
+  background-position: calc(100% - 18px) 18px, calc(100% - 12px) 18px;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
 }
 
 .line-item {
@@ -1120,6 +1131,85 @@ textarea:focus {
   width: 100%;
 }
 
+.payment-source-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.payment-source-box .ghost-action {
+  min-height: 43px;
+}
+
+.payment-source-status {
+  padding: 12px;
+  color: #dce9ff;
+  background: rgba(8, 22, 38, 0.34);
+  border: 1px solid rgba(171, 203, 244, 0.14);
+  border-radius: 13px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.bridge-pay-progress {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(8, 22, 38, 0.34);
+  border: 1px solid rgba(171, 203, 244, 0.14);
+  border-radius: 13px;
+}
+
+.bridge-pay-progress[hidden] {
+  display: none;
+}
+
+.progress-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 10px;
+  background: rgba(10, 23, 39, 0.38);
+  border: 1px solid rgba(171, 203, 244, 0.12);
+  border-radius: 10px;
+}
+
+.progress-step span {
+  color: #dce9ff;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.progress-step strong {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: right;
+}
+
+.progress-active {
+  border-color: rgba(43, 215, 255, 0.34);
+}
+
+.progress-active strong {
+  color: #9eeaff;
+}
+
+.progress-done strong {
+  color: #9ef7bc;
+}
+
+.progress-error {
+  border-color: rgba(255, 100, 120, 0.34);
+}
+
+.progress-error strong {
+  color: #ffb7c1;
+}
+
 .payment-route {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -1290,6 +1380,8 @@ textarea:focus {
 
   .stats-grid,
   .form-grid,
+  .payment-source-box,
+  .progress-step,
   .payment-hero,
   .checkout-grid,
   .reference-grid {
