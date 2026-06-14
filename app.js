@@ -1,7 +1,6 @@
 const STORAGE_KEY = "arc-invoice-usdc-invoices-v1";
 const SETTINGS_KEY = "arc-invoice-usdc-settings-v1";
 const ARC_EXPLORER_URL = "https://testnet.arcscan.app";
-const ARC_NATIVE_USDC_DECIMALS = 18;
 const ARC_USDC_DECIMALS = 6;
 const DEFAULT_PUBLIC_CONFIG = {
   networkName: "Arc Testnet",
@@ -18,11 +17,13 @@ const DEFAULT_PUBLIC_CONFIG = {
 const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
 const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
 const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
+const ERC20_DECIMALS_SELECTOR = "0x313ce567";
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
 const CCTP_GET_MIN_FEE_SELECTOR = "0x516990e3";
 const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
-const CCTP_STANDARD_FINALITY_THRESHOLD = 2000;
+const CCTP_STANDARD_FINALITY_THRESHOLD = 1000;
+const CCTP_FAST_FINALITY_THRESHOLD = 500;
 const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 const CCTP_IRIS_SANDBOX_BASE = "https://iris-api-sandbox.circle.com";
 
@@ -373,7 +374,7 @@ async function refreshWalletBalance(event) {
       method: "eth_getBalance",
       params: [address, "latest"],
     });
-    state.wallet.balance = `${formatUnits(rawBalance, ARC_NATIVE_USDC_DECIMALS)} USDC`;
+    state.wallet.balance = `${formatUnits(rawBalance, 18)} USDC`;
   } catch {
     state.wallet.balance = "Unavailable";
   }
@@ -473,10 +474,7 @@ function normalizePublicConfig(config) {
   const paymentRouterAddress = normalizeAddress(config.paymentRouterAddress) || DEFAULT_PUBLIC_CONFIG.paymentRouterAddress;
   const usdcDecimals = Number(config.usdcDecimals);
   const normalizedUsdcDecimals = Number.isFinite(usdcDecimals) ? Math.min(Math.max(Math.trunc(usdcDecimals), 0), 18) : DEFAULT_PUBLIC_CONFIG.usdcDecimals;
-  const paymentTokenDecimals =
-    sameAddress(usdcTokenAddress, DEFAULT_PUBLIC_CONFIG.usdcTokenAddress) && normalizedUsdcDecimals === ARC_NATIVE_USDC_DECIMALS
-      ? ARC_USDC_DECIMALS
-      : normalizedUsdcDecimals;
+  const paymentTokenDecimals = normalizedUsdcDecimals;
   return {
     networkName: String(config.networkName || DEFAULT_PUBLIC_CONFIG.networkName),
     chainId,
@@ -986,7 +984,7 @@ function renderPaymentVerification(invoice) {
             ? "The connected wallet is also the receiving wallet. A self-transfer does not settle an invoice."
             :
           config.onchainPaymentsEnabled
-            ? `Choose where your USDC is. If Arc balance is enough, pay directly. If USDC is on another testnet, Fundline will bridge first, then pay.`
+            ? `Choose where your USDC is. If Arc balance is enough, pay directly. If USDC is on another testnet, Fundline will bridge first, then pay. Need testnet USDC? <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Get some at faucet.circle.com</a>.`
             : "Send USDC manually to the receiving wallet, then use verification below."
         }</p>
       </div>
@@ -1040,8 +1038,7 @@ function renderVerifiedPayment(invoice) {
   return `
     <div class="verified-payment">
       <span>Verified payment</span>
-      <strong>${escapeHtml(invoice.txHash || "demo")}</strong>
-      ${explorerUrl ? `<a href="${escapeHtml(explorerUrl)}" target="_blank" rel="noreferrer">Open transaction</a>` : ""}
+      ${explorerUrl ? `<a href="${escapeHtml(explorerUrl)}" target="_blank" rel="noreferrer" class="tx-hash-link"><strong>${escapeHtml(invoice.txHash || "demo")}</strong></a>` : `<strong>${escapeHtml(invoice.txHash || "demo")}</strong>`}
     </div>
   `;
 }
@@ -1252,9 +1249,16 @@ async function payInvoiceWithWallet(id) {
   const button = document.querySelector("#payWithWallet");
   setButtonBusy(button, "Preparing payment...");
   try {
+    button.classList.remove("error-ring");
     await submitArcPayment(invoice, payerWallet, button);
   } catch (error) {
-    showToast(error?.message || "Wallet payment failed.");
+    const isRejected = error?.code === 4001 || String(error?.message).toLowerCase().includes("rejected") || String(error?.message).toLowerCase().includes("denied");
+    const msg = isRejected ? "Transaction rejected by user." : error?.message || "Wallet payment failed.";
+    showToast(msg);
+    if (isRejected) {
+      button.classList.add("error-ring");
+      setTimeout(() => button.classList.remove("error-ring"), 3000);
+    }
   } finally {
     resetPayWithWalletButton(button, invoice);
   }
@@ -1264,6 +1268,10 @@ async function submitArcPayment(invoice, payerWallet, button) {
   const provider = window.ethereum;
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
   await ensurePaymentNetwork(provider, config);
+  const onchainDecimals = await readUsdcDecimals(provider, config.usdcTokenAddress);
+  if (onchainDecimals !== 6) {
+    throw new Error(`Critical Error: Expected Arc USDC to have 6 decimals but found ${onchainDecimals}.`);
+  }
   const amountUnits = parseTokenUnits(invoice.total, config.usdcDecimals);
   const balance = await readUsdcBalance(provider, config.usdcTokenAddress, payerWallet);
   if (balance < amountUnits) {
@@ -1359,6 +1367,7 @@ async function bridgeAndPayInvoice(id, sourceKey) {
       destination: CCTP_TESTNET_CHAINS.arcTestnet,
       amount: amountUnits,
       recipient: payerWallet,
+      fast: true,
     });
     await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
     setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
@@ -1375,9 +1384,14 @@ async function bridgeAndPayInvoice(id, sourceKey) {
     setProgressStep(progress, "pay", "done", "Payment submitted");
     setProgressStep(progress, "verify", verified ? "done" : "active", verified ? "Payment verified" : "Waiting for Arcscan");
   } catch (error) {
+    const isRejected = error?.code === 4001 || String(error?.message).toLowerCase().includes("rejected") || String(error?.message).toLowerCase().includes("denied");
     const active = progress.find((step) => step.status === "active");
-    if (active) setProgressStep(progress, active.key, "error", error?.message || "Stopped");
-    showToast(error?.message || "Bridge and pay failed.");
+    if (active) setProgressStep(progress, active.key, "error", isRejected ? "Rejected by user" : error?.message || "Stopped");
+    showToast(isRejected ? "Transaction rejected by user." : error?.message || "Bridge and pay failed.");
+    if (isRejected) {
+      button.classList.add("error-ring");
+      setTimeout(() => button.classList.remove("error-ring"), 3000);
+    }
   } finally {
     resetPayWithWalletButton(button, invoice);
     await refreshPaymentSourceStatus(id, { silent: true });
@@ -1480,6 +1494,14 @@ async function readUsdcBalance(provider, token, owner) {
   return hexToBigInt(result);
 }
 
+async function readUsdcDecimals(provider, token) {
+  const result = await provider.request({
+    method: "eth_call",
+    params: [{ to: token, data: ERC20_DECIMALS_SELECTOR }, "latest"],
+  });
+  return Number(hexToBigInt(result));
+}
+
 async function readUsdcBalanceFromRpc(rpcUrl, token, owner) {
   const data = `${ERC20_BALANCE_OF_SELECTOR}${encodeAddress(owner)}`;
   const result = await rpcCall(rpcUrl, "eth_call", [{ to: token, data }, "latest"]);
@@ -1516,7 +1538,7 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, 
   });
 }
 
-async function sendCctpBurn(provider, { from, source, destination, amount, recipient }) {
+async function sendCctpBurn(provider, { from, source, destination, amount, recipient, fast = false }) {
   const minFeeRaw = await provider
     .request({
       method: "eth_call",
@@ -1537,7 +1559,7 @@ async function sendCctpBurn(provider, { from, source, destination, amount, recip
     encodeAddress(source.usdc) +
     encodeBytes32(ZERO_BYTES32) +
     encodeUint256(hexToBigInt(minFeeRaw)) +
-    encodeUint256(CCTP_STANDARD_FINALITY_THRESHOLD);
+    encodeUint256(fast ? CCTP_FAST_FINALITY_THRESHOLD : CCTP_STANDARD_FINALITY_THRESHOLD);
   return provider.request({
     method: "eth_sendTransaction",
     params: [{ from, to: CCTP_TOKEN_MESSENGER_V2, data, value: "0x0" }],

@@ -232,7 +232,7 @@
             <span>Approve exact USDC</span>
             <span>Pay invoice</span>
             <span>Verify on Arcscan</span>
-            <span>Mark paid</span>
+            <span>Server marks paid</span>
           </div>
           <div class="code-card">
             <div class="code-head"><span>PaymentRouter call</span><button data-copy="#pay-router-call" type="button">Copy</button></div>
@@ -242,6 +242,10 @@
             If PaymentRouter is not configured, the payment page keeps the wallet payment button disabled and still
             supports manual USDC transfer plus Arcscan verification.
           </p>
+          <div class="note">
+            <strong>Verification rule</strong>
+            <span>When PaymentRouter is configured, Fundline only marks an invoice paid after finding both the router invoice reference and the matching USDC transfer for the exact payer, merchant and amount.</span>
+          </div>
         </section>
 
         <section class="doc-section" id="receipts">

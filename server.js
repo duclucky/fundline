@@ -12,6 +12,21 @@ const DATA_DIR = path.join(ROOT, "data");
 const INVOICE_DB_PATH = path.join(DATA_DIR, "invoices.json");
 const WEBHOOK_DB_PATH = path.join(DATA_DIR, "webhooks.json");
 const WEBHOOK_LOG_DB_PATH = path.join(DATA_DIR, "webhook-logs.json");
+const PAYMENT_ATTEMPT_DB_PATH = path.join(DATA_DIR, "payment-attempts.json");
+const DISPATCHED_WEBHOOKS_PATH = path.join(DATA_DIR, "dispatched_webhooks.json");
+
+let dispatchedEventIds = new Set();
+try {
+  if (fs.existsSync(DISPATCHED_WEBHOOKS_PATH)) {
+    const data = JSON.parse(fs.readFileSync(DISPATCHED_WEBHOOKS_PATH, "utf8"));
+    if (Array.isArray(data)) dispatchedEventIds = new Set(data);
+  }
+} catch (e) {}
+
+function saveDispatchedEventIds() {
+  fs.writeFileSync(DISPATCHED_WEBHOOKS_PATH, JSON.stringify(Array.from(dispatchedEventIds)));
+}
+
 const ARCSCAN_API_BASE = process.env.ARCSCAN_API_BASE || "https://testnet.arcscan.app/api/v2";
 const ARCSCAN_EXPLORER_BASE = process.env.ARCSCAN_EXPLORER_BASE || "https://testnet.arcscan.app";
 const ARC_USDC_TOKEN_ADDRESS = normalizeAddress(process.env.ARC_USDC_TOKEN_ADDRESS || "0x3600000000000000000000000000000000000000");
@@ -284,6 +299,15 @@ async function handleInvoiceById(req, res, invoiceId) {
     }
     try {
       const patch = await readJsonBody(req);
+      const requestedStatus = String(patch.status || "").trim().toLowerCase();
+      if (requestedStatus === "paid" && invoice.status !== "paid") {
+        sendJson(res, 409, { error: "Paid status can only be set by verified on-chain payment" });
+        return;
+      }
+      if (invoice.status === "paid" && requestedStatus && requestedStatus !== "paid") {
+        sendJson(res, 409, { error: "Paid invoices cannot be reopened from the client" });
+        return;
+      }
       const updated = normalizeInvoicePatch(invoice, patch);
       db.invoices[index] = updated;
       saveInvoiceDb(db);
@@ -467,10 +491,54 @@ function saveWebhookLogDb(db) {
   fs.writeFileSync(WEBHOOK_LOG_DB_PATH, `${JSON.stringify({ logs: db.logs || [] }, null, 2)}\n`);
 }
 
+function loadPaymentAttemptDb() {
+  ensureDataDir();
+  if (!fs.existsSync(PAYMENT_ATTEMPT_DB_PATH)) return { attempts: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(PAYMENT_ATTEMPT_DB_PATH, "utf8"));
+    return { attempts: Array.isArray(parsed.attempts) ? parsed.attempts.map(normalizeStoredPaymentAttempt).filter(Boolean) : [] };
+  } catch {
+    return { attempts: [] };
+  }
+}
+
+function savePaymentAttemptDb(db) {
+  ensureDataDir();
+  fs.writeFileSync(PAYMENT_ATTEMPT_DB_PATH, `${JSON.stringify({ attempts: db.attempts || [] }, null, 2)}\n`);
+}
+
 function appendWebhookLog(log) {
   const db = loadWebhookLogDb();
   db.logs = [normalizeWebhookLog(log), ...db.logs].slice(0, 500);
   saveWebhookLogDb(db);
+}
+
+function createPaymentAttempt(input) {
+  const attempt = normalizePaymentAttempt({
+    ...input,
+    id: makeId(10),
+    status: "pending",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  const db = loadPaymentAttemptDb();
+  db.attempts = [attempt, ...db.attempts].slice(0, 1000);
+  savePaymentAttemptDb(db);
+  return attempt;
+}
+
+function updatePaymentAttempt(attemptId, patch) {
+  const db = loadPaymentAttemptDb();
+  const index = db.attempts.findIndex((attempt) => attempt.id === attemptId);
+  if (index < 0) return null;
+  const updated = normalizePaymentAttempt({
+    ...db.attempts[index],
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  }, { allowExistingTimestamps: true });
+  db.attempts[index] = updated;
+  savePaymentAttemptDb(db);
+  return updated;
 }
 
 function ensureDataDir() {
@@ -496,6 +564,14 @@ function normalizeStoredWebhook(webhook) {
 function normalizeStoredWebhookLog(log) {
   try {
     return normalizeWebhookLog(log, { allowExistingTimestamps: true });
+  } catch {
+    return null;
+  }
+}
+
+function normalizeStoredPaymentAttempt(attempt) {
+  try {
+    return normalizePaymentAttempt(attempt, { allowExistingTimestamps: true });
   } catch {
     return null;
   }
@@ -625,6 +701,78 @@ function normalizeWebhookLog(input, options = {}) {
     durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : 0,
     createdAt,
   };
+}
+
+function normalizePaymentAttempt(input, options = {}) {
+  const id = /^[a-f0-9]{20}$/i.test(String(input.id || "")) ? String(input.id).toLowerCase() : makeId(10);
+  const invoiceId = /^[a-f0-9]{20}$/i.test(String(input.invoiceId || "")) ? String(input.invoiceId).toLowerCase() : "";
+  if (!invoiceId) throw new Error("Invalid invoice ID");
+  const amount = roundMoney(input.amount);
+  if (amount <= 0) throw new Error("Invalid payment attempt amount");
+  const status = ["pending", "verified", "failed"].includes(String(input.status || "").trim().toLowerCase())
+    ? String(input.status).trim().toLowerCase()
+    : "pending";
+  const createdAt = options.allowExistingTimestamps && input.createdAt ? String(input.createdAt) : new Date().toISOString();
+  const updatedAt = options.allowExistingTimestamps && input.updatedAt ? String(input.updatedAt) : createdAt;
+
+  return {
+    id,
+    invoiceId,
+    invoiceNumber: String(input.invoiceNumber || "").trim().slice(0, 48),
+    chain: String(input.chain || ARC_NETWORK_NAME).trim().slice(0, 80),
+    chainId: Number(input.chainId || ARC_CHAIN_ID),
+    payerWallet: normalizeAddress(input.payerWallet),
+    merchantWallet: normalizeAddress(input.merchantWallet),
+    amount,
+    tokenSymbol: String(input.tokenSymbol || "USDC").trim().slice(0, 20),
+    tokenAddress: normalizeAddress(input.tokenAddress) || ARC_USDC_TOKEN_ADDRESS,
+    onchainInvoiceId: normalizeBytes32(input.onchainInvoiceId),
+    txHash: normalizeTxHash(input.txHash),
+    status,
+    error: String(input.error || "").trim().slice(0, 500),
+    verifiedAt: String(input.verifiedAt || "").trim(),
+    match: input.match && typeof input.match === "object" ? sanitizePaymentMatch(input.match) : null,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function sanitizePaymentMatch(input = {}) {
+  return {
+    source: String(input.source || "").trim().slice(0, 80),
+    txHash: normalizeTxHash(input.txHash),
+    explorerUrl: String(input.explorerUrl || "").trim().slice(0, 500),
+    from: normalizeAddress(input.from),
+    to: normalizeAddress(input.to),
+    timestamp: String(input.timestamp || "").trim(),
+    blockNumber: String(input.blockNumber || "").trim().slice(0, 80),
+    tokenSymbol: String(input.tokenSymbol || "USDC").trim().slice(0, 20),
+    tokenAddress: normalizeAddress(input.tokenAddress) || String(input.tokenAddress || "").trim().slice(0, 80),
+    rawAmount: String(input.rawAmount || "").trim().slice(0, 120),
+    onchainInvoiceId: normalizeBytes32(input.onchainInvoiceId),
+    referenceVerified: Boolean(input.referenceVerified),
+    transferVerified: Boolean(input.transferVerified),
+    paymentAttemptId: /^[a-f0-9]{20}$/i.test(String(input.paymentAttemptId || "")) ? String(input.paymentAttemptId).toLowerCase() : "",
+  };
+}
+
+function findTxHashPaymentOwner(invoices, txHash, excludeInvoiceId = "") {
+  const normalized = normalizeTxHash(txHash);
+  if (!normalized) return null;
+  const excluded = String(excludeInvoiceId || "").toLowerCase();
+
+  const ownerInvoice = (invoices || []).find((invoice) => {
+    if (!invoice || invoice.id === excluded) return false;
+    if (normalizeTxHash(invoice.txHash) === normalized) return true;
+    return normalizeTxHash(invoice.verifiedPayment?.txHash) === normalized;
+  });
+  if (ownerInvoice) return ownerInvoice;
+
+  const ownerAttempt = loadPaymentAttemptDb().attempts.find((attempt) => {
+    if (!attempt || attempt.invoiceId === excluded || attempt.status !== "verified") return false;
+    return normalizeTxHash(attempt.txHash || attempt.match?.txHash) === normalized;
+  });
+  return ownerAttempt ? { id: ownerAttempt.invoiceId, number: ownerAttempt.invoiceNumber } : null;
 }
 
 function normalizeInvoicePatch(existing, patch) {
@@ -775,18 +923,27 @@ async function dispatchInvoicePaidWebhooks(invoice, req) {
     invoice: decorateInvoiceForAgent(invoice, req),
   };
 
-  const results = await Promise.allSettled(webhooks.map((webhook) => sendWebhookWithLog(webhook, payload, invoice)));
-  const sent = results.filter((result) => result.status === "fulfilled").length;
-  const failed = results.length - sent;
-  if (failed) console.log(`Webhook invoice.paid delivered to ${sent}/${results.length} endpoint(s)`);
+  const results = await Promise.allSettled(webhooks.map(async (webhook) => {
+    if (!invoice.webhookEventId) return Promise.resolve(null);
+    const idKey = `${invoice.webhookEventId}:${webhook.id}`;
+    if (dispatchedEventIds.has(idKey)) return Promise.resolve(null);
+    
+    const res = await sendWebhookWithLog(webhook, payload, invoice, invoice.webhookEventId);
+    dispatchedEventIds.add(idKey);
+    saveDispatchedEventIds();
+    return res;
+  }));
+  const sent = results.filter((result) => result.status === "fulfilled" && result.value !== null).length;
+  const failed = results.filter((result) => result.status === "rejected").length;
+  if (failed || sent) console.log(`Webhook invoice.paid delivered to ${sent}/${results.length} endpoint(s)`);
   return { sent, failed };
 }
 
-async function sendWebhookWithLog(webhook, payload, invoice) {
+async function sendWebhookWithLog(webhook, payload, invoice, idempotencyKey) {
   const deliveryId = makeId(10);
   const startedAt = Date.now();
   try {
-    const result = await sendWebhook(webhook, payload, deliveryId);
+    const result = await sendWebhook(webhook, payload, deliveryId, idempotencyKey);
     appendWebhookLog({
       deliveryId,
       webhookId: webhook.id,
@@ -819,7 +976,7 @@ async function sendWebhookWithLog(webhook, payload, invoice) {
   }
 }
 
-function sendWebhook(webhook, payload, deliveryId = makeId(10)) {
+function sendWebhook(webhook, payload, deliveryId = makeId(10), idempotencyKey = "") {
   return new Promise((resolve, reject) => {
     const target = new URL(webhook.url);
     const transport = target.protocol === "http:" ? http : https;
@@ -831,6 +988,9 @@ function sendWebhook(webhook, payload, deliveryId = makeId(10)) {
       "X-Fundline-Event": payload.event,
       "X-Fundline-Delivery": deliveryId,
     };
+    if (idempotencyKey) {
+      headers["Idempotency-Key"] = idempotencyKey;
+    }
     if (webhook.secret) {
       const signature = `sha256=${crypto.createHmac("sha256", webhook.secret).update(body).digest("hex")}`;
       headers["X-Fundline-Signature"] = signature;
@@ -874,14 +1034,31 @@ async function handleVerifyPayment(req, res) {
     return;
   }
 
+  let attempt = null;
   try {
     const body = await readJsonBody(req);
+    const invoiceId = String(body.invoiceId || "").trim().toLowerCase();
     const payerWallet = normalizeAddress(body.payerWallet);
-    const merchantWallet = normalizeAddress(body.merchantWallet);
-    const amount = Number(body.amount);
     const txHash = normalizeTxHash(body.txHash);
-    const onchainInvoiceId = normalizeBytes32(body.onchainInvoiceId);
-    const createdAt = body.createdAt ? new Date(body.createdAt) : null;
+
+    if (!/^[a-f0-9]{20}$/i.test(invoiceId)) {
+      sendJson(res, 400, { error: "Invoice ID is required" });
+      return;
+    }
+
+    const db = loadInvoiceDb();
+    const invoiceIndex = db.invoices.findIndex((item) => item.id === invoiceId);
+    const invoice = invoiceIndex >= 0 ? db.invoices[invoiceIndex] : null;
+    if (!invoice) {
+      sendJson(res, 404, { error: "Invoice not found" });
+      return;
+    }
+
+    const merchantWallet = invoice.merchantWallet;
+    const amount = Number(invoice.total);
+    const onchainInvoiceId = normalizeBytes32(invoice.onchainInvoiceId);
+    const createdAt = invoice.createdAt ? new Date(invoice.createdAt) : null;
+    const now = new Date().toISOString();
 
     if (!payerWallet) {
       sendJson(res, 400, { error: "Payer wallet is required" });
@@ -899,43 +1076,204 @@ async function handleVerifyPayment(req, res) {
       sendJson(res, 400, { error: "Invoice amount is invalid" });
       return;
     }
+    if (ARC_PAYMENT_ROUTER_ADDRESS && !onchainInvoiceId) {
+      sendJson(res, 400, { error: "Invoice payment reference is missing" });
+      return;
+    }
+
+    attempt = createPaymentAttempt({
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.number,
+      payerWallet,
+      merchantWallet,
+      amount,
+      tokenSymbol: "USDC",
+      tokenAddress: ARC_USDC_TOKEN_ADDRESS,
+      onchainInvoiceId,
+      txHash,
+      chain: ARC_NETWORK_NAME,
+      chainId: ARC_CHAIN_ID,
+    });
+
+    if (invoice.status === "paid") {
+      const existingHash = normalizeTxHash(invoice.txHash);
+      if (txHash && existingHash && txHash !== existingHash) {
+        const failedAttempt = updatePaymentAttempt(attempt.id, {
+          status: "failed",
+          error: "Invoice is already paid with a different transaction",
+        });
+        sendJson(res, 409, { error: "Invoice is already paid with a different transaction", attempt: failedAttempt });
+        return;
+      }
+      const match = sanitizePaymentMatch(invoice.verifiedPayment || {
+        source: invoice.verificationSource || "stored_verified_payment",
+        txHash: existingHash,
+        explorerUrl: existingHash ? `${ARCSCAN_EXPLORER_BASE}/tx/${existingHash}` : "",
+        from: invoice.payerWallet,
+        to: invoice.merchantWallet,
+        timestamp: invoice.paidAt,
+        tokenSymbol: "USDC",
+        tokenAddress: ARC_USDC_TOKEN_ADDRESS,
+        onchainInvoiceId,
+        referenceVerified: Boolean(onchainInvoiceId),
+        transferVerified: true,
+      });
+      const verifiedAttempt = updatePaymentAttempt(attempt.id, {
+        status: "verified",
+        verifiedAt: now,
+        txHash: match.txHash,
+        match,
+      });
+      sendJson(res, 200, { verified: true, match, invoice, attempt: verifiedAttempt });
+      return;
+    }
+
+    const duplicateBeforeScan = txHash ? findTxHashPaymentOwner(db.invoices, txHash, invoice.id) : null;
+    if (duplicateBeforeScan) {
+      if (invoice.status === "verifying") {
+        db.invoices[invoiceIndex] = normalizeInvoice(
+          {
+            ...invoice,
+            status: "open",
+            lastVerificationAt: now,
+          },
+          { allowExistingTimestamps: true },
+        );
+        saveInvoiceDb(db);
+      }
+      const failedAttempt = updatePaymentAttempt(attempt.id, {
+        status: "failed",
+        error: `Transaction already verifies invoice ${duplicateBeforeScan.number || duplicateBeforeScan.id}`,
+      });
+      sendJson(res, 409, { error: "This transaction is already used for another invoice", attempt: failedAttempt });
+      return;
+    }
 
     const match = await findArcPayment({
+      invoiceId: invoice.id,
       payerWallet,
       merchantWallet,
       amount,
       onchainInvoiceId,
       createdAt: createdAt && Number.isFinite(createdAt.getTime()) ? createdAt : null,
       txHash,
+      requireInvoiceReference: Boolean(ARC_PAYMENT_ROUTER_ADDRESS && onchainInvoiceId),
     });
 
     if (!match) {
+      if (invoice.status === "verifying") {
+        db.invoices[invoiceIndex] = normalizeInvoice(
+          {
+            ...invoice,
+            status: "open",
+            lastVerificationAt: now,
+          },
+          { allowExistingTimestamps: true },
+        );
+        saveInvoiceDb(db);
+      }
+      const pendingAttempt = updatePaymentAttempt(attempt.id, {
+        status: "pending",
+        error: ARC_PAYMENT_ROUTER_ADDRESS && onchainInvoiceId
+          ? "No matching USDC Transfer with the invoice reference was found yet."
+          : "No matching USDC payment was found on Arcscan yet.",
+      });
       sendJson(res, 200, {
         verified: false,
-        error: "No matching USDC payment was found on Arcscan yet.",
+        status: "pending",
+        error: pendingAttempt.error,
+        attempt: pendingAttempt,
       });
       return;
     }
 
-    sendJson(res, 200, { verified: true, match });
+    const duplicateAfterScan = findTxHashPaymentOwner(db.invoices, match.txHash, invoice.id);
+    if (duplicateAfterScan) {
+      if (invoice.status === "verifying") {
+        db.invoices[invoiceIndex] = normalizeInvoice(
+          {
+            ...invoice,
+            status: "open",
+            lastVerificationAt: now,
+          },
+          { allowExistingTimestamps: true },
+        );
+        saveInvoiceDb(db);
+      }
+      const failedAttempt = updatePaymentAttempt(attempt.id, {
+        status: "failed",
+        txHash: match.txHash,
+        error: `Transaction already verifies invoice ${duplicateAfterScan.number || duplicateAfterScan.id}`,
+        match,
+      });
+      sendJson(res, 409, { error: "This transaction is already used for another invoice", attempt: failedAttempt });
+      return;
+    }
+
+    const sanitizedMatch = sanitizePaymentMatch({
+      ...match,
+      paymentAttemptId: attempt.id,
+      onchainInvoiceId,
+    });
+    const updated = normalizeInvoice(
+      {
+        ...invoice,
+        status: "paid",
+        paidAt: sanitizedMatch.timestamp || now,
+        payerWallet,
+        txHash: sanitizedMatch.txHash,
+        verifiedAt: now,
+        verificationSource: sanitizedMatch.source,
+        verifiedPayment: sanitizedMatch,
+        lastVerificationAt: now,
+        webhookEventId: invoice.webhookEventId || crypto.randomUUID(),
+      },
+      { allowExistingTimestamps: true },
+    );
+    db.invoices[invoiceIndex] = updated;
+    saveInvoiceDb(db);
+
+    const verifiedAttempt = updatePaymentAttempt(attempt.id, {
+      status: "verified",
+      verifiedAt: now,
+      txHash: sanitizedMatch.txHash,
+      match: sanitizedMatch,
+    });
+
+    if (invoice.status !== "paid") {
+      dispatchInvoicePaidWebhooks(updated, req).catch((error) => {
+        console.log(`Webhook dispatch failed: ${error.message || "Unknown error"}`);
+      });
+    }
+
+    sendJson(res, 200, { verified: true, match: sanitizedMatch, invoice: updated, attempt: verifiedAttempt });
   } catch (error) {
+    if (attempt?.id) {
+      updatePaymentAttempt(attempt.id, {
+        status: "failed",
+        error: error.message || "Arcscan verification failed",
+      });
+    }
     sendJson(res, 500, { error: error.message || "Arcscan verification failed" });
   }
 }
 
 async function findArcPayment(criteria) {
+  if (criteria.requireInvoiceReference) {
+    if (criteria.txHash) return findPaymentInRpcReceipt(criteria);
+    return findRecentReferencedPayment(criteria);
+  }
+
   if (criteria.txHash) {
     const receiptMatch = await findPaymentInRpcReceipt(criteria);
     if (receiptMatch) return receiptMatch;
     const transferMatch = await findTokenTransferByTx(criteria);
     if (transferMatch) return transferMatch;
-    const txMatch = await findNativeTransferByTx(criteria);
-    if (txMatch) return txMatch;
   }
 
   const transferMatch = await findRecentTokenTransfer(criteria);
   if (transferMatch) return transferMatch;
-  return findRecentNativeTransfer(criteria);
+  return null;
 }
 
 async function findPaymentInRpcReceipt(criteria) {
@@ -946,6 +1284,7 @@ async function findPaymentInRpcReceipt(criteria) {
     const logs = Array.isArray(receipt.logs) ? receipt.logs : [];
     const routerEvent = findInvoicePaidLog(logs, criteria);
     const transferEvent = findUsdcTransferLog(logs, criteria);
+    if (criteria.requireInvoiceReference && (!routerEvent || !transferEvent)) return null;
     if (!routerEvent && !transferEvent) return null;
     return {
       source: routerEvent ? "rpc_payment_router_event" : "rpc_usdc_transfer_log",
@@ -958,10 +1297,27 @@ async function findPaymentInRpcReceipt(criteria) {
       tokenSymbol: "USDC",
       tokenAddress: ARC_USDC_TOKEN_ADDRESS,
       rawAmount: String((routerEvent || transferEvent).amount),
+      onchainInvoiceId: routerEvent ? criteria.onchainInvoiceId : "",
+      referenceVerified: Boolean(routerEvent),
+      transferVerified: Boolean(transferEvent),
     };
   } catch {
     return null;
   }
+}
+
+async function findRecentReferencedPayment(criteria) {
+  const transactions = await fetchArcscanItems(`/addresses/${criteria.payerWallet}/transactions`, {}, 3);
+  for (const transaction of transactions) {
+    const txHash = normalizeTxHash(transaction.hash || transaction.transaction_hash);
+    if (!txHash) continue;
+    const from = normalizeAddress(transaction.from?.hash || transaction.from);
+    if (from && !sameAddress(from, criteria.payerWallet)) continue;
+    if (!isRecentEnough(transaction.timestamp, criteria.createdAt)) continue;
+    const match = await findPaymentInRpcReceipt({ ...criteria, txHash });
+    if (match) return { ...match, timestamp: transaction.timestamp || match.timestamp };
+  }
+  return null;
 }
 
 function findInvoicePaidLog(logs, criteria) {
@@ -977,7 +1333,7 @@ function findInvoicePaidLog(logs, criteria) {
     const amount = words[0] ? BigInt(words[0]) : 0n;
     const token = words[1] ? topicToAddress(words[1]) : "";
     if (ARC_USDC_TOKEN_ADDRESS && token && !sameAddress(token, ARC_USDC_TOKEN_ADDRESS)) continue;
-    if (amount >= expectedAmount) return { ...log, amount };
+    if (amount === expectedAmount) return { ...log, amount };
   }
   return null;
 }
@@ -990,7 +1346,7 @@ function findUsdcTransferLog(logs, criteria) {
     if (!sameAddress(topicToAddress(log.topics[1]), criteria.payerWallet)) continue;
     if (!sameAddress(topicToAddress(log.topics[2]), criteria.merchantWallet)) continue;
     const amount = log.data && /^0x[0-9a-f]+$/i.test(log.data) ? BigInt(log.data) : 0n;
-    if (amount >= expectedAmount) return { ...log, amount };
+    if (amount === expectedAmount) return { ...log, amount };
   }
   return null;
 }
@@ -1044,7 +1400,7 @@ function isMatchingTokenTransfer(transfer, criteria) {
   const decimals = Number(transfer.total?.decimals ?? transfer.token?.decimals ?? 6);
   const rawValue = parseUnitsValue(transfer.total?.value ?? transfer.value);
   const expected = amountToUnits(criteria.amount, Number.isFinite(decimals) ? decimals : 6);
-  return rawValue >= expected;
+  return rawValue === expected;
 }
 
 function toTokenTransferMatch(transfer) {

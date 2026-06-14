@@ -68,14 +68,15 @@ The payment page does not let the payer mark an invoice paid manually. It asks A
 The current verifier accepts a payment when it finds:
 
 - USDC token transfer from payer wallet to invoice receiving wallet.
-- Amount greater than or equal to the invoice total.
+- Exact amount equal to the invoice total.
+- PaymentRouter `InvoicePaid` reference for the invoice when the router is configured.
 - Transaction time after the invoice was created, with a small clock-skew tolerance.
 
 If the payer does not connect a wallet in the app, they must enter the wallet address that sent the payment. A transaction hash is optional and only speeds up lookup.
 
 When verification starts, the invoice briefly moves to `verifying`. If Arcscan does not return a valid match, the invoice returns to `open`. If the due date has passed and no payment is verified, the UI shows `expired`.
 
-Paid invoices store payer wallet, transaction hash, verification source, and verification time. Those fields are included in CSV export, Telegram alerts, and PDF receipts.
+Paid invoices store payer wallet, transaction hash, verification source, and verification time. Fundline also stores every payment verification attempt as `pending`, `verified`, or `failed`, and rejects a transaction hash that has already verified another invoice. Those fields are included in CSV export, Telegram alerts, and PDF receipts.
 
 ## Cross-chain payment pilot
 

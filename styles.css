@@ -1463,3 +1463,6 @@ select {
     width: 100%;
   }
 }
+
+@keyframes errorRing { 0% { box-shadow: 0 0 0 0px rgba(255, 77, 79, 0.6); } 100% { box-shadow: 0 0 0 6px rgba(255, 77, 79, 0); } } .error-ring { animation: errorRing 0.4s ease-out; border-color: #ff4d4f !important; color: #ff4d4f !important; }
+

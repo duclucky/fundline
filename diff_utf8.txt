@@ -1,0 +1,4134 @@
+﻿diff --git a/README.md b/README.md
+index 845d74e..7ef1110 100644
+--- a/README.md
++++ b/README.md
+@@ -68,14 +68,15 @@ The payment page does not let the payer mark an invoice paid manually. It asks A
+ The current verifier accepts a payment when it finds:
+ 
+ - USDC token transfer from payer wallet to invoice receiving wallet.
+-- Amount greater than or equal to the invoice total.
++- Exact amount equal to the invoice total.
++- PaymentRouter `InvoicePaid` reference for the invoice when the router is configured.
+ - Transaction time after the invoice was created, with a small clock-skew tolerance.
+ 
+ If the payer does not connect a wallet in the app, they must enter the wallet address that sent the payment. A transaction hash is optional and only speeds up lookup.
+ 
+ When verification starts, the invoice briefly moves to `verifying`. If Arcscan does not return a valid match, the invoice returns to `open`. If the due date has passed and no payment is verified, the UI shows `expired`.
+ 
+-Paid invoices store payer wallet, transaction hash, verification source, and verification time. Those fields are included in CSV export, Telegram alerts, and PDF receipts.
++Paid invoices store payer wallet, transaction hash, verification source, and verification time. Fundline also stores every payment verification attempt as `pending`, `verified`, or `failed`, and rejects a transaction hash that has already verified another invoice. Those fields are included in CSV export, Telegram alerts, and PDF receipts.
+ 
+ ## Cross-chain payment pilot
+ 
+diff --git a/app.js b/app.js
+index 433fa12..fc25799 100644
+--- a/app.js
++++ b/app.js
+@@ -1,7 +1,6 @@
+ const STORAGE_KEY = "arc-invoice-usdc-invoices-v1";
+ const SETTINGS_KEY = "arc-invoice-usdc-settings-v1";
+ const ARC_EXPLORER_URL = "https://testnet.arcscan.app";
+-const ARC_NATIVE_USDC_DECIMALS = 18;
+ const ARC_USDC_DECIMALS = 6;
+ const DEFAULT_PUBLIC_CONFIG = {
+   networkName: "Arc Testnet",
+@@ -18,11 +17,13 @@ const DEFAULT_PUBLIC_CONFIG = {
+ const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
+ const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
+ const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
++const ERC20_DECIMALS_SELECTOR = "0x313ce567";
+ const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
+ const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
+ const CCTP_GET_MIN_FEE_SELECTOR = "0x516990e3";
+ const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
+-const CCTP_STANDARD_FINALITY_THRESHOLD = 2000;
++const CCTP_STANDARD_FINALITY_THRESHOLD = 1000;
++const CCTP_FAST_FINALITY_THRESHOLD = 500;
+ const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
+ const CCTP_IRIS_SANDBOX_BASE = "https://iris-api-sandbox.circle.com";
+ 
+@@ -373,7 +374,7 @@ async function refreshWalletBalance(event) {
+       method: "eth_getBalance",
+       params: [address, "latest"],
+     });
+-    state.wallet.balance = `${formatUnits(rawBalance, ARC_NATIVE_USDC_DECIMALS)} USDC`;
++    state.wallet.balance = `${formatUnits(rawBalance, 18)} USDC`;
+   } catch {
+     state.wallet.balance = "Unavailable";
+   }
+@@ -473,10 +474,7 @@ function normalizePublicConfig(config) {
+   const paymentRouterAddress = normalizeAddress(config.paymentRouterAddress) || DEFAULT_PUBLIC_CONFIG.paymentRouterAddress;
+   const usdcDecimals = Number(config.usdcDecimals);
+   const normalizedUsdcDecimals = Number.isFinite(usdcDecimals) ? Math.min(Math.max(Math.trunc(usdcDecimals), 0), 18) : DEFAULT_PUBLIC_CONFIG.usdcDecimals;
+-  const paymentTokenDecimals =
+-    sameAddress(usdcTokenAddress, DEFAULT_PUBLIC_CONFIG.usdcTokenAddress) && normalizedUsdcDecimals === ARC_NATIVE_USDC_DECIMALS
+-      ? ARC_USDC_DECIMALS
+-      : normalizedUsdcDecimals;
++  const paymentTokenDecimals = normalizedUsdcDecimals;
+   return {
+     networkName: String(config.networkName || DEFAULT_PUBLIC_CONFIG.networkName),
+     chainId,
+@@ -986,7 +984,7 @@ function renderPaymentVerification(invoice) {
+             ? "The connected wallet is also the receiving wallet. A self-transfer does not settle an invoice."
+             :
+           config.onchainPaymentsEnabled
+-            ? `Choose where your USDC is. If Arc balance is enough, pay directly. If USDC is on another testnet, Fundline will bridge first, then pay.`
++            ? `Choose where your USDC is. If Arc balance is enough, pay directly. If USDC is on another testnet, Fundline will bridge first, then pay. Need testnet USDC? <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Get some at faucet.circle.com</a>.`
+             : "Send USDC manually to the receiving wallet, then use verification below."
+         }</p>
+       </div>
+@@ -1040,8 +1038,7 @@ function renderVerifiedPayment(invoice) {
+   return `
+     <div class="verified-payment">
+       <span>Verified payment</span>
+-      <strong>${escapeHtml(invoice.txHash || "demo")}</strong>
+-      ${explorerUrl ? `<a href="${escapeHtml(explorerUrl)}" target="_blank" rel="noreferrer">Open transaction</a>` : ""}
++      ${explorerUrl ? `<a href="${escapeHtml(explorerUrl)}" target="_blank" rel="noreferrer" class="tx-hash-link"><strong>${escapeHtml(invoice.txHash || "demo")}</strong></a>` : `<strong>${escapeHtml(invoice.txHash || "demo")}</strong>`}
+     </div>
+   `;
+ }
+@@ -1252,9 +1249,16 @@ async function payInvoiceWithWallet(id) {
+   const button = document.querySelector("#payWithWallet");
+   setButtonBusy(button, "Preparing payment...");
+   try {
++    button.classList.remove("error-ring");
+     await submitArcPayment(invoice, payerWallet, button);
+   } catch (error) {
+-    showToast(error?.message || "Wallet payment failed.");
++    const isRejected = error?.code === 4001 || String(error?.message).toLowerCase().includes("rejected") || String(error?.message).toLowerCase().includes("denied");
++    const msg = isRejected ? "Transaction rejected by user." : error?.message || "Wallet payment failed.";
++    showToast(msg);
++    if (isRejected) {
++      button.classList.add("error-ring");
++      setTimeout(() => button.classList.remove("error-ring"), 3000);
++    }
+   } finally {
+     resetPayWithWalletButton(button, invoice);
+   }
+@@ -1264,6 +1268,10 @@ async function submitArcPayment(invoice, payerWallet, button) {
+   const provider = window.ethereum;
+   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+   await ensurePaymentNetwork(provider, config);
++  const onchainDecimals = await readUsdcDecimals(provider, config.usdcTokenAddress);
++  if (onchainDecimals !== 6) {
++    throw new Error(`Critical Error: Expected Arc USDC to have 6 decimals but found ${onchainDecimals}.`);
++  }
+   const amountUnits = parseTokenUnits(invoice.total, config.usdcDecimals);
+   const balance = await readUsdcBalance(provider, config.usdcTokenAddress, payerWallet);
+   if (balance < amountUnits) {
+@@ -1359,6 +1367,7 @@ async function bridgeAndPayInvoice(id, sourceKey) {
+       destination: CCTP_TESTNET_CHAINS.arcTestnet,
+       amount: amountUnits,
+       recipient: payerWallet,
++      fast: true,
+     });
+     await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
+     setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
+@@ -1375,9 +1384,14 @@ async function bridgeAndPayInvoice(id, sourceKey) {
+     setProgressStep(progress, "pay", "done", "Payment submitted");
+     setProgressStep(progress, "verify", verified ? "done" : "active", verified ? "Payment verified" : "Waiting for Arcscan");
+   } catch (error) {
++    const isRejected = error?.code === 4001 || String(error?.message).toLowerCase().includes("rejected") || String(error?.message).toLowerCase().includes("denied");
+     const active = progress.find((step) => step.status === "active");
+-    if (active) setProgressStep(progress, active.key, "error", error?.message || "Stopped");
+-    showToast(error?.message || "Bridge and pay failed.");
++    if (active) setProgressStep(progress, active.key, "error", isRejected ? "Rejected by user" : error?.message || "Stopped");
++    showToast(isRejected ? "Transaction rejected by user." : error?.message || "Bridge and pay failed.");
++    if (isRejected) {
++      button.classList.add("error-ring");
++      setTimeout(() => button.classList.remove("error-ring"), 3000);
++    }
+   } finally {
+     resetPayWithWalletButton(button, invoice);
+     await refreshPaymentSourceStatus(id, { silent: true });
+@@ -1480,6 +1494,14 @@ async function readUsdcBalance(provider, token, owner) {
+   return hexToBigInt(result);
+ }
+ 
++async function readUsdcDecimals(provider, token) {
++  const result = await provider.request({
++    method: "eth_call",
++    params: [{ to: token, data: ERC20_DECIMALS_SELECTOR }, "latest"],
++  });
++  return Number(hexToBigInt(result));
++}
++
+ async function readUsdcBalanceFromRpc(rpcUrl, token, owner) {
+   const data = `${ERC20_BALANCE_OF_SELECTOR}${encodeAddress(owner)}`;
+   const result = await rpcCall(rpcUrl, "eth_call", [{ to: token, data }, "latest"]);
+@@ -1516,7 +1538,7 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet,
+   });
+ }
+ 
+-async function sendCctpBurn(provider, { from, source, destination, amount, recipient }) {
++async function sendCctpBurn(provider, { from, source, destination, amount, recipient, fast = false }) {
+   const minFeeRaw = await provider
+     .request({
+       method: "eth_call",
+@@ -1537,7 +1559,7 @@ async function sendCctpBurn(provider, { from, source, destination, amount, recip
+     encodeAddress(source.usdc) +
+     encodeBytes32(ZERO_BYTES32) +
+     encodeUint256(hexToBigInt(minFeeRaw)) +
+-    encodeUint256(CCTP_STANDARD_FINALITY_THRESHOLD);
++    encodeUint256(fast ? CCTP_FAST_FINALITY_THRESHOLD : CCTP_STANDARD_FINALITY_THRESHOLD);
+   return provider.request({
+     method: "eth_sendTransaction",
+     params: [{ from, to: CCTP_TOKEN_MESSENGER_V2, data, value: "0x0" }],
+diff --git a/docs.html b/docs.html
+index bf2b7e5..47a9705 100644
+--- a/docs.html
++++ b/docs.html
+@@ -232,7 +232,7 @@
+             <span>Approve exact USDC</span>
+             <span>Pay invoice</span>
+             <span>Verify on Arcscan</span>
+-            <span>Mark paid</span>
++            <span>Server marks paid</span>
+           </div>
+           <div class="code-card">
+             <div class="code-head"><span>PaymentRouter call</span><button data-copy="#pay-router-call" type="button">Copy</button></div>
+@@ -242,6 +242,10 @@
+             If PaymentRouter is not configured, the payment page keeps the wallet payment button disabled and still
+             supports manual USDC transfer plus Arcscan verification.
+           </p>
++          <div class="note">
++            <strong>Verification rule</strong>
++            <span>When PaymentRouter is configured, Fundline only marks an invoice paid after finding both the router invoice reference and the matching USDC transfer for the exact payer, merchant and amount.</span>
++          </div>
+         </section>
+ 
+         <section class="doc-section" id="receipts">
+diff --git a/home.css b/home.css
+index fdf61c7..dcf67c9 100644
+--- a/home.css
++++ b/home.css
+@@ -1,22 +1,30 @@
++/* ====================================================
++   FUNDLINE HOME ΓÇö Design System + Landing Page CSS
++   ==================================================== */
++
+ :root {
+   color-scheme: dark;
+-  --bg: #07111d;
+-  --ink: #f5f8ff;
+-  --muted: #a9bbd4;
+-  --muted-2: #74859e;
+-  --line: rgba(174, 208, 246, 0.18);
+-  --line-strong: rgba(184, 218, 255, 0.34);
+-  --panel: rgba(20, 36, 58, 0.62);
+-  --cyan: #35ddff;
+-  --blue: #6087ff;
+-  --green: #72f6a6;
+-  --warm: #f0c79f;
+-  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
++  --bg:           #050505;
++  --ink:          #ffffff;
++  --muted:        #9ca3af;
++  --muted-2:      #6b7280;
++  --line:         rgba(255, 255, 255, 0.08);
++  --line-strong:  rgba(255, 255, 255, 0.15);
++  --panel:        rgba(255, 255, 255, 0.02);
++  --cyan:         #00f0ff;
++  --blue:         #2b58ff;
++  --green:        #00ff9d;
++  --warm:         #ffb86c;
++  --mono:         "SFMono-Regular", Consolas, "Liberation Mono", monospace;
++  --radius-sm:    12px;
++  --radius-md:    16px;
++  --radius-lg:    24px;
++  --container:    min(1200px, calc(100% - 48px));
++  --section-y:    120px;
+ }
+ 
+-* {
+-  box-sizing: border-box;
+-}
++/* ---- Reset ---- */
++*, *::before, *::after { box-sizing: border-box; }
+ 
+ html {
+   background: var(--bg);
+@@ -27,52 +35,233 @@ body {
+   margin: 0;
+   min-width: 320px;
+   color: var(--ink);
+-  background:
+-    radial-gradient(circle at 50% 12%, rgba(75, 110, 190, 0.2), transparent 32%),
+-    radial-gradient(circle at 50% 102%, rgba(60, 181, 211, 0.32), transparent 34%),
+-    linear-gradient(145deg, #07111d 0%, #0c1d34 54%, #2b5874 100%);
+-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
++  background: var(--bg);
++  background-image:
++    radial-gradient(ellipse at 50% -20%, rgba(43, 88, 255, 0.2) 0%, transparent 60%),
++    radial-gradient(circle at 85% 60%, rgba(0, 240, 255, 0.06) 0%, transparent 40%);
++  background-attachment: fixed;
++  font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
++  font-size: 17px;
++  line-height: 1.65;
+ }
+ 
+-a {
+-  color: inherit;
+-  text-decoration: none;
++a { color: inherit; text-decoration: none; }
++a:hover { color: var(--cyan); }
++
++h1, h2, h3, h4, p { margin-top: 0; }
++ul { margin: 0; padding: 0; list-style: none; }
++li { padding: 0; }
++button { cursor: pointer; font: inherit; border: 0; background: none; padding: 0; color: inherit; }
++figure { margin: 0; }
++
++code { font-family: var(--mono); color: #c7f8ff; }
++pre { margin: 0; }
++
++/* ---- Typography ---- */
++h1 {
++  max-width: 100%;
++  margin: 28px 0 22px;
++  font-size: clamp(24px, 6.5vw, 100px);
++  line-height: 1.1;
++  font-weight: 800;
++  letter-spacing: -0.04em;
+ }
+ 
+-.home-shell {
+-  min-height: 100vh;
+-  overflow: hidden;
++.hero-line {
++  display: block;
++  white-space: nowrap;
+ }
+ 
+-.home-nav {
+-  position: fixed;
+-  z-index: 20;
+-  top: 0;
+-  left: 0;
+-  right: 0;
+-  display: grid;
+-  grid-template-columns: auto minmax(0, 1fr) auto;
++h2 {
++  margin-bottom: 16px;
++  font-size: clamp(36px, 5.5vw, 64px);
++  line-height: 1.1;
++  letter-spacing: -0.03em;
++  font-weight: 800;
++}
++
++.single-line-title {
++  white-space: nowrap;
++  font-size: clamp(16px, 4vw, 64px);
++}
++
++h3 {
++  font-size: clamp(17px, 2.2vw, 21px);
++  line-height: 1.3;
++  font-weight: 900;
++  letter-spacing: -0.025em;
++  margin-bottom: 10px;
++}
++
++/* ---- Eyebrow ---- */
++.eyebrow {
++  color: var(--cyan);
++  font-family: var(--mono);
++  font-size: 11px;
++  font-weight: 950;
++  letter-spacing: 0.14em;
++  text-transform: uppercase;
++  margin-bottom: 10px;
++}
++
++/* Larger eyebrow in section headers */
++.section-header .eyebrow,
++.audience-card .card-eyebrow {
++  font-size: 13px;
++  letter-spacing: 0.16em;
++  margin-bottom: 14px;
++}
++
++/* ---- Section header ---- */
++.section-header {
++  text-align: center;
++  max-width: 720px;
++  margin: 0 auto 60px;
++}
++
++.section-header h2 {
++  margin-bottom: 18px;
++}
++
++.section-sub {
++  color: var(--muted);
++  font-size: clamp(16px, 1.8vw, 19px);
++  line-height: 1.65;
++  margin-bottom: 0;
++  max-width: 560px;
++  margin-left: auto;
++  margin-right: auto;
++}
++
++/* ---- Section containers ---- */
++.audience-section,
++.how-section,
++.showcase-section,
++.features-section,
++.dev-section,
++.trust-section,
++.pricing-section,
++.faq-section,
++.final-cta-section {
++  width: var(--container);
++  margin: 0 auto;
++  padding: var(--section-y) 0;
++}
++
++/* ---- Buttons ---- */
++.nav-button,
++.launch-cta,
++.docs-cta,
++.audience-cta {
++  display: inline-flex;
+   align-items: center;
+-  gap: 18px;
+-  min-height: 72px;
++  justify-content: center;
++  border-radius: 11px;
++  font-weight: 950;
++  white-space: nowrap;
++  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
++  cursor: pointer;
++}
++
++.nav-button.secondary,
++.docs-cta,
++.audience-cta-secondary {
++  color: var(--ink);
++  background: rgba(255, 255, 255, 0.03);
++  backdrop-filter: blur(12px);
++  -webkit-backdrop-filter: blur(12px);
++  border: 1px solid var(--line-strong);
++}
++
++.nav-button.primary,
++.launch-cta,
++.audience-cta-primary {
++  color: #000000;
++  background: linear-gradient(135deg, var(--cyan), #00d4ff, var(--green));
++  border: 1px solid rgba(255, 255, 255, 0.5);
++  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.2);
++}
++
++.nav-button:hover,
++.launch-cta:hover,
++.docs-cta:hover,
++.audience-cta:hover {
++  opacity: 1;
++  transform: translateY(-2px);
++  box-shadow: 0 12px 32px rgba(0, 240, 255, 0.35);
++  border-color: rgba(255, 255, 255, 0.6);
++}
++
++.nav-button.secondary:hover,
++.docs-cta:hover {
++  color: var(--ink);
++}
++
++.launch-cta:hover,
++.audience-cta-primary:hover {
++  color: #07111d;
++}
++
++.nav-button {
++  min-height: 40px;
++  padding: 0 17px;
++  font-size: 14px;
++}
++
++.launch-cta,
++.docs-cta {
++  min-width: 190px;
++  min-height: 54px;
+   padding: 0 24px;
+-  background: rgba(7, 17, 29, 0.82);
+-  border-bottom: 1px solid var(--line);
+-  backdrop-filter: blur(18px);
++  font-size: 16px;
+ }
+ 
+-.home-brand,
+-.nav-actions,
+-.hero-actions,
+-.hero-stats,
+-.marquee-track {
++.audience-cta {
++  min-height: 48px;
++  padding: 0 22px;
++  font-size: 15px;
++  align-self: flex-start;
++}
++
++/* ---- Reveal animation ---- */
++.reveal {
++  opacity: 0;
++  transform: translateY(22px);
++  transition: opacity 0.5s ease, transform 0.5s ease;
++}
++
++.reveal.is-visible {
++  opacity: 1;
++  transform: translateY(0);
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .reveal { opacity: 1; transform: none; transition: none; }
++}
++
++/* ====================================================
++   1. NAVBAR
++   ==================================================== */
++.home-nav {
++  position: fixed;
++  z-index: 100;
++  top: 0; left: 0; right: 0;
+   display: flex;
+   align-items: center;
++  gap: 16px;
++  min-height: 72px;
++  padding: 0 28px;
++  background: rgba(7, 17, 29, 0.84);
++  border-bottom: 1px solid var(--line);
++  backdrop-filter: blur(20px);
++  -webkit-backdrop-filter: blur(20px);
+ }
+ 
+ .home-brand {
++  display: flex;
++  align-items: center;
+   gap: 10px;
+-  width: fit-content;
++  flex-shrink: 0;
+ }
+ 
+ .brand-symbol {
+@@ -83,6 +272,7 @@ a {
+   background: linear-gradient(145deg, var(--cyan) 0%, var(--blue) 58%, #71f4c4 100%);
+   box-shadow: 0 14px 30px rgba(53, 221, 255, 0.2);
+   overflow: hidden;
++  flex-shrink: 0;
+ }
+ 
+ .brand-symbol::before,
+@@ -94,28 +284,23 @@ a {
+ }
+ 
+ .brand-symbol::before {
+-  left: 9px;
+-  top: 7px;
+-  width: 4px;
+-  height: 18px;
++  left: 9px; top: 7px;
++  width: 4px; height: 18px;
+ }
+ 
+ .brand-symbol::after {
+-  left: 9px;
+-  top: 7px;
+-  width: 16px;
+-  height: 4px;
++  left: 9px; top: 7px;
++  width: 16px; height: 4px;
+   box-shadow: 0 7px 0 var(--bg);
+ }
+ 
+ .brand-word {
+-  font-size: 23px;
++  font-size: 22px;
+   font-weight: 950;
+   letter-spacing: -0.045em;
+ }
+ 
+-.testnet-pill,
+-.live-pill {
++.testnet-pill {
+   display: inline-flex;
+   align-items: center;
+   border-radius: 999px;
+@@ -123,9 +308,6 @@ a {
+   font-weight: 950;
+   letter-spacing: 0.12em;
+   text-transform: uppercase;
+-}
+-
+-.testnet-pill {
+   min-height: 22px;
+   padding: 0 8px;
+   color: #75f6ff;
+@@ -134,63 +316,159 @@ a {
+   font-size: 10px;
+ }
+ 
++/* Desktop nav links */
++.nav-links {
++  display: flex;
++  align-items: center;
++  gap: 4px;
++  flex: 1;
++  justify-content: center;
++}
++
++.nav-link {
++  padding: 7px 13px;
++  font-size: 14px;
++  font-weight: 700;
++  color: var(--muted);
++  border-radius: 8px;
++  transition: color 0.15s, background 0.15s;
++}
++
++.nav-link:hover {
++  color: var(--ink);
++  background: rgba(255, 255, 255, 0.06);
++}
++
++.nav-link.nav-link-active {
++  color: var(--cyan);
++  background: rgba(53, 221, 255, 0.08);
++}
++
+ .nav-actions {
+-  grid-column: 3;
+-  justify-content: flex-end;
++  display: flex;
++  align-items: center;
+   gap: 10px;
++  flex-shrink: 0;
+ }
+ 
+-.nav-button,
+-.launch-cta,
+-.docs-cta {
+-  display: inline-flex;
+-  align-items: center;
++/* Hamburger button */
++.hamburger {
++  display: none;
++  flex-direction: column;
+   justify-content: center;
+-  border-radius: 11px;
+-  font-weight: 950;
+-  white-space: nowrap;
++  align-items: center;
++  gap: 5px;
++  width: 40px;
++  height: 40px;
++  border-radius: 10px;
++  border: 1px solid var(--line-strong);
++  background: rgba(24, 41, 66, 0.5);
++  flex-shrink: 0;
++  transition: background 0.15s;
+ }
+ 
+-.nav-button {
+-  min-height: 40px;
+-  padding: 0 17px;
+-  font-size: 14px;
++.hamburger:hover { background: rgba(35, 58, 92, 0.7); }
++
++.hamburger span {
++  display: block;
++  width: 18px;
++  height: 2px;
++  background: var(--ink);
++  border-radius: 2px;
++  transition: transform 0.25s, opacity 0.25s;
+ }
+ 
+-.nav-button.secondary,
+-.docs-cta {
+-  color: #dce9ff;
+-  background: rgba(24, 41, 66, 0.62);
+-  border: 1px solid var(--line);
++.hamburger[aria-expanded="true"] span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
++.hamburger[aria-expanded="true"] span:nth-child(2) { opacity: 0; transform: scaleX(0); }
++.hamburger[aria-expanded="true"] span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
++
++/* ====================================================
++   Mobile menu
++   ==================================================== */
++.mobile-menu {
++  position: fixed;
++  inset: 72px 0 0;
++  z-index: 99;
++  background: rgba(5, 13, 24, 0.97);
++  backdrop-filter: blur(20px);
++  -webkit-backdrop-filter: blur(20px);
++  padding: 24px 28px 48px;
++  border-top: 1px solid var(--line);
++  overflow-y: auto;
++  opacity: 0;
++  pointer-events: none;
++  transition: opacity 0.2s;
++  display: flex;
++  flex-direction: column;
+ }
+ 
+-.nav-button.primary,
+-.launch-cta {
++.mobile-menu.is-open {
++  opacity: 1;
++  pointer-events: auto;
++}
++
++.mobile-nav {
++  display: flex;
++  flex-direction: column;
++  gap: 0;
++}
++
++.mobile-link {
++  display: block;
++  padding: 18px 0;
++  font-size: 22px;
++  font-weight: 900;
++  letter-spacing: -0.03em;
++  border-bottom: 1px solid var(--line);
++  transition: color 0.15s;
++}
++
++.mobile-link:hover { color: var(--cyan); }
++
++.mobile-cta-btn {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  margin-top: 28px;
++  min-height: 56px;
++  padding: 0 28px;
++  border-radius: 14px;
++  font-size: 18px;
++  font-weight: 950;
+   color: #07111d;
+   background: linear-gradient(135deg, var(--cyan), var(--blue));
+   border: 1px solid rgba(170, 218, 255, 0.72);
++  transition: opacity 0.15s;
++  align-self: flex-start;
+ }
+ 
++.mobile-cta-btn:hover { opacity: 0.88; color: #07111d; }
++
++/* ====================================================
++   2. HERO
++   ==================================================== */
+ .hero-section {
+   position: relative;
+   display: grid;
+   justify-items: center;
+   min-height: 100svh;
+-  padding: 118px 24px 126px;
++  padding: 128px 24px 120px;
+   text-align: center;
+ }
+ 
+ .hero-section::before {
+   position: absolute;
+-  inset: 74px 0 0;
++  inset: -150px 0 0;
+   z-index: -1;
+   content: "";
+   background:
+-    linear-gradient(90deg, transparent, rgba(72, 121, 195, 0.1), transparent),
+-    radial-gradient(ellipse at center bottom, rgba(90, 196, 220, 0.26), transparent 52%);
++    radial-gradient(ellipse at center top, rgba(0, 240, 255, 0.12), transparent 45%),
++    radial-gradient(circle at 50% 30%, rgba(43, 88, 255, 0.1), transparent 50%);
+ }
+ 
+ .live-pill {
++  display: inline-flex;
++  align-items: center;
+   gap: 9px;
+   width: fit-content;
+   min-height: 32px;
+@@ -200,33 +478,24 @@ a {
+   background: rgba(24, 81, 95, 0.4);
+   border: 1px solid rgba(53, 221, 255, 0.36);
+   font-size: 11px;
++  border-radius: 999px;
++  font-family: var(--mono);
++  font-weight: 950;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
+ }
+ 
+-.live-pill span {
++.live-dot {
++  display: inline-block;
+   width: 8px;
+   height: 8px;
+   background: var(--green);
+   border-radius: 999px;
+   box-shadow: 0 0 14px rgba(114, 246, 166, 0.82);
++  flex-shrink: 0;
+ }
+ 
+-h1,
+-h2,
+-h3,
+-p {
+-  margin-top: 0;
+-}
+-
+-h1 {
+-  max-width: 980px;
+-  margin: 30px 0 22px;
+-  font-size: clamp(56px, 9vw, 116px);
+-  line-height: 0.95;
+-  font-weight: 950;
+-  letter-spacing: -0.07em;
+-}
+-
+-h1 span {
++.hero-gradient {
+   background: linear-gradient(90deg, var(--cyan), var(--blue), var(--warm));
+   -webkit-background-clip: text;
+   background-clip: text;
+@@ -234,53 +503,60 @@ h1 span {
+ }
+ 
+ .hero-copy {
+-  max-width: 650px;
+-  margin-bottom: 34px;
++  max-width: 620px;
++  margin-bottom: 36px;
+   color: var(--muted);
+-  font-size: clamp(17px, 2vw, 22px);
+-  line-height: 1.55;
++  font-size: clamp(17px, 2vw, 21px);
++  line-height: 1.6;
+ }
+ 
+ .hero-actions {
++  display: flex;
++  align-items: center;
+   justify-content: center;
++  flex-wrap: wrap;
+   gap: 12px;
+-  margin-bottom: 64px;
++  margin-bottom: 22px;
+ }
+ 
+-.launch-cta,
+-.docs-cta {
+-  min-width: 190px;
+-  min-height: 54px;
+-  padding: 0 24px;
+-  font-size: 16px;
++.hero-micro {
++  color: var(--muted-2);
++  font-size: 13px;
++  font-weight: 600;
++  margin-bottom: 36px;
+ }
+ 
+-.hero-stats {
+-  width: min(760px, 100%);
++.trust-strip {
++  display: flex;
++  align-items: center;
++  flex-wrap: wrap;
+   justify-content: center;
+-  gap: 0;
+-  padding-top: 30px;
+-  border-top: 1px solid rgba(184, 218, 255, 0.22);
++  padding-top: 28px;
++  border-top: 1px solid rgba(184, 218, 255, 0.18);
++  width: min(780px, 100%);
+ }
+ 
+-.hero-stats article {
+-  flex: 1;
+-  display: grid;
+-  gap: 7px;
+-  min-width: 0;
+-}
+-
+-.hero-stats strong {
+-  font-size: clamp(22px, 3vw, 34px);
+-  line-height: 1;
++.trust-strip span {
++  position: relative;
++  padding: 6px 22px;
++  color: var(--muted);
++  font-size: 13px;
++  font-weight: 700;
++  letter-spacing: 0.01em;
+ }
+ 
+-.hero-stats span {
+-  color: var(--muted);
+-  font-size: 12px;
+-  font-weight: 800;
++.trust-strip span + span::before {
++  content: "";
++  position: absolute;
++  left: 0; top: 50%;
++  transform: translateY(-50%);
++  width: 1px; height: 14px;
++  background: var(--line-strong);
+ }
+ 
++/* ====================================================
++   Marquee band
++   ==================================================== */
+ .marquee-band {
+   overflow: hidden;
+   border-top: 1px solid var(--line);
+@@ -289,6 +565,8 @@ h1 span {
+ }
+ 
+ .marquee-track {
++  display: flex;
++  align-items: center;
+   width: max-content;
+   min-height: 118px;
+   gap: 70px;
+@@ -306,172 +584,844 @@ h1 span {
+ 
+ .marquee-track span::after {
+   position: absolute;
+-  top: 50%;
+-  right: -42px;
+-  width: 4px;
+-  height: 4px;
++  top: 50%; right: -42px;
++  width: 4px; height: 4px;
+   background: rgba(184, 218, 255, 0.42);
+   border-radius: 999px;
+   content: "";
+ }
+ 
+ @keyframes marquee {
+-  from {
+-    transform: translateX(0);
+-  }
+-
+-  to {
+-    transform: translateX(-50%);
+-  }
++  from { transform: translateX(0); }
++  to   { transform: translateX(-50%); }
+ }
+ 
+-.product-section,
+-.feature-grid {
+-  width: min(1180px, calc(100% - 48px));
+-  margin: 0 auto;
++/* ====================================================
++   3. AUDIENCE SPLIT
++   ==================================================== */
++.audience-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 20px;
+ }
+ 
+-.product-section {
+-  display: grid;
+-  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+-  gap: 28px;
+-  padding: 86px 0 28px;
++.audience-card {
++  display: flex;
++  flex-direction: column;
++  gap: 18px;
++  padding: 32px 28px;
++  background: var(--panel);
++  backdrop-filter: blur(24px);
++  -webkit-backdrop-filter: blur(24px);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-lg);
++  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.3s, box-shadow 0.3s;
+ }
+ 
+-.section-copy {
+-  align-self: start;
+-  position: sticky;
+-  top: 96px;
++.audience-card:hover {
++  transform: translateY(-6px);
++  border-color: rgba(0, 240, 255, 0.4);
++  box-shadow: 0 12px 40px rgba(0, 240, 255, 0.12), inset 0 0 0 1px rgba(0, 240, 255, 0.2);
+ }
+ 
+-.eyebrow {
++.card-eyebrow {
+   color: var(--cyan);
+   font-family: var(--mono);
+   font-size: 11px;
+   font-weight: 950;
+   letter-spacing: 0.14em;
+   text-transform: uppercase;
++  margin-bottom: 0;
+ }
+ 
+-h2 {
+-  margin-bottom: 16px;
+-  font-size: clamp(34px, 5vw, 58px);
+-  line-height: 0.96;
+-  letter-spacing: -0.055em;
++.audience-card h3 {
++  font-size: clamp(17px, 2vw, 21px);
++  line-height: 1.35;
++  margin-bottom: 0;
++  color: var(--ink);
++}
++
++.card-list {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++  flex: 1;
+ }
+ 
+-.section-copy p:not(.eyebrow),
+-.workflow-panel p,
+-.feature-grid p {
++.card-list li {
++  position: relative;
++  padding-left: 18px;
+   color: var(--muted);
+-  line-height: 1.6;
++  font-size: 15px;
++  line-height: 1.55;
++}
++
++.card-list li::before {
++  content: "";
++  position: absolute;
++  left: 0; top: 9px;
++  width: 6px; height: 6px;
++  border-radius: 50%;
++  background: var(--cyan);
++  opacity: 0.65;
+ }
+ 
+-.workflow-panel {
++/* ====================================================
++   4. HOW IT WORKS
++   ==================================================== */
++.how-grid {
+   display: grid;
++  grid-template-columns: repeat(4, minmax(0, 1fr));
+   gap: 14px;
+ }
+ 
+-.workflow-panel article,
+-.feature-grid article {
++.how-card {
++  display: flex;
++  flex-direction: column;
++  gap: 14px;
++  padding: 24px 20px;
+   background: var(--panel);
+   border: 1px solid var(--line);
+-  border-radius: 18px;
++  border-radius: var(--radius-md);
++  transition: border-color 0.2s;
+ }
+ 
+-.workflow-panel article {
+-  display: grid;
+-  grid-template-columns: 56px minmax(0, 1fr);
+-  gap: 6px 18px;
+-  padding: 18px;
+-}
++.how-card:hover { border-color: rgba(53, 221, 255, 0.25); }
+ 
+-.workflow-panel span {
+-  grid-row: span 2;
++.step-num {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+-  width: 46px;
+-  height: 46px;
+-  color: #07111d;
++  width: 44px;
++  height: 44px;
++  border-radius: 12px;
+   background: linear-gradient(135deg, var(--cyan), var(--blue));
+-  border-radius: 14px;
++  color: #07111d;
+   font-family: var(--mono);
++  font-size: 13px;
+   font-weight: 950;
++  letter-spacing: 0.04em;
++  flex-shrink: 0;
+ }
+ 
+-.workflow-panel strong,
+-.feature-grid h3 {
+-  font-size: 20px;
++.how-card strong {
++  display: block;
++  font-size: 16px;
++  font-weight: 900;
++  letter-spacing: -0.02em;
++  color: var(--ink);
+ }
+ 
+-.workflow-panel p {
++.how-card p {
++  color: var(--muted);
++  font-size: 14px;
++  line-height: 1.65;
+   margin-bottom: 0;
++  flex: 1;
+ }
+ 
+-code {
+-  color: #c7f8ff;
+-  font-family: var(--mono);
+-}
+-
+-.feature-grid {
++/* ====================================================
++   5. PRODUCT SHOWCASE
++   ==================================================== */
++.showcase-grid {
+   display: grid;
+-  grid-template-columns: repeat(3, minmax(0, 1fr));
+-  gap: 16px;
+-  padding: 24px 0 90px;
++  grid-template-columns: repeat(4, minmax(0, 1fr));
++  gap: 20px;
++  align-items: stretch;
+ }
+ 
+-.feature-grid article {
+-  min-height: 230px;
+-  padding: 22px;
+-}
+-
+-.feature-grid h3 {
+-  margin-bottom: 12px;
++.mockup-frame {
++  display: flex;
++  flex-direction: column;
++  gap: 12px;
++  height: 100%;
+ }
+ 
+-@media (max-width: 980px) {
+-  .home-nav {
+-    grid-template-columns: 1fr;
+-    gap: 12px;
+-    padding: 14px 18px;
++.mockup-caption {
++  font-size: 12px;
++  font-weight: 700;
++  color: var(--muted-2);
++  letter-spacing: 0.05em;
++  text-transform: uppercase;
++  text-align: center;
++}
++
++.mockup-window {
++  background: rgba(8, 18, 34, 0.92);
++  border: 1px solid var(--line-strong);
++  border-radius: var(--radius-md);
++  overflow: hidden;
++  flex: 1;
++  display: flex;
++  flex-direction: column;
++}
++
++.mockup-titlebar {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  padding: 10px 14px;
++  background: rgba(255, 255, 255, 0.035);
++  border-bottom: 1px solid var(--line);
++}
++
++.mock-dot {
++  width: 10px;
++  height: 10px;
++  border-radius: 50%;
++  flex-shrink: 0;
++}
++
++.mock-dot-red   { background: rgba(255, 88, 88, 0.65); }
++.mock-dot-amber { background: rgba(255, 190, 50, 0.65); }
++.mock-dot-green { background: rgba(80, 210, 80, 0.65); }
++
++.mock-win-title {
++  font-size: 12px;
++  font-weight: 700;
++  color: var(--muted-2);
++  margin-left: 8px;
++}
++
++.mockup-body {
++  display: flex;
++  flex-direction: column;
++  gap: 13px;
++  padding: 18px 16px;
++  flex: 1;
++}
++
++.mock-field {
++  display: flex;
++  flex-direction: column;
++  gap: 5px;
++}
++
++.mock-field-row {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 10px;
++}
++
++.mock-label {
++  font-size: 11px;
++  font-weight: 700;
++  color: var(--muted-2);
++  letter-spacing: 0.03em;
++}
++
++.mock-input {
++  height: 30px;
++  border-radius: 7px;
++  background: rgba(255, 255, 255, 0.05);
++  border: 1px solid var(--line-strong);
++  display: flex;
++  align-items: center;
++  padding: 0 10px;
++  font-size: 13px;
++  font-family: var(--mono);
++  color: var(--muted);
++}
++
++.mock-input-accent {
++  border-color: rgba(53, 221, 255, 0.45);
++  color: var(--cyan);
++  font-weight: 700;
++}
++
++.mock-textarea {
++  height: 52px;
++  border-radius: 7px;
++  background: rgba(255, 255, 255, 0.04);
++  border: 1px solid var(--line);
++}
++
++.mock-actions {
++  display: flex;
++  gap: 8px;
++  margin-top: auto;
++}
++
++.mock-btn-primary {
++  flex: 1;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  height: 34px;
++  border-radius: 8px;
++  background: linear-gradient(135deg, var(--cyan), var(--blue));
++  color: #07111d;
++  font-size: 12px;
++  font-weight: 950;
++}
++
++.mock-btn-secondary {
++  flex: 1;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  height: 34px;
++  border-radius: 8px;
++  background: rgba(255, 255, 255, 0.05);
++  border: 1px solid var(--line-strong);
++  color: var(--muted);
++  font-size: 11px;
++  font-weight: 700;
++}
++
++/* Pay page mockup */
++.mockup-pay-body {
++  align-items: center;
++  text-align: center;
++}
++
++.mock-amount-display {
++  display: flex;
++  flex-direction: column;
++  gap: 3px;
++  text-align: center;
++}
++
++.mock-amt-label {
++  font-size: 11px;
++  color: var(--muted-2);
++  font-weight: 700;
++  letter-spacing: 0.04em;
++  text-transform: uppercase;
++}
++
++.mock-amt-value {
++  font-size: 24px;
++  font-weight: 950;
++  color: var(--cyan);
++  letter-spacing: -0.04em;
++  line-height: 1;
++}
++
++.mock-qr-zone {
++  display: flex;
++  justify-content: center;
++}
++
++.mock-qr-frame {
++  width: 86px;
++  height: 86px;
++  border-radius: 10px;
++  border: 2px solid var(--line-strong);
++  background: rgba(255, 255, 255, 0.03);
++  display: flex;
++  align-items: center;
++  justify-content: center;
++}
++
++.mock-qr-label {
++  font-size: 10px;
++  font-weight: 700;
++  color: var(--muted-2);
++  letter-spacing: 0.06em;
++  text-transform: uppercase;
++}
++
++.mock-detail-row {
++  display: flex;
++  justify-content: space-between;
++  align-items: center;
++  gap: 8px;
++  font-size: 12px;
++  width: 100%;
++}
++
++.mock-detail-row > span:first-child {
++  color: var(--muted-2);
++  font-weight: 600;
++  flex-shrink: 0;
++}
++
++.mock-detail-row code {
++  font-size: 11px;
++  color: #c7f8ff;
++}
++
++.mockup-pay-body .mock-btn-primary {
++  width: 100%;
++}
++
++/* Receipt mockup */
++.mock-paid-badge {
++  padding: 7px 10px;
++  border-radius: 8px;
++  background: rgba(114, 246, 166, 0.11);
++  border: 1px solid rgba(114, 246, 166, 0.28);
++  color: var(--green);
++  font-size: 12px;
++  font-weight: 700;
++  text-align: center;
++}
++
++.mock-status-paid {
++  color: var(--green);
++  font-weight: 700;
++  font-size: 12px;
++}
++
++/* ====================================================
++   6. FEATURES GRID
++   ==================================================== */
++.features-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 16px;
++}
++
++.feature-card {
++  padding: 26px 24px;
++  background: var(--panel);
++  backdrop-filter: blur(16px);
++  -webkit-backdrop-filter: blur(16px);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-lg);
++  transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), border-color 0.3s, box-shadow 0.3s;
++}
++
++.feature-card:hover {
++  transform: translateY(-4px);
++  border-color: rgba(43, 88, 255, 0.5);
++  box-shadow: 0 8px 32px rgba(43, 88, 255, 0.15), inset 0 0 0 1px rgba(43, 88, 255, 0.2);
++}
++
++.feature-card .eyebrow { margin-bottom: 8px; }
++
++.feature-card h3 { margin-bottom: 10px; }
++
++.feature-card p {
++  color: var(--muted);
++  font-size: 15px;
++  line-height: 1.65;
++  margin-bottom: 0;
++}
++
++/* ====================================================
++   7. FOR DEVELOPERS
++   ==================================================== */
++.dev-section {
++  border-top: 1px solid var(--line);
++  border-bottom: 1px solid var(--line);
++}
++
++.dev-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 20px;
++  margin-bottom: 32px;
++}
++
++#dev-title {
++  white-space: nowrap;
++  font-size: clamp(12px, 4vw, 56px);
++  letter-spacing: -0.04em;
++}
++
++.dev-code-block {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++}
++
++.code-label {
++  font-size: 12px;
++  font-weight: 700;
++  color: var(--muted-2);
++  letter-spacing: 0.06em;
++  text-transform: uppercase;
++  margin-bottom: 0;
++}
++
++.dev-code-block pre {
++  background: rgba(5, 12, 24, 0.88);
++  border: 1px solid var(--line-strong);
++  border-radius: var(--radius-md);
++  padding: 20px 18px;
++  overflow-x: auto;
++  font-size: 13px;
++  line-height: 1.7;
++  flex: 1;
++}
++
++.dev-code-block pre code {
++  color: #c7f8ff;
++  font-size: inherit;
++}
++
++.dev-actions {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  gap: 12px;
++  flex-wrap: wrap;
++}
++
++/* ====================================================
++   8. TRUST AND SECURITY
++   ==================================================== */
++.trust-grid {
++  display: grid;
++  grid-template-columns: repeat(4, minmax(0, 1fr));
++  gap: 16px;
++}
++
++.trust-card {
++  display: flex;
++  flex-direction: column;
++  gap: 12px;
++  padding: 24px 20px;
++  background: var(--panel);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-lg);
++  transition: border-color 0.2s;
++}
++
++.trust-card:hover { border-color: rgba(114, 246, 166, 0.25); }
++
++.trust-card strong {
++  display: block;
++  font-size: 16px;
++  font-weight: 900;
++  letter-spacing: -0.02em;
++}
++
++.trust-card p {
++  color: var(--muted);
++  font-size: 14px;
++  line-height: 1.65;
++  margin-bottom: 0;
++  flex: 1;
++}
++
++/* ====================================================
++   9. PRICING
++   ==================================================== */
++.pricing-grid {
++  display: grid;
++  grid-template-columns: repeat(2, minmax(0, 1fr));
++  gap: 20px;
++  max-width: 700px;
++  margin: 0 auto;
++}
++
++.pricing-card {
++  display: flex;
++  flex-direction: column;
++  gap: 14px;
++  padding: 32px 28px;
++  border-radius: var(--radius-lg);
++}
++
++.pricing-card-active {
++  background: rgba(18, 36, 62, 0.85);
++  border: 1px solid rgba(53, 221, 255, 0.35);
++  box-shadow: 0 0 48px rgba(53, 221, 255, 0.07);
++}
++
++.pricing-card-future {
++  background: var(--panel);
++  border: 1px solid var(--line);
++}
++
++.pricing-tier {
++  font-family: var(--mono);
++  font-size: 11px;
++  font-weight: 950;
++  letter-spacing: 0.16em;
++  text-transform: uppercase;
++  color: var(--cyan);
++  margin-bottom: 0;
++}
++
++.pricing-card-future .pricing-tier { color: var(--muted-2); }
++
++.pricing-price {
++  font-size: clamp(38px, 5vw, 54px);
++  font-weight: 950;
++  letter-spacing: -0.06em;
++  line-height: 1;
++  margin-bottom: 0;
++}
++
++.pricing-card-future .pricing-price { color: var(--muted-2); }
++
++.pricing-note {
++  color: var(--muted-2);
++  font-size: 13px;
++  margin-bottom: 0;
++}
++
++.pricing-list {
++  display: flex;
++  flex-direction: column;
++  gap: 9px;
++  flex: 1;
++}
++
++.pricing-list li {
++  position: relative;
++  padding-left: 18px;
++  font-size: 14px;
++  color: var(--muted);
++  line-height: 1.5;
++}
++
++.pricing-list li::before {
++  content: "";
++  position: absolute;
++  left: 0; top: 8px;
++  width: 6px; height: 6px;
++  border-radius: 50%;
++  background: var(--green);
++  opacity: 0.8;
++}
++
++.pricing-card-future .pricing-list li::before {
++  background: var(--muted-2);
++  opacity: 0.45;
++}
++
++.pricing-soon {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 48px;
++  border-radius: 11px;
++  background: rgba(255, 255, 255, 0.04);
++  border: 1px solid var(--line-strong);
++  color: var(--muted-2);
++  font-size: 14px;
++  font-weight: 700;
++  letter-spacing: 0.03em;
++}
++
++/* ====================================================
++   10. FAQ
++   ==================================================== */
++.faq-list {
++  max-width: 720px;
++  margin: 0 auto;
++  display: flex;
++  flex-direction: column;
++  gap: 6px;
++}
++
++.faq-item {
++  border: 1px solid var(--line);
++  border-radius: var(--radius-md);
++  overflow: hidden;
++  transition: border-color 0.2s;
++}
++
++.faq-item:focus-within {
++  border-color: rgba(53, 221, 255, 0.3);
++}
++
++.faq-question {
++  width: 100%;
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 16px;
++  padding: 20px 22px;
++  text-align: left;
++  font-size: 16px;
++  font-weight: 800;
++  letter-spacing: -0.01em;
++  color: var(--ink);
++  background: var(--panel);
++  transition: background 0.15s;
++}
++
++.faq-question:hover { background: rgba(24, 44, 72, 0.75); }
++
++.faq-question::after {
++  content: "+";
++  font-size: 22px;
++  font-weight: 300;
++  color: var(--cyan);
++  flex-shrink: 0;
++  transition: transform 0.25s;
++  line-height: 1;
++}
++
++.faq-question[aria-expanded="true"]::after {
++  transform: rotate(45deg);
++}
++
++.faq-answer {
++  padding: 0 22px 20px;
++  background: var(--panel);
++}
++
++.faq-answer[hidden] { display: none; }
++
++.faq-answer p {
++  color: var(--muted);
++  font-size: 15px;
++  line-height: 1.7;
++  margin-bottom: 0;
++  padding-top: 4px;
++}
++
++/* ====================================================
++   11. FINAL CTA
++   ==================================================== */
++.final-cta-section {
++  text-align: center;
++  background: rgba(12, 24, 44, 0.55);
++  border: 1px solid var(--line);
++  border-radius: var(--radius-lg);
++  padding: 80px 40px;
++  position: relative;
++  overflow: hidden;
++}
++
++.final-cta-section::before {
++  content: "";
++  position: absolute;
++  inset: 0;
++  background: radial-gradient(ellipse at center, rgba(53, 221, 255, 0.06), transparent 65%);
++  pointer-events: none;
++}
++
++.final-cta-section h2 { margin-bottom: 16px; }
++
++.final-cta-sub {
++  color: var(--muted);
++  font-size: clamp(16px, 1.8vw, 19px);
++  margin-bottom: 36px;
++}
++
++/* ====================================================
++   12. FOOTER
++   ==================================================== */
++.home-footer {
++  margin-top: 0;
++  border-top: 1px solid var(--line);
++  background: rgba(4, 11, 20, 0.7);
++}
++
++.footer-inner {
++  display: grid;
++  grid-template-columns: auto 1fr;
++  gap: 48px;
++  align-items: start;
++  width: var(--container);
++  margin: 0 auto;
++  padding: 56px 0 40px;
++}
++
++.footer-brand {
++  display: flex;
++  flex-direction: column;
++  gap: 14px;
++  min-width: 200px;
++}
++
++.footer-brand-link {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++}
++
++.footer-tagline {
++  color: var(--muted-2);
++  font-size: 14px;
++  max-width: 210px;
++  line-height: 1.6;
++  margin-bottom: 0;
++}
++
++.footer-nav {
++  display: grid;
++  grid-template-columns: repeat(3, minmax(0, 1fr));
++  gap: 20px;
++  justify-self: end;
++}
++
++.footer-col {
++  display: flex;
++  flex-direction: column;
++  gap: 10px;
++}
++
++.footer-col-title {
++  font-size: 11px;
++  font-weight: 950;
++  letter-spacing: 0.12em;
++  text-transform: uppercase;
++  color: var(--muted-2);
++  margin-bottom: 4px;
++}
++
++.footer-col a {
++  font-size: 14px;
++  color: var(--muted);
++  transition: color 0.15s;
++}
++
++.footer-col a:hover { color: var(--cyan); }
++
++.footer-bottom {
++  width: var(--container);
++  margin: 0 auto;
++  padding: 20px 0 32px;
++  border-top: 1px solid var(--line);
++  display: flex;
++  gap: 24px;
++  flex-wrap: wrap;
++}
++
++.footer-bottom p {
++  color: var(--muted-2);
++  font-size: 13px;
++  margin-bottom: 0;
++}
++
++/* ====================================================
++   RESPONSIVE ΓÇö Tablet (640px ΓÇô 1024px)
++   ==================================================== */
++@media (max-width: 1024px) {
++  .nav-links { display: none; }
++  .hamburger { display: flex; }
++  .nav-actions .nav-button.secondary { display: none; }
++
++  .how-grid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
+   }
+ 
+-  .nav-actions {
+-    justify-content: flex-start;
+-    overflow: auto;
++  .trust-grid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
+   }
+ 
+-  .hero-section {
+-    padding-top: 188px;
++  .showcase-grid {
++    grid-template-columns: repeat(2, minmax(0, 1fr));
+   }
+ 
+-  .product-section,
+-  .feature-grid {
++  .footer-inner {
+     grid-template-columns: 1fr;
++    gap: 32px;
+   }
+ 
+-  .section-copy {
+-    position: static;
+-  }
++  .footer-nav { justify-self: start; }
+ }
+ 
++/* ====================================================
++   RESPONSIVE ΓÇö Mobile (< 640px)
++   ==================================================== */
+ @media (max-width: 640px) {
+-  .home-brand {
+-    flex-wrap: wrap;
+-  }
++  :root { --section-y: 56px; }
+ 
+-  .hero-section {
+-    align-content: start;
+-    padding: 180px 18px 84px;
+-  }
++  .home-nav { padding: 0 18px; min-height: 64px; }
+ 
+-  h1 {
+-    font-size: 54px;
+-  }
++  .hero-section { padding: 116px 18px 80px; }
+ 
+-  .hero-actions,
+-  .hero-stats {
++  .hero-actions {
+     display: grid;
+     width: 100%;
+   }
+@@ -479,11 +1429,42 @@ code {
+   .launch-cta,
+   .docs-cta {
+     width: 100%;
++    min-width: 0;
+   }
+ 
+-  .hero-stats {
+-    grid-template-columns: repeat(2, minmax(0, 1fr));
+-    row-gap: 24px;
++  .trust-strip {
++    gap: 0;
++  }
++
++  .trust-strip span {
++    padding: 6px 14px;
++    font-size: 12px;
++  }
++
++  .audience-grid,
++  .how-grid,
++  .showcase-grid,
++  .features-grid,
++  .dev-grid,
++  .trust-grid,
++  .pricing-grid {
++    grid-template-columns: 1fr;
++  }
++
++  .final-cta-section { padding: 48px 20px; }
++
++  .final-cta-section .hero-actions {
++    display: grid;
++    width: 100%;
++  }
++
++  .footer-nav {
++    grid-template-columns: 1fr 1fr;
++  }
++
++  .footer-bottom {
++    flex-direction: column;
++    gap: 6px;
+   }
+ 
+   .marquee-track {
+@@ -491,8 +1472,5 @@ code {
+     gap: 42px;
+   }
+ 
+-  .product-section,
+-  .feature-grid {
+-    width: calc(100% - 32px);
+-  }
++  .dev-grid { grid-template-columns: 1fr; }
+ }
+diff --git a/home.html b/home.html
+index 69ac556..408ea36 100644
+--- a/home.html
++++ b/home.html
+@@ -3,140 +3,621 @@
+   <head>
+     <meta charset="utf-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1" />
+-    <title>Fundline | USDC invoices and settlement</title>
++    <title>Fundline - USDC Invoicing and Direct Settlement</title>
++    <meta name="description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk. API-first for developers and AI agents." />
++
++    <!-- Open Graph -->
++    <meta property="og:title" content="Fundline - USDC Invoicing and Direct Settlement" />
++    <meta property="og:description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk." />
++    <meta property="og:image" content="/og-image.png" />
++    <meta property="og:url" content="https://fundline.xyz" />
++    <meta property="og:type" content="website" />
++    <meta property="og:site_name" content="Fundline" />
++    <meta name="twitter:card" content="summary_large_image" />
++    <meta name="twitter:title" content="Fundline - USDC Invoicing and Direct Settlement" />
++    <meta name="twitter:description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk." />
++    <meta name="twitter:image" content="/og-image.png" />
++    <meta name="twitter:image" content="/og-image.png" />
++
++    <link rel="preconnect" href="https://fonts.googleapis.com">
++    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
++    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+     <link rel="stylesheet" href="/home.css" />
+   </head>
+   <body>
+-    <main class="home-shell">
+-      <header class="home-nav">
+-        <a class="home-brand" href="/" aria-label="Fundline home">
+-          <span class="brand-symbol" aria-hidden="true"></span>
+-          <span class="brand-word">Fundline</span>
+-          <span class="testnet-pill">TESTNET</span>
+-        </a>
+-        <div class="nav-actions">
+-          <a class="nav-button secondary" href="/docs.html">Docs</a>
+-          <a class="nav-button primary" href="/app.html">Launch App</a>
+-        </div>
+-      </header>
+-
+-      <section class="hero-section">
+-        <div class="live-pill"><span></span> PaymentRouter live on Arc Testnet</div>
+-        <h1>
+-          USDC invoices.
+-          <br />
+-          Paid directly.
+-          <br />
+-          <span>No escrow.</span>
++
++    <!-- =============================================
++         1. NAVBAR
++         ============================================= -->
++    <header class="home-nav" role="banner">
++      <a class="home-brand" href="/" aria-label="Fundline home">
++        <span class="brand-symbol" aria-hidden="true"></span>
++        <span class="brand-word">Fundline</span>
++        <span class="testnet-pill">TESTNET</span>
++      </a>
++
++      <nav class="nav-links" aria-label="Primary navigation">
++        <a href="#product" class="nav-link">Product</a>
++        <a href="#developers" class="nav-link">Developers</a>
++        <a href="/docs" class="nav-link">Docs</a>
++        <a href="#pricing" class="nav-link">Pricing</a>
++      </nav>
++
++      <div class="nav-actions">
++        <a class="nav-button secondary" href="/docs">Docs</a>
++        <a class="nav-button primary" href="/app" id="nav-cta">Create invoice</a>
++      </div>
++
++      <button
++        class="hamburger"
++        id="hamburger"
++        type="button"
++        aria-label="Open navigation menu"
++        aria-expanded="false"
++        aria-controls="mobile-menu"
++      >
++        <span></span>
++        <span></span>
++        <span></span>
++      </button>
++    </header>
++
++    <!-- Mobile menu -->
++    <div class="mobile-menu" id="mobile-menu" aria-hidden="true" role="dialog" aria-label="Mobile navigation">
++      <nav class="mobile-nav">
++        <a href="#product" class="mobile-link">Product</a>
++        <a href="#developers" class="mobile-link">Developers</a>
++        <a href="/docs" class="mobile-link">Docs</a>
++        <a href="#pricing" class="mobile-link">Pricing</a>
++        <a class="mobile-cta-btn" href="/app" id="mobile-cta">Create invoice</a>
++      </nav>
++    </div>
++
++    <main>
++
++      <!-- =============================================
++           2. HERO
++           ============================================= -->
++      <section class="hero-section" aria-labelledby="hero-title">
++        <div class="live-pill" id="live-pill">
++          <span class="live-dot" aria-hidden="true"></span>
++          PaymentRouter live on Arc Testnet
++        </div>
++
++        <h1 id="hero-title" class="reveal">
++          <span class="hero-line">Get paid in USDC in minutes</span>
++          <span class="hero-line hero-gradient">No escrow</span>
++          <span class="hero-line hero-gradient">No custody risk</span>
+         </h1>
+-        <p class="hero-copy">
+-          Create professional invoices, send a public payment link, let clients pay USDC on Arc, then verify the
+-          transaction, send alerts and issue receipts. The settlement pilot prepares native USDC movement from
+-          Sepolia or Base Sepolia into Arc without wrapped bridge assets.
++
++        <p class="hero-copy reveal">
++          Create professional invoices and get paid directly to your wallet
+         </p>
+-        <div class="hero-actions">
+-          <a class="launch-cta" href="/app.html">Create invoice</a>
+-          <a class="docs-cta" href="/docs.html">Read docs</a>
++
++        <div class="hero-actions reveal">
++          <a class="launch-cta" href="/app" id="hero-cta-primary">Create invoice</a>
++          <a class="docs-cta" href="/docs" id="hero-cta-secondary">Read docs</a>
+         </div>
+-        <div class="hero-stats" aria-label="Product highlights">
+-          <article>
+-            <strong>0%</strong>
+-            <span>Custody risk</span>
+-          </article>
+-          <article>
+-            <strong>USDC</strong>
+-            <span>Native payment</span>
+-          </article>
+-          <article>
+-            <strong>CCTP</strong>
+-            <span>Native bridge</span>
+-          </article>
+-          <article>
+-            <strong>API</strong>
+-            <span>Agent ready</span>
+-          </article>
++
++        <p class="hero-micro">
++          No signup needed &nbsp;&middot;&nbsp; No credit card &nbsp;&middot;&nbsp; Free on testnet
++        </p>
++
++        <div class="trust-strip" aria-label="Trust signals">
++          <span>Built on Circle USDC</span>
++          <span>Native CCTP bridge</span>
++          <span>0% custody risk</span>
++          <span>API-ready</span>
+         </div>
+       </section>
+ 
+-      <section class="marquee-band" aria-label="Fundline ecosystem">
++      <!-- Marquee band -->
++      <section class="marquee-band" aria-hidden="true">
+         <div class="marquee-track">
+           <span>Arc Testnet</span>
+           <span>Circle USDC</span>
+-          <span>CCTP Pilot</span>
+-          <span>Base Sepolia</span>
+-          <span>PaymentRouter</span>
+-          <span>PDF Receipts</span>
+-          <span>Telegram Alerts</span>
+-          <span>Agent API</span>
+-          <span>invoice.paid Webhooks</span>
++          <span>Zero Platform Fees</span>
++          <span>Direct Settlement</span>
+           <span>Arc Testnet</span>
+           <span>Circle USDC</span>
+-          <span>CCTP Pilot</span>
+-          <span>Ethereum Sepolia</span>
+-          <span>PaymentRouter</span>
+           <span>PDF Receipts</span>
+           <span>Telegram Alerts</span>
+-          <span>Agent API</span>
+-          <span>invoice.paid Webhooks</span>
++          <span>Zero Platform Fees</span>
+         </div>
+       </section>
+ 
+-      <section class="product-section" id="product">
+-        <div class="section-copy">
+-          <p class="eyebrow">Product</p>
+-          <h2>Built for freelancers, indie teams and service agents.</h2>
+-          <p>
+-            Fundline turns stablecoin payment collection into a clean invoice workflow: create, share, pay, verify,
+-            alert, receipt and export.
+-          </p>
+-        </div>
+-        <div class="workflow-panel">
+-          <article>
+-            <span>01</span>
++      <!-- =============================================
++           3. AUDIENCE SPLIT
++           ============================================= -->
++      <section class="audience-section" id="product" aria-labelledby="audience-title">
++        <div class="section-header">
++          <p class="eyebrow">Who is Fundline for</p>
++          <h2 id="audience-title">Choose your workflow</h2>
++          <p class="section-sub">Fundline serves two distinct groups with dedicated features and documentation.</p>
++        </div>
++        <div class="audience-grid">
++
++          <article class="audience-card reveal">
++            <p class="card-eyebrow">For freelancers and agencies</p>
++            <h3>Professional invoices, paid in USDC, straight to your wallet.</h3>
++            <ul class="card-list">
++              <li>Create and share invoice links in seconds</li>
++              <li>Clients pay USDC directly from their wallet</li>
++              <li>PDF receipts and CSV export included</li>
++              <li>Telegram alerts when payment arrives</li>
++            </ul>
++            <a class="audience-cta audience-cta-primary" href="/app" id="audience-cta-freelancer">Create invoice</a>
++          </article>
++
++          <article class="audience-card reveal">
++            <p class="card-eyebrow">For developers and AI agents</p>
++            <h3>Create invoices via a secure API and receive invoice.paid webhooks.</h3>
++            <ul class="card-list">
++              <li>REST API with Bearer token authentication</li>
++              <li>Receive real-time webhook events on payment</li>
++              <li>Automate billing inside any backend or agent</li>
++              <li>On-chain payment verification built in</li>
++            </ul>
++            <a class="audience-cta audience-cta-secondary" href="/docs" id="audience-cta-dev">Read docs</a>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           4. HOW IT WORKS
++           ============================================= -->
++      <section class="how-section" aria-labelledby="how-title">
++        <div class="section-header">
++          <p class="eyebrow">How it works</p>
++          <h2 id="how-title" class="single-line-title">Four steps from invoice to receipt</h2>
++        </div>
++        <div class="how-grid">
++
++          <article class="how-card reveal">
++            <span class="step-num" aria-hidden="true">01</span>
+             <strong>Create invoice</strong>
+-            <p>Client details, due date, notes and line items with automatic USDC total.</p>
++            <p>Add client details, due date, line items and notes. The USDC total is calculated automatically.</p>
+           </article>
+-          <article>
+-            <span>02</span>
++
++          <article class="how-card reveal">
++            <span class="step-num" aria-hidden="true">02</span>
+             <strong>Share payment link</strong>
+-            <p>Public <code>/pay/:id</code> page with QR code and receiving wallet details.</p>
++            <p>A public <code>/pay/:id</code> page is generated with a QR code and the receiving wallet address.</p>
+           </article>
+-          <article>
+-            <span>03</span>
++
++          <article class="how-card reveal">
++            <span class="step-num" aria-hidden="true">03</span>
+             <strong>Verify payment</strong>
+-            <p>Arcscan checks payer wallet, merchant wallet, amount and transaction hash.</p>
++            <p>Arcscan checks the payer wallet, merchant wallet, amount and transaction hash on-chain before marking the invoice paid.</p>
+           </article>
+-          <article>
+-            <span>04</span>
++
++          <article class="how-card reveal">
++            <span class="step-num" aria-hidden="true">04</span>
+             <strong>Send receipt</strong>
+-            <p>Paid invoices can generate PDF receipts and CSV records.</p>
++            <p>Paid invoices generate a PDF receipt and CSV record. Telegram alerts fire automatically on confirmation.</p>
+           </article>
++
+         </div>
+       </section>
+ 
+-      <section class="feature-grid" id="payments">
+-        <article>
+-          <p class="eyebrow">Payments</p>
+-          <h3>Direct wallet settlement</h3>
+-          <p>PaymentRouter transfers USDC from payer wallet to merchant wallet. The contract does not hold funds.</p>
+-        </article>
+-        <article id="settlement">
+-          <p class="eyebrow">Settlement</p>
+-          <h3>Native USDC across chains</h3>
+-          <p>Prepare Sepolia or Base Sepolia USDC settlement into Arc through a CCTP burn-and-mint pilot.</p>
+-        </article>
+-        <article id="agents">
+-          <p class="eyebrow">Agents</p>
+-          <h3>API-first invoice creation</h3>
+-          <p>Backends and AI agents can create invoices through protected endpoints and receive payment links.</p>
+-        </article>
+-        <article id="security">
+-          <p class="eyebrow">Security</p>
+-          <h3>Verify before paid</h3>
+-          <p>The paid state is only saved after a matching on-chain payment is found and persisted on the server.</p>
+-        </article>
++      <!-- =============================================
++           5. PRODUCT SHOWCASE
++           ============================================= -->
++      <section class="showcase-section" aria-labelledby="showcase-title">
++        <div class="section-header">
++          <p class="eyebrow">Product</p>
++          <h2 id="showcase-title">See Fundline in action</h2>
++          <p class="section-sub">From invoice creation to on-chain receipt in one clean workflow.</p>
++        </div>
++        <div class="showcase-grid">
++
++          <!-- Invoice editor mockup -->
++          <figure class="mockup-frame reveal" aria-label="Invoice editor interface">
++            <figcaption class="mockup-caption">Invoice editor</figcaption>
++            <div class="mockup-window">
++              <div class="mockup-titlebar" aria-hidden="true">
++                <span class="mock-dot mock-dot-red"></span>
++                <span class="mock-dot mock-dot-amber"></span>
++                <span class="mock-dot mock-dot-green"></span>
++                <span class="mock-win-title">New invoice</span>
++              </div>
++              <div class="mockup-body">
++                <div class="mock-field">
++                  <span class="mock-label">Client name</span>
++                  <div class="mock-input"></div>
++                </div>
++                <div class="mock-field-row">
++                  <div class="mock-field">
++                    <span class="mock-label">Amount (USDC)</span>
++                    <div class="mock-input mock-input-accent">500</div>
++                  </div>
++                  <div class="mock-field">
++                    <span class="mock-label">Due date</span>
++                    <div class="mock-input"></div>
++                  </div>
++                </div>
++                <div class="mock-field">
++                  <span class="mock-label">Description</span>
++                  <div class="mock-textarea"></div>
++                </div>
++                <div class="mock-actions">
++                  <div class="mock-btn-primary">Create invoice</div>
++                </div>
++              </div>
++            </div>
++          </figure>
++
++          <!-- Pay page mockup -->
++          <figure class="mockup-frame reveal" aria-label="Payment page interface">
++            <figcaption class="mockup-caption">Payment page &mdash; /pay/:id</figcaption>
++            <div class="mockup-window">
++              <div class="mockup-titlebar" aria-hidden="true">
++                <span class="mock-dot mock-dot-red"></span>
++                <span class="mock-dot mock-dot-amber"></span>
++                <span class="mock-dot mock-dot-green"></span>
++                <span class="mock-win-title">Pay Invoice #INV-001</span>
++              </div>
++              <div class="mockup-body mockup-pay-body">
++                <div class="mock-amount-display">
++                  <span class="mock-amt-label">Amount due</span>
++                  <strong class="mock-amt-value">500 USDC</strong>
++                </div>
++                <div class="mock-qr-zone" aria-label="QR code placeholder">
++                  <div class="mock-qr-frame">
++                    <span class="mock-qr-label">QR code</span>
++                  </div>
++                </div>
++                <div class="mock-detail-row">
++                  <span>Merchant</span>
++                  <code>0x1a2b...cd3e</code>
++                </div>
++                <div class="mock-btn-primary">Pay with wallet</div>
++              </div>
++            </div>
++          </figure>
++
++          <!-- Receipt mockup -->
++          <figure class="mockup-frame reveal" aria-label="Payment receipt interface">
++            <figcaption class="mockup-caption">Receipt &mdash; payment confirmed</figcaption>
++            <div class="mockup-window">
++              <div class="mockup-titlebar" aria-hidden="true">
++                <span class="mock-dot mock-dot-red"></span>
++                <span class="mock-dot mock-dot-amber"></span>
++                <span class="mock-dot mock-dot-green"></span>
++                <span class="mock-win-title">Receipt</span>
++              </div>
++              <div class="mockup-body">
++                <div class="mock-paid-badge">Payment verified on-chain</div>
++                <div class="mock-detail-row">
++                  <span>Amount</span>
++                  <strong>500 USDC</strong>
++                </div>
++                <div class="mock-detail-row">
++                  <span>Tx hash</span>
++                  <code>0xab12...ef34</code>
++                </div>
++                <div class="mock-detail-row">
++                  <span>Date</span>
++                  <span>Jun 14, 2026</span>
++                </div>
++                <div class="mock-detail-row">
++                  <span>Status</span>
++                  <span class="mock-status-paid">Paid</span>
++                </div>
++                <div class="mock-actions">
++                  <div class="mock-btn-secondary">Download PDF</div>
++                  <div class="mock-btn-secondary">Export CSV</div>
++                </div>
++              </div>
++            </div>
++          </figure>
++
++          <!-- Telegram Bot mockup -->
++          <figure class="mockup-frame reveal" aria-label="Telegram notification interface">
++            <figcaption class="mockup-caption">Telegram Alert</figcaption>
++            <div class="mockup-window">
++              <div class="mockup-titlebar" aria-hidden="true">
++                <span class="mock-dot mock-dot-red"></span>
++                <span class="mock-dot mock-dot-amber"></span>
++                <span class="mock-dot mock-dot-green"></span>
++                <span class="mock-win-title">Fundline Bot</span>
++              </div>
++              <div class="mockup-body" style="background: rgba(15, 23, 42, 0.6);">
++                <div style="background: rgba(53, 221, 255, 0.08); border: 1px solid rgba(53, 221, 255, 0.15); border-radius: 12px 12px 12px 2px; padding: 14px; margin-top: 10px;">
++                  <strong style="color: var(--cyan); font-size: 12px; display: block; margin-bottom: 8px;">Fundline Notifier</strong>
++                  <div style="font-size: 11px; color: var(--muted); line-height: 1.6;">
++                    <span style="color: var(--green); font-weight: 700;">Payment Received!</span><br><br>
++                    <strong>Invoice:</strong> #INV-001<br>
++                    <strong>Amount:</strong> 500 USDC<br>
++                    <strong>Status:</strong> Confirmed on-chain
++                  </div>
++                </div>
++                <div class="mock-actions">
++                  <div class="mock-btn-secondary">View Transaction</div>
++                </div>
++              </div>
++            </div>
++          </figure>
++
++        </div>
+       </section>
++
++      <!-- =============================================
++           6. FEATURES GRID
++           ============================================= -->
++      <section class="features-section" aria-labelledby="features-title">
++        <div class="section-header">
++          <p class="eyebrow">Features</p>
++          <h2 id="features-title" class="single-line-title">Everything you need to bill in USDC</h2>
++        </div>
++        <div class="features-grid">
++
++          <article class="feature-card reveal" id="payments">
++            <p class="eyebrow">Payments</p>
++            <h3>Direct wallet settlement</h3>
++            <p>PaymentRouter transfers USDC from payer wallet to merchant wallet. The contract holds no funds at any point.</p>
++          </article>
++
++          <article class="feature-card reveal" id="settlement">
++            <p class="eyebrow">Settlement</p>
++            <h3>Native USDC across chains</h3>
++            <p>Prepare Sepolia or Base Sepolia USDC settlement into Arc through a CCTP burn-and-mint pilot. No wrapped bridge assets.</p>
++          </article>
++
++          <article class="feature-card reveal" id="agents">
++            <p class="eyebrow">Agents</p>
++            <h3>API-first invoice creation</h3>
++            <p>Backends and AI agents can create invoices through protected endpoints and receive payment links programmatically.</p>
++          </article>
++
++          <article class="feature-card reveal" id="security">
++            <p class="eyebrow">Security</p>
++            <h3>Verify before paid</h3>
++            <p>The paid state is only saved after a matching on-chain payment is found and confirmed. No false positives, no premature settlement.</p>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           7. FOR DEVELOPERS
++           ============================================= -->
++      <section class="dev-section" id="developers" aria-labelledby="dev-title">
++        <div class="section-header">
++          <p class="eyebrow">Developers and AI agents</p>
++          <h2 id="dev-title" class="single-line-title">Automate billing with the Fundline API</h2>
++          <p class="section-sub">Create invoices programmatically and receive real-time webhook events when payment is confirmed on-chain.</p>
++        </div>
++        <div class="dev-grid">
++
++          <div class="dev-code-block reveal">
++            <p class="code-label">Create an invoice via API</p>
++            <pre><code>POST /api/agent/invoices
++Authorization: Bearer YOUR_API_KEY
++Content-Type: application/json
++
++{
++  "merchantWallet": "0xYourWalletAddress",
++  "clientName": "Acme Corp",
++  "amount": "500",
++  "currency": "USDC",
++  "dueDate": "2026-07-01",
++  "description": "Design services - June 2026"
++}</code></pre>
++          </div>
++
++          <div class="dev-code-block reveal">
++            <p class="code-label">invoice.paid webhook payload</p>
++            <pre><code>{
++  "event": "invoice.paid",
++  "invoiceId": "abc123def456789012",
++  "amount": "500",
++  "currency": "USDC",
++  "payer": "0xPayerWalletAddress",
++  "merchant": "0xMerchantWalletAddress",
++  "txHash": "0xTransactionHashHere",
++  "verifiedAt": "2026-06-14T15:00:00Z"
++}</code></pre>
++          </div>
++
++        </div>
++        <div class="dev-actions">
++          <a class="nav-button secondary" href="/docs#agent-api" id="dev-cta-docs">Read API docs</a>
++          <a class="nav-button primary" href="/docs#webhooks" id="dev-cta-webhooks">Set up webhooks</a>
++        </div>
++      </section>
++
++      <!-- =============================================
++           8. TRUST AND SECURITY
++           ============================================= -->
++      <section class="trust-section" aria-labelledby="trust-title">
++        <div class="section-header">
++          <p class="eyebrow">Trust and security</p>
++          <h2 id="trust-title" class="single-line-title">Your funds go directly to your wallet</h2>
++          <p class="section-sub">Fundline is non-custodial by design. The smart contract routes USDC and never holds a balance.</p>
++        </div>
++        <div class="trust-grid">
++
++          <article class="trust-card reveal">
++            <strong class="trust-title">No custody risk</strong>
++            <p>The PaymentRouter contract transfers USDC directly from payer to merchant. No intermediate holding address exists.</p>
++          </article>
++
++          <article class="trust-card reveal">
++            <strong class="trust-title">On-chain verification</strong>
++            <p>Every payment is verified against Arcscan before the invoice is marked paid. Unverified payments are never accepted.</p>
++          </article>
++
++          <article class="trust-card reveal">
++            <strong class="trust-title">Native USDC only</strong>
++            <p>Built on Circle USDC, the regulated stablecoin. No wrapped tokens, no synthetic assets, no bridging risk.</p>
++          </article>
++
++          <article class="trust-card reveal">
++            <strong class="trust-title">Open and auditable</strong>
++            <p>Contract source is available on Arcscan. Settlement happens on a public testnet ledger that anyone can inspect.</p>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           9. PRICING
++           ============================================= -->
++      <section class="pricing-section" id="pricing" aria-labelledby="pricing-title">
++        <div class="section-header">
++          <p class="eyebrow">Pricing</p>
++          <h2 id="pricing-title">Free during testnet</h2>
++          <p class="section-sub">All features are available at no cost on testnet. Mainnet pricing will be announced before launch.</p>
++        </div>
++        <div class="pricing-grid">
++
++          <article class="pricing-card pricing-card-active reveal">
++            <p class="pricing-tier">Testnet</p>
++            <p class="pricing-price">Free</p>
++            <p class="pricing-note">No signup required. No credit card.</p>
++            <ul class="pricing-list">
++              <li>Unlimited invoices</li>
++              <li>PDF receipts and CSV export</li>
++              <li>Telegram payment alerts</li>
++              <li>Agent API access</li>
++              <li>invoice.paid webhooks</li>
++              <li>On-chain payment verification</li>
++            </ul>
++            <a class="launch-cta" href="/app" id="pricing-cta">Start now</a>
++          </article>
++
++          <article class="pricing-card pricing-card-future reveal">
++            <p class="pricing-tier">Mainnet</p>
++            <p class="pricing-price">TBD</p>
++            <p class="pricing-note">Announced before mainnet launch.</p>
++            <ul class="pricing-list">
++              <li>Everything in Testnet</li>
++              <li>Live USDC settlement</li>
++              <li>Custom domains for pay pages</li>
++              <li>Priority support</li>
++            </ul>
++            <span class="pricing-soon">Coming soon</span>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           10. FAQ
++           ============================================= -->
++      <section class="faq-section" aria-labelledby="faq-title">
++        <div class="section-header">
++          <p class="eyebrow">FAQ</p>
++          <h2 id="faq-title">Frequently asked questions</h2>
++        </div>
++        <div class="faq-list" role="list">
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              What is USDC?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>USDC (USD Coin) is a regulated stablecoin issued by Circle, pegged 1:1 to the US dollar. It is backed by fully reserved assets and is one of the most widely used digital dollars. Fundline uses native USDC on Arc Testnet for all settlements.</p>
++            </div>
++          </article>
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              What wallet do I need?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>Any EVM-compatible wallet works: MetaMask, Rabby, Coinbase Wallet, or any wallet that supports custom RPC networks. You will need to add the Arc Testnet network and hold some testnet USDC. The documentation has step-by-step wallet setup instructions.</p>
++            </div>
++          </article>
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              Is it safe with no escrow?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>Yes. Removing escrow reduces risk, not increases it. The PaymentRouter contract moves USDC directly from payer to merchant in a single transaction. There is no intermediate holding address, so there is no custodial party that could be compromised or restrict access to your funds.</p>
++            </div>
++          </article>
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              When is mainnet?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>Fundline is currently live on Arc Testnet. A mainnet launch date has not been announced. Follow the project on social channels for updates. All testnet features will carry over to mainnet.</p>
++            </div>
++          </article>
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              What are the fees?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>Fundline itself charges no fees on testnet. You only pay the network gas cost for each on-chain transaction, which is minimal on Arc Testnet. Mainnet fees have not been announced and will be disclosed before launch.</p>
++            </div>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           11. FINAL CTA
++           ============================================= -->
++      <section class="final-cta-section" aria-labelledby="final-cta-title">
++        <h2 id="final-cta-title">Ready to get paid in USDC?</h2>
++        <p class="final-cta-sub">Start creating invoices on Arc Testnet today. No signup needed.</p>
++        <div class="hero-actions">
++          <a class="launch-cta" href="/app" id="final-cta-primary">Create invoice</a>
++          <a class="docs-cta" href="/docs" id="final-cta-secondary">Read docs</a>
++        </div>
++      </section>
++
+     </main>
++
++    <!-- =============================================
++         12. FOOTER
++         ============================================= -->
++    <footer class="home-footer" role="contentinfo">
++      <div class="footer-inner">
++
++        <div class="footer-brand">
++          <a class="home-brand footer-brand-link" href="/" aria-label="Fundline home">
++            <span class="brand-symbol" aria-hidden="true"></span>
++            <span class="brand-word">Fundline</span>
++          </a>
++          <p class="footer-tagline">Non-custodial USDC invoicing on Arc Testnet.</p>
++        </div>
++
++        <nav class="footer-nav" aria-label="Footer navigation">
++          <div class="footer-col">
++            <p class="footer-col-title">Product</p>
++            <a href="/app">Create invoice</a>
++            <a href="#product">How it works</a>
++            <a href="#pricing">Pricing</a>
++          </div>
++          <div class="footer-col">
++            <p class="footer-col-title">Developers</p>
++            <a href="/docs">Documentation</a>
++            <a href="#developers">Agent API</a>
++            <a href="/docs#webhooks">Webhooks</a>
++          </div>
++          <div class="footer-col">
++            <p class="footer-col-title">Community</p>
++            <a href="#" rel="noopener noreferrer">Twitter / X</a>
++            <a href="#" rel="noopener noreferrer">GitHub</a>
++            <a href="#" rel="noopener noreferrer">Telegram</a>
++          </div>
++        </nav>
++
++      </div>
++      <div class="footer-bottom">
++        <p>Fundline is a testnet project. Not financial advice.</p>
++        <p>Built on Arc Testnet with Circle USDC.</p>
++      </div>
++    </footer>
++
+     <script src="/home.js"></script>
+   </body>
+ </html>
+diff --git a/home.js b/home.js
+index e6e63aa..216eff9 100644
+--- a/home.js
++++ b/home.js
+@@ -1,26 +1,213 @@
++/* ====================================================
++   FUNDLINE HOME ΓÇö Landing page JavaScript
++   ==================================================== */
++
++/* Run immediately on parse */
+ redirectPaymentFallback();
++initHamburger();
++initFaqAccordion();
++initRevealObserver();
++initNavHighlight();
++initCtaAnalytics();
++
++/* ====================================================
++   Existing: redirect /pay/:id to app
++   ==================================================== */
++function redirectPaymentFallback() {
++  var match = window.location.pathname.match(/^\/pay\/([^/?#]+)/);
++  if (!match) return;
++  var invoiceId = encodeURIComponent(decodeURIComponent(match[1]));
++  window.location.replace("/app.html?pay=" + invoiceId);
++}
+ 
+-const livePill = document.querySelector(".live-pill");
+-const statCards = document.querySelectorAll(".hero-stats article");
++/* ====================================================
++   Existing: fetch live config from server
++   ==================================================== */
++var livePill = document.getElementById("live-pill");
+ 
+ fetch("/api/config")
+-  .then((response) => (response.ok ? response.json() : null))
+-  .then((config) => {
++  .then(function (response) { return response.ok ? response.json() : null; })
++  .then(function (config) {
+     if (!config) return;
+     if (livePill) {
+-      livePill.lastChild.textContent = config.onchainPaymentsEnabled
+-        ? " PaymentRouter live on Arc Testnet"
+-        : " Fundline ready on Arc Testnet";
+-    }
+-    if (statCards[1]) {
+-      statCards[1].querySelector("span").textContent = config.usdcTokenAddress ? "Native payment" : "Payment token";
++      var textNode = livePill.lastChild;
++      while (textNode && textNode.nodeType !== 3) {
++        textNode = textNode.previousSibling;
++      }
++      if (textNode) {
++        textNode.textContent = config.onchainPaymentsEnabled
++          ? " PaymentRouter live on Arc Testnet"
++          : " Fundline ready on Arc Testnet";
++      }
+     }
+   })
+-  .catch(() => {});
++  .catch(function () {});
+ 
+-function redirectPaymentFallback() {
+-  const match = window.location.pathname.match(/^\/pay\/([^/?#]+)/);
+-  if (!match) return;
+-  const invoiceId = encodeURIComponent(decodeURIComponent(match[1]));
+-  window.location.replace(`/app.html?pay=${invoiceId}`);
++/* ====================================================
++   1. Hamburger menu
++   ==================================================== */
++function initHamburger() {
++  var btn = document.getElementById("hamburger");
++  var menu = document.getElementById("mobile-menu");
++  if (!btn || !menu) return;
++
++  btn.addEventListener("click", function () {
++    var isOpen = btn.getAttribute("aria-expanded") === "true";
++    setMenuOpen(!isOpen);
++  });
++
++  /* Close when a mobile link is clicked */
++  menu.querySelectorAll(".mobile-link, .mobile-cta-btn").forEach(function (link) {
++    link.addEventListener("click", function () {
++      setMenuOpen(false);
++    });
++  });
++
++  /* Close on Escape */
++  document.addEventListener("keydown", function (e) {
++    if (e.key === "Escape") setMenuOpen(false);
++  });
++
++  /* Close when clicking outside */
++  document.addEventListener("click", function (e) {
++    if (
++      btn.getAttribute("aria-expanded") === "true" &&
++      !btn.contains(e.target) &&
++      !menu.contains(e.target)
++    ) {
++      setMenuOpen(false);
++    }
++  });
++
++  function setMenuOpen(open) {
++    btn.setAttribute("aria-expanded", String(open));
++    menu.setAttribute("aria-hidden", String(!open));
++    if (open) {
++      menu.classList.add("is-open");
++      document.body.style.overflow = "hidden";
++    } else {
++      menu.classList.remove("is-open");
++      document.body.style.overflow = "";
++    }
++  }
++}
++
++/* ====================================================
++   2. FAQ accordion
++   ==================================================== */
++function initFaqAccordion() {
++  var questions = document.querySelectorAll(".faq-question");
++  questions.forEach(function (btn) {
++    btn.addEventListener("click", function () {
++      var isOpen = btn.getAttribute("aria-expanded") === "true";
++      var answer = btn.nextElementSibling;
++
++      /* Close all others */
++      questions.forEach(function (other) {
++        if (other === btn) return;
++        other.setAttribute("aria-expanded", "false");
++        var otherAnswer = other.nextElementSibling;
++        if (otherAnswer) otherAnswer.hidden = true;
++      });
++
++      /* Toggle this one */
++      btn.setAttribute("aria-expanded", String(!isOpen));
++      if (answer) answer.hidden = isOpen;
++    });
++  });
++}
++
++/* ====================================================
++   3. Scroll reveal (IntersectionObserver)
++   ==================================================== */
++function initRevealObserver() {
++  if (!window.IntersectionObserver) {
++    /* Fallback: show everything immediately */
++    document.querySelectorAll(".reveal").forEach(function (el) {
++      el.classList.add("is-visible");
++    });
++    return;
++  }
++
++  var observer = new IntersectionObserver(
++    function (entries) {
++      entries.forEach(function (entry) {
++        if (entry.isIntersecting) {
++          entry.target.classList.add("is-visible");
++          observer.unobserve(entry.target);
++        }
++      });
++    },
++    { threshold: 0.12, rootMargin: "0px 0px -40px 0px" }
++  );
++
++  document.querySelectorAll(".reveal").forEach(function (el, idx) {
++    /* Stagger siblings inside the same grid */
++    el.style.transitionDelay = (idx % 4) * 0.08 + "s";
++    observer.observe(el);
++  });
++}
++
++/* ====================================================
++   4. Nav link active highlight on scroll
++   ==================================================== */
++function initNavHighlight() {
++  var navLinks = document.querySelectorAll(".nav-link");
++  if (!navLinks.length) return;
++
++  var sections = [];
++  navLinks.forEach(function (link) {
++    var href = link.getAttribute("href");
++    if (!href || !href.startsWith("#")) return;
++    var target = document.getElementById(href.slice(1));
++    if (target) sections.push({ link: link, section: target });
++  });
++
++  if (!sections.length) return;
++
++  var observer = new IntersectionObserver(
++    function (entries) {
++      entries.forEach(function (entry) {
++        var match = sections.find(function (s) { return s.section === entry.target; });
++        if (!match) return;
++        if (entry.isIntersecting) {
++          navLinks.forEach(function (l) { l.classList.remove("nav-link-active"); });
++          match.link.classList.add("nav-link-active");
++        }
++      });
++    },
++    { threshold: 0.35 }
++  );
++
++  sections.forEach(function (s) { observer.observe(s.section); });
++}
++
++/* ====================================================
++   5. CTA click analytics (placeholder)
++   ==================================================== */
++function initCtaAnalytics() {
++  var ctaIds = [
++    "nav-cta",
++    "hero-cta-primary",
++    "hero-cta-secondary",
++    "mobile-cta",
++    "audience-cta-freelancer",
++    "audience-cta-dev",
++    "dev-cta-docs",
++    "dev-cta-webhooks",
++    "pricing-cta",
++    "final-cta-primary",
++    "final-cta-secondary",
++  ];
++
++  ctaIds.forEach(function (id) {
++    var el = document.getElementById(id);
++    if (!el) return;
++    el.addEventListener("click", function () {
++      /* Replace this placeholder with your analytics call, e.g.:
++         plausible("CTA Click", { props: { id: id } });
++         gtag("event", "cta_click", { cta_id: id });        */
++      console.log("[Fundline] CTA click:", id);
++    });
++  });
+ }
+diff --git a/index.html b/index.html
+index 69ac556..cf279fe 100644
+--- a/index.html
++++ b/index.html
+@@ -3,62 +3,117 @@
+   <head>
+     <meta charset="utf-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1" />
+-    <title>Fundline | USDC invoices and settlement</title>
++    <title>Fundline - USDC Invoicing and Direct Settlement</title>
++    <meta name="description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk. API-first for developers and AI agents." />
++
++    <!-- Open Graph -->
++    <meta property="og:title" content="Fundline - USDC Invoicing and Direct Settlement" />
++    <meta property="og:description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk." />
++    <meta property="og:image" content="/og-image.png" />
++    <meta property="og:url" content="https://fundline.xyz" />
++    <meta property="og:type" content="website" />
++    <meta property="og:site_name" content="Fundline" />
++
++    <!-- Twitter / X Card -->
++    <meta name="twitter:card" content="summary_large_image" />
++    <meta name="twitter:title" content="Fundline - USDC Invoicing and Direct Settlement" />
++    <meta name="twitter:description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk." />
++    <meta name="twitter:image" content="/og-image.png" />
++
++    <link rel="preconnect" href="https://fonts.googleapis.com">
++    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
++    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+     <link rel="stylesheet" href="/home.css" />
+   </head>
+   <body>
+-    <main class="home-shell">
+-      <header class="home-nav">
+-        <a class="home-brand" href="/" aria-label="Fundline home">
+-          <span class="brand-symbol" aria-hidden="true"></span>
+-          <span class="brand-word">Fundline</span>
+-          <span class="testnet-pill">TESTNET</span>
+-        </a>
+-        <div class="nav-actions">
+-          <a class="nav-button secondary" href="/docs.html">Docs</a>
+-          <a class="nav-button primary" href="/app.html">Launch App</a>
+-        </div>
+-      </header>
+-
+-      <section class="hero-section">
+-        <div class="live-pill"><span></span> PaymentRouter live on Arc Testnet</div>
+-        <h1>
+-          USDC invoices.
+-          <br />
+-          Paid directly.
+-          <br />
+-          <span>No escrow.</span>
++
++    <!-- =============================================
++         1. NAVBAR
++         ============================================= -->
++    <header class="home-nav" role="banner">
++      <a class="home-brand" href="/" aria-label="Fundline home">
++        <span class="brand-symbol" aria-hidden="true"></span>
++        <span class="brand-word">Fundline</span>
++        <span class="testnet-pill">TESTNET</span>
++      </a>
++
++      <nav class="nav-links" aria-label="Primary navigation">
++        <a href="#product" class="nav-link">Product</a>
++        <a href="#developers" class="nav-link">Developers</a>
++        <a href="/docs" class="nav-link">Docs</a>
++        <a href="#pricing" class="nav-link">Pricing</a>
++      </nav>
++
++      <div class="nav-actions">
++        <a class="nav-button secondary" href="/docs">Docs</a>
++        <a class="nav-button primary" href="/app" id="nav-cta">Create invoice</a>
++      </div>
++
++      <button
++        class="hamburger"
++        id="hamburger"
++        type="button"
++        aria-label="Open navigation menu"
++        aria-expanded="false"
++        aria-controls="mobile-menu"
++      >
++        <span></span>
++        <span></span>
++        <span></span>
++      </button>
++    </header>
++
++    <!-- Mobile menu -->
++    <div class="mobile-menu" id="mobile-menu" aria-hidden="true" role="dialog" aria-label="Mobile navigation">
++      <nav class="mobile-nav">
++        <a href="#product" class="mobile-link">Product</a>
++        <a href="#developers" class="mobile-link">Developers</a>
++        <a href="/docs" class="mobile-link">Docs</a>
++        <a href="#pricing" class="mobile-link">Pricing</a>
++        <a class="mobile-cta-btn" href="/app" id="mobile-cta">Create invoice</a>
++      </nav>
++    </div>
++
++    <main>
++
++      <!-- =============================================
++           2. HERO
++           ============================================= -->
++      <section class="hero-section" aria-labelledby="hero-title">
++        <div class="live-pill" id="live-pill">
++          <span class="live-dot" aria-hidden="true"></span>
++          PaymentRouter live on Arc Testnet
++        </div>
++
++        <h1 id="hero-title" class="reveal">
++          <span class="hero-line">Get paid in USDC in minutes</span>
++          <span class="hero-line hero-gradient">No escrow</span>
++          <span class="hero-line hero-gradient">No custody risk</span>
+         </h1>
+-        <p class="hero-copy">
+-          Create professional invoices, send a public payment link, let clients pay USDC on Arc, then verify the
+-          transaction, send alerts and issue receipts. The settlement pilot prepares native USDC movement from
+-          Sepolia or Base Sepolia into Arc without wrapped bridge assets.
++
++        <p class="hero-copy reveal">
++          Create professional invoices and get paid directly to your wallet
+         </p>
+-        <div class="hero-actions">
+-          <a class="launch-cta" href="/app.html">Create invoice</a>
+-          <a class="docs-cta" href="/docs.html">Read docs</a>
++
++        <div class="hero-actions reveal">
++          <a class="launch-cta" href="/app" id="hero-cta-primary">Create invoice</a>
++          <a class="docs-cta" href="/docs" id="hero-cta-secondary">Read docs</a>
+         </div>
+-        <div class="hero-stats" aria-label="Product highlights">
+-          <article>
+-            <strong>0%</strong>
+-            <span>Custody risk</span>
+-          </article>
+-          <article>
+-            <strong>USDC</strong>
+-            <span>Native payment</span>
+-          </article>
+-          <article>
+-            <strong>CCTP</strong>
+-            <span>Native bridge</span>
+-          </article>
+-          <article>
+-            <strong>API</strong>
+-            <span>Agent ready</span>
+-          </article>
++
++        <p class="hero-micro">
++          No signup needed &nbsp;&middot;&nbsp; No credit card &nbsp;&middot;&nbsp; Free on testnet
++        </p>
++
++        <div class="trust-strip" aria-label="Trust signals">
++          <span>Built on Circle USDC</span>
++          <span>Native CCTP bridge</span>
++          <span>0% custody risk</span>
++          <span>API-ready</span>
+         </div>
+       </section>
+ 
+-      <section class="marquee-band" aria-label="Fundline ecosystem">
++      <!-- Marquee band -->
++      <section class="marquee-band" aria-hidden="true">
+         <div class="marquee-track">
+           <span>Arc Testnet</span>
+           <span>Circle USDC</span>
+@@ -81,62 +136,498 @@
+         </div>
+       </section>
+ 
+-      <section class="product-section" id="product">
+-        <div class="section-copy">
+-          <p class="eyebrow">Product</p>
+-          <h2>Built for freelancers, indie teams and service agents.</h2>
+-          <p>
+-            Fundline turns stablecoin payment collection into a clean invoice workflow: create, share, pay, verify,
+-            alert, receipt and export.
+-          </p>
+-        </div>
+-        <div class="workflow-panel">
+-          <article>
+-            <span>01</span>
++      <!-- =============================================
++           3. AUDIENCE SPLIT
++           ============================================= -->
++      <section class="audience-section" id="product" aria-labelledby="audience-title">
++        <div class="section-header">
++          <p class="eyebrow">Who is Fundline for</p>
++          <h2 id="audience-title">Choose your workflow</h2>
++          <p class="section-sub">Fundline serves two distinct groups with dedicated features and documentation.</p>
++        </div>
++        <div class="audience-grid">
++
++          <article class="audience-card reveal">
++            <p class="card-eyebrow">For freelancers and agencies</p>
++            <h3>Professional invoices, paid in USDC, straight to your wallet.</h3>
++            <ul class="card-list">
++              <li>Create and share invoice links in seconds</li>
++              <li>Clients pay USDC directly from their wallet</li>
++              <li>PDF receipts and CSV export included</li>
++              <li>Telegram alerts when payment arrives</li>
++            </ul>
++            <a class="audience-cta audience-cta-primary" href="/app" id="audience-cta-freelancer">Create invoice</a>
++          </article>
++
++          <article class="audience-card reveal">
++            <p class="card-eyebrow">For developers and AI agents</p>
++            <h3>Create invoices via a secure API and receive invoice.paid webhooks.</h3>
++            <ul class="card-list">
++              <li>REST API with Bearer token authentication</li>
++              <li>Receive real-time webhook events on payment</li>
++              <li>Automate billing inside any backend or agent</li>
++              <li>On-chain payment verification built in</li>
++            </ul>
++            <a class="audience-cta audience-cta-secondary" href="/docs" id="audience-cta-dev">Read docs</a>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           4. HOW IT WORKS
++           ============================================= -->
++      <section class="how-section" aria-labelledby="how-title">
++        <div class="section-header">
++          <p class="eyebrow">How it works</p>
++          <h2 id="how-title" class="single-line-title">Four steps from invoice to receipt</h2>
++        </div>
++        <div class="how-grid">
++
++          <article class="how-card reveal">
++            <span class="step-num" aria-hidden="true">01</span>
+             <strong>Create invoice</strong>
+-            <p>Client details, due date, notes and line items with automatic USDC total.</p>
++            <p>Add client details, due date, line items and notes. The USDC total is calculated automatically.</p>
+           </article>
+-          <article>
+-            <span>02</span>
++
++          <article class="how-card reveal">
++            <span class="step-num" aria-hidden="true">02</span>
+             <strong>Share payment link</strong>
+-            <p>Public <code>/pay/:id</code> page with QR code and receiving wallet details.</p>
++            <p>A public <code>/pay/:id</code> page is generated with a QR code and the receiving wallet address.</p>
+           </article>
+-          <article>
+-            <span>03</span>
++
++          <article class="how-card reveal">
++            <span class="step-num" aria-hidden="true">03</span>
+             <strong>Verify payment</strong>
+-            <p>Arcscan checks payer wallet, merchant wallet, amount and transaction hash.</p>
++            <p>Arcscan checks the payer wallet, merchant wallet, amount and transaction hash on-chain before marking the invoice paid.</p>
+           </article>
+-          <article>
+-            <span>04</span>
++
++          <article class="how-card reveal">
++            <span class="step-num" aria-hidden="true">04</span>
+             <strong>Send receipt</strong>
+-            <p>Paid invoices can generate PDF receipts and CSV records.</p>
++            <p>Paid invoices generate a PDF receipt and CSV record. Telegram alerts fire automatically on confirmation.</p>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           5. PRODUCT SHOWCASE
++           ============================================= -->
++      <section class="showcase-section" aria-labelledby="showcase-title">
++        <div class="section-header">
++          <p class="eyebrow">Product</p>
++          <h2 id="showcase-title">See Fundline in action</h2>
++          <p class="section-sub">From invoice creation to on-chain receipt in one clean workflow.</p>
++        </div>
++        <div class="showcase-grid">
++
++          <!-- Invoice editor mockup -->
++          <figure class="mockup-frame reveal" aria-label="Invoice editor interface">
++            <figcaption class="mockup-caption">Invoice editor</figcaption>
++            <div class="mockup-window">
++              <div class="mockup-titlebar" aria-hidden="true">
++                <span class="mock-dot mock-dot-red"></span>
++                <span class="mock-dot mock-dot-amber"></span>
++                <span class="mock-dot mock-dot-green"></span>
++                <span class="mock-win-title">New invoice</span>
++              </div>
++              <div class="mockup-body">
++                <div class="mock-field">
++                  <span class="mock-label">Client name</span>
++                  <div class="mock-input"></div>
++                </div>
++                <div class="mock-field-row">
++                  <div class="mock-field">
++                    <span class="mock-label">Amount (USDC)</span>
++                    <div class="mock-input mock-input-accent">500</div>
++                  </div>
++                  <div class="mock-field">
++                    <span class="mock-label">Due date</span>
++                    <div class="mock-input"></div>
++                  </div>
++                </div>
++                <div class="mock-field">
++                  <span class="mock-label">Description</span>
++                  <div class="mock-textarea"></div>
++                </div>
++                <div class="mock-actions">
++                  <div class="mock-btn-primary">Create invoice</div>
++                </div>
++              </div>
++            </div>
++          </figure>
++
++          <!-- Pay page mockup -->
++          <figure class="mockup-frame reveal" aria-label="Payment page interface">
++            <figcaption class="mockup-caption">Payment page &mdash; /pay/:id</figcaption>
++            <div class="mockup-window">
++              <div class="mockup-titlebar" aria-hidden="true">
++                <span class="mock-dot mock-dot-red"></span>
++                <span class="mock-dot mock-dot-amber"></span>
++                <span class="mock-dot mock-dot-green"></span>
++                <span class="mock-win-title">Pay Invoice #INV-001</span>
++              </div>
++              <div class="mockup-body mockup-pay-body">
++                <div class="mock-amount-display">
++                  <span class="mock-amt-label">Amount due</span>
++                  <strong class="mock-amt-value">500 USDC</strong>
++                </div>
++                <div class="mock-qr-zone" aria-label="QR code placeholder">
++                  <div class="mock-qr-frame">
++                    <span class="mock-qr-label">QR code</span>
++                  </div>
++                </div>
++                <div class="mock-detail-row">
++                  <span>Merchant</span>
++                  <code>0x1a2b...cd3e</code>
++                </div>
++                <div class="mock-btn-primary">Pay with wallet</div>
++              </div>
++            </div>
++          </figure>
++
++          <!-- Receipt mockup -->
++          <figure class="mockup-frame reveal" aria-label="Payment receipt interface">
++            <figcaption class="mockup-caption">Receipt &mdash; payment confirmed</figcaption>
++            <div class="mockup-window">
++              <div class="mockup-titlebar" aria-hidden="true">
++                <span class="mock-dot mock-dot-red"></span>
++                <span class="mock-dot mock-dot-amber"></span>
++                <span class="mock-dot mock-dot-green"></span>
++                <span class="mock-win-title">Receipt</span>
++              </div>
++              <div class="mockup-body">
++                <div class="mock-paid-badge">Payment verified on-chain</div>
++                <div class="mock-detail-row">
++                  <span>Amount</span>
++                  <strong>500 USDC</strong>
++                </div>
++                <div class="mock-detail-row">
++                  <span>Tx hash</span>
++                  <code>0xab12...ef34</code>
++                </div>
++                <div class="mock-detail-row">
++                  <span>Date</span>
++                  <span>Jun 14, 2026</span>
++                </div>
++                <div class="mock-detail-row">
++                  <span>Status</span>
++                  <span class="mock-status-paid">Paid</span>
++                </div>
++                <div class="mock-actions">
++                  <div class="mock-btn-secondary">Download PDF</div>
++                  <div class="mock-btn-secondary">Export CSV</div>
++                </div>
++              </div>
++            </div>
++          </figure>
++
++          <!-- Telegram Bot mockup -->
++          <figure class="mockup-frame reveal" aria-label="Telegram notification interface">
++            <figcaption class="mockup-caption">Telegram Alert</figcaption>
++            <div class="mockup-window">
++              <div class="mockup-titlebar" aria-hidden="true">
++                <span class="mock-dot mock-dot-red"></span>
++                <span class="mock-dot mock-dot-amber"></span>
++                <span class="mock-dot mock-dot-green"></span>
++                <span class="mock-win-title">Fundline Bot</span>
++              </div>
++              <div class="mockup-body" style="background: rgba(15, 23, 42, 0.6);">
++                <div style="background: rgba(53, 221, 255, 0.08); border: 1px solid rgba(53, 221, 255, 0.15); border-radius: 12px 12px 12px 2px; padding: 14px; margin-top: 10px;">
++                  <strong style="color: var(--cyan); font-size: 12px; display: block; margin-bottom: 8px;">Fundline Notifier</strong>
++                  <div style="font-size: 11px; color: var(--muted); line-height: 1.6;">
++                    <span style="color: var(--green); font-weight: 700;">Payment Received!</span><br><br>
++                    <strong>Invoice:</strong> #INV-001<br>
++                    <strong>Amount:</strong> 500 USDC<br>
++                    <strong>Status:</strong> Confirmed on-chain
++                  </div>
++                </div>
++                <div class="mock-actions">
++                  <div class="mock-btn-secondary">View Transaction</div>
++                </div>
++              </div>
++            </div>
++          </figure>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           6. FEATURES GRID
++           ============================================= -->
++      <section class="features-section" aria-labelledby="features-title">
++        <div class="section-header">
++          <p class="eyebrow">Features</p>
++          <h2 id="features-title" class="single-line-title">Everything you need to bill in USDC</h2>
++        </div>
++        <div class="features-grid">
++
++          <article class="feature-card reveal" id="payments">
++            <p class="eyebrow">Payments</p>
++            <h3>Direct wallet settlement</h3>
++            <p>PaymentRouter transfers USDC from payer wallet to merchant wallet. The contract holds no funds at any point.</p>
++          </article>
++
++          <article class="feature-card reveal" id="settlement">
++            <p class="eyebrow">Settlement</p>
++            <h3>Native USDC across chains</h3>
++            <p>Prepare Sepolia or Base Sepolia USDC settlement into Arc through a CCTP burn-and-mint pilot. No wrapped bridge assets.</p>
++          </article>
++
++          <article class="feature-card reveal" id="agents">
++            <p class="eyebrow">Agents</p>
++            <h3>API-first invoice creation</h3>
++            <p>Backends and AI agents can create invoices through protected endpoints and receive payment links programmatically.</p>
+           </article>
++
++          <article class="feature-card reveal" id="security">
++            <p class="eyebrow">Security</p>
++            <h3>Verify before paid</h3>
++            <p>The paid state is only saved after a matching on-chain payment is found and confirmed. No false positives, no premature settlement.</p>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           7. FOR DEVELOPERS
++           ============================================= -->
++      <section class="dev-section" id="developers" aria-labelledby="dev-title">
++        <div class="section-header">
++          <p class="eyebrow">Developers and AI agents</p>
++          <h2 id="dev-title" class="single-line-title">Automate billing with the Fundline API</h2>
++          <p class="section-sub">Create invoices programmatically and receive real-time webhook events when payment is confirmed on-chain.</p>
++        </div>
++        <div class="dev-grid">
++
++          <div class="dev-code-block reveal">
++            <p class="code-label">Create an invoice via API</p>
++            <pre><code>POST /api/agent/invoices
++Authorization: Bearer YOUR_API_KEY
++Content-Type: application/json
++
++{
++  "merchantWallet": "0xYourWalletAddress",
++  "clientName": "Acme Corp",
++  "amount": "500",
++  "currency": "USDC",
++  "dueDate": "2026-07-01",
++  "description": "Design services - June 2026"
++}</code></pre>
++          </div>
++
++          <div class="dev-code-block reveal">
++            <p class="code-label">invoice.paid webhook payload</p>
++            <pre><code>{
++  "event": "invoice.paid",
++  "invoiceId": "abc123def456789012",
++  "amount": "500",
++  "currency": "USDC",
++  "payer": "0xPayerWalletAddress",
++  "merchant": "0xMerchantWalletAddress",
++  "txHash": "0xTransactionHashHere",
++  "verifiedAt": "2026-06-14T15:00:00Z"
++}</code></pre>
++          </div>
++
++        </div>
++        <div class="dev-actions">
++          <a class="nav-button secondary" href="/docs#agent-api" id="dev-cta-docs">Read API docs</a>
++          <a class="nav-button primary" href="/docs#webhooks" id="dev-cta-webhooks">Set up webhooks</a>
++        </div>
++      </section>
++
++      <!-- =============================================
++           8. TRUST AND SECURITY
++           ============================================= -->
++      <section class="trust-section" aria-labelledby="trust-title">
++        <div class="section-header">
++          <p class="eyebrow">Trust and security</p>
++          <h2 id="trust-title" class="single-line-title">Your funds go directly to your wallet</h2>
++          <p class="section-sub">Fundline is non-custodial by design. The smart contract routes USDC and never holds a balance.</p>
++        </div>
++        <div class="trust-grid">
++
++          <article class="trust-card reveal">
++            <strong class="trust-title">No custody risk</strong>
++            <p>The PaymentRouter contract transfers USDC directly from payer to merchant. No intermediate holding address exists.</p>
++          </article>
++
++          <article class="trust-card reveal">
++            <strong class="trust-title">On-chain verification</strong>
++            <p>Every payment is verified against Arcscan before the invoice is marked paid. Unverified payments are never accepted.</p>
++          </article>
++
++          <article class="trust-card reveal">
++            <strong class="trust-title">Native USDC only</strong>
++            <p>Built on Circle USDC, the regulated stablecoin. No wrapped tokens, no synthetic assets, no bridging risk.</p>
++          </article>
++
++          <article class="trust-card reveal">
++            <strong class="trust-title">Open and auditable</strong>
++            <p>Contract source is available on Arcscan. Settlement happens on a public testnet ledger that anyone can inspect.</p>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           9. PRICING
++           ============================================= -->
++      <section class="pricing-section" id="pricing" aria-labelledby="pricing-title">
++        <div class="section-header">
++          <p class="eyebrow">Pricing</p>
++          <h2 id="pricing-title">Free during testnet</h2>
++          <p class="section-sub">All features are available at no cost on testnet. Mainnet pricing will be announced before launch.</p>
++        </div>
++        <div class="pricing-grid">
++
++          <article class="pricing-card pricing-card-active reveal">
++            <p class="pricing-tier">Testnet</p>
++            <p class="pricing-price">Free</p>
++            <p class="pricing-note">No signup required. No credit card.</p>
++            <ul class="pricing-list">
++              <li>Unlimited invoices</li>
++              <li>PDF receipts and CSV export</li>
++              <li>Telegram payment alerts</li>
++              <li>Agent API access</li>
++              <li>invoice.paid webhooks</li>
++              <li>On-chain payment verification</li>
++            </ul>
++            <a class="launch-cta" href="/app" id="pricing-cta">Start now</a>
++          </article>
++
++          <article class="pricing-card pricing-card-future reveal">
++            <p class="pricing-tier">Mainnet</p>
++            <p class="pricing-price">TBD</p>
++            <p class="pricing-note">Announced before mainnet launch.</p>
++            <ul class="pricing-list">
++              <li>Everything in Testnet</li>
++              <li>Live USDC settlement</li>
++              <li>Custom domains for pay pages</li>
++              <li>Priority support</li>
++            </ul>
++            <span class="pricing-soon">Coming soon</span>
++          </article>
++
+         </div>
+       </section>
+ 
+-      <section class="feature-grid" id="payments">
+-        <article>
+-          <p class="eyebrow">Payments</p>
+-          <h3>Direct wallet settlement</h3>
+-          <p>PaymentRouter transfers USDC from payer wallet to merchant wallet. The contract does not hold funds.</p>
+-        </article>
+-        <article id="settlement">
+-          <p class="eyebrow">Settlement</p>
+-          <h3>Native USDC across chains</h3>
+-          <p>Prepare Sepolia or Base Sepolia USDC settlement into Arc through a CCTP burn-and-mint pilot.</p>
+-        </article>
+-        <article id="agents">
+-          <p class="eyebrow">Agents</p>
+-          <h3>API-first invoice creation</h3>
+-          <p>Backends and AI agents can create invoices through protected endpoints and receive payment links.</p>
+-        </article>
+-        <article id="security">
+-          <p class="eyebrow">Security</p>
+-          <h3>Verify before paid</h3>
+-          <p>The paid state is only saved after a matching on-chain payment is found and persisted on the server.</p>
+-        </article>
++      <!-- =============================================
++           10. FAQ
++           ============================================= -->
++      <section class="faq-section" aria-labelledby="faq-title">
++        <div class="section-header">
++          <p class="eyebrow">FAQ</p>
++          <h2 id="faq-title">Frequently asked questions</h2>
++        </div>
++        <div class="faq-list" role="list">
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              What is USDC?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>USDC (USD Coin) is a regulated stablecoin issued by Circle, pegged 1:1 to the US dollar. It is backed by fully reserved assets and is one of the most widely used digital dollars. Fundline uses native USDC on Arc Testnet for all settlements.</p>
++            </div>
++          </article>
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              What wallet do I need?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>Any EVM-compatible wallet works: MetaMask, Rabby, Coinbase Wallet, or any wallet that supports custom RPC networks. You will need to add the Arc Testnet network and hold some testnet USDC. The documentation has step-by-step wallet setup instructions.</p>
++            </div>
++          </article>
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              Is it safe with no escrow?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>Yes. Removing escrow reduces risk, not increases it. The PaymentRouter contract moves USDC directly from payer to merchant in a single transaction. There is no intermediate holding address, so there is no custodial party that could be compromised or restrict access to your funds.</p>
++            </div>
++          </article>
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              When is mainnet?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>Fundline is currently live on Arc Testnet. A mainnet launch date has not been announced. Follow the project on social channels for updates. All testnet features will carry over to mainnet.</p>
++            </div>
++          </article>
++
++          <article class="faq-item reveal" role="listitem">
++            <button class="faq-question" aria-expanded="false" type="button">
++              What are the fees?
++            </button>
++            <div class="faq-answer" hidden>
++              <p>Fundline itself charges no fees on testnet. You only pay the network gas cost for each on-chain transaction, which is minimal on Arc Testnet. Mainnet fees have not been announced and will be disclosed before launch.</p>
++            </div>
++          </article>
++
++        </div>
++      </section>
++
++      <!-- =============================================
++           11. FINAL CTA
++           ============================================= -->
++      <section class="final-cta-section" aria-labelledby="final-cta-title">
++        <h2 id="final-cta-title">Ready to get paid in USDC?</h2>
++        <p class="final-cta-sub">Start creating invoices on Arc Testnet today. No signup needed.</p>
++        <div class="hero-actions">
++          <a class="launch-cta" href="/app" id="final-cta-primary">Create invoice</a>
++          <a class="docs-cta" href="/docs" id="final-cta-secondary">Read docs</a>
++        </div>
+       </section>
++
+     </main>
++
++    <!-- =============================================
++         12. FOOTER
++         ============================================= -->
++    <footer class="home-footer" role="contentinfo">
++      <div class="footer-inner">
++
++        <div class="footer-brand">
++          <a class="home-brand footer-brand-link" href="/" aria-label="Fundline home">
++            <span class="brand-symbol" aria-hidden="true"></span>
++            <span class="brand-word">Fundline</span>
++          </a>
++          <p class="footer-tagline">Non-custodial USDC invoicing on Arc Testnet.</p>
++        </div>
++
++        <nav class="footer-nav" aria-label="Footer navigation">
++          <div class="footer-col">
++            <p class="footer-col-title">Product</p>
++            <a href="/app">Create invoice</a>
++            <a href="#product">How it works</a>
++            <a href="#pricing">Pricing</a>
++          </div>
++          <div class="footer-col">
++            <p class="footer-col-title">Developers</p>
++            <a href="/docs">Documentation</a>
++            <a href="#developers">Agent API</a>
++            <a href="/docs#webhooks">Webhooks</a>
++          </div>
++          <div class="footer-col">
++            <p class="footer-col-title">Community</p>
++            <a href="#" rel="noopener noreferrer">Twitter / X</a>
++            <a href="#" rel="noopener noreferrer">GitHub</a>
++            <a href="#" rel="noopener noreferrer">Telegram</a>
++          </div>
++        </nav>
++
++      </div>
++      <div class="footer-bottom">
++        <p>Fundline is a testnet project. Not financial advice.</p>
++        <p>Built on Arc Testnet with Circle USDC.</p>
++      </div>
++    </footer>
++
+     <script src="/home.js"></script>
+   </body>
+ </html>
+diff --git a/server.js b/server.js
+index 43be0f5..cd5e8d1 100644
+--- a/server.js
++++ b/server.js
+@@ -12,6 +12,21 @@ const DATA_DIR = path.join(ROOT, "data");
+ const INVOICE_DB_PATH = path.join(DATA_DIR, "invoices.json");
+ const WEBHOOK_DB_PATH = path.join(DATA_DIR, "webhooks.json");
+ const WEBHOOK_LOG_DB_PATH = path.join(DATA_DIR, "webhook-logs.json");
++const PAYMENT_ATTEMPT_DB_PATH = path.join(DATA_DIR, "payment-attempts.json");
++const DISPATCHED_WEBHOOKS_PATH = path.join(DATA_DIR, "dispatched_webhooks.json");
++
++let dispatchedEventIds = new Set();
++try {
++  if (fs.existsSync(DISPATCHED_WEBHOOKS_PATH)) {
++    const data = JSON.parse(fs.readFileSync(DISPATCHED_WEBHOOKS_PATH, "utf8"));
++    if (Array.isArray(data)) dispatchedEventIds = new Set(data);
++  }
++} catch (e) {}
++
++function saveDispatchedEventIds() {
++  fs.writeFileSync(DISPATCHED_WEBHOOKS_PATH, JSON.stringify(Array.from(dispatchedEventIds)));
++}
++
+ const ARCSCAN_API_BASE = process.env.ARCSCAN_API_BASE || "https://testnet.arcscan.app/api/v2";
+ const ARCSCAN_EXPLORER_BASE = process.env.ARCSCAN_EXPLORER_BASE || "https://testnet.arcscan.app";
+ const ARC_USDC_TOKEN_ADDRESS = normalizeAddress(process.env.ARC_USDC_TOKEN_ADDRESS || "0x3600000000000000000000000000000000000000");
+@@ -284,6 +299,15 @@ async function handleInvoiceById(req, res, invoiceId) {
+     }
+     try {
+       const patch = await readJsonBody(req);
++      const requestedStatus = String(patch.status || "").trim().toLowerCase();
++      if (requestedStatus === "paid" && invoice.status !== "paid") {
++        sendJson(res, 409, { error: "Paid status can only be set by verified on-chain payment" });
++        return;
++      }
++      if (invoice.status === "paid" && requestedStatus && requestedStatus !== "paid") {
++        sendJson(res, 409, { error: "Paid invoices cannot be reopened from the client" });
++        return;
++      }
+       const updated = normalizeInvoicePatch(invoice, patch);
+       db.invoices[index] = updated;
+       saveInvoiceDb(db);
+@@ -467,12 +491,56 @@ function saveWebhookLogDb(db) {
+   fs.writeFileSync(WEBHOOK_LOG_DB_PATH, `${JSON.stringify({ logs: db.logs || [] }, null, 2)}\n`);
+ }
+ 
++function loadPaymentAttemptDb() {
++  ensureDataDir();
++  if (!fs.existsSync(PAYMENT_ATTEMPT_DB_PATH)) return { attempts: [] };
++  try {
++    const parsed = JSON.parse(fs.readFileSync(PAYMENT_ATTEMPT_DB_PATH, "utf8"));
++    return { attempts: Array.isArray(parsed.attempts) ? parsed.attempts.map(normalizeStoredPaymentAttempt).filter(Boolean) : [] };
++  } catch {
++    return { attempts: [] };
++  }
++}
++
++function savePaymentAttemptDb(db) {
++  ensureDataDir();
++  fs.writeFileSync(PAYMENT_ATTEMPT_DB_PATH, `${JSON.stringify({ attempts: db.attempts || [] }, null, 2)}\n`);
++}
++
+ function appendWebhookLog(log) {
+   const db = loadWebhookLogDb();
+   db.logs = [normalizeWebhookLog(log), ...db.logs].slice(0, 500);
+   saveWebhookLogDb(db);
+ }
+ 
++function createPaymentAttempt(input) {
++  const attempt = normalizePaymentAttempt({
++    ...input,
++    id: makeId(10),
++    status: "pending",
++    createdAt: new Date().toISOString(),
++    updatedAt: new Date().toISOString(),
++  });
++  const db = loadPaymentAttemptDb();
++  db.attempts = [attempt, ...db.attempts].slice(0, 1000);
++  savePaymentAttemptDb(db);
++  return attempt;
++}
++
++function updatePaymentAttempt(attemptId, patch) {
++  const db = loadPaymentAttemptDb();
++  const index = db.attempts.findIndex((attempt) => attempt.id === attemptId);
++  if (index < 0) return null;
++  const updated = normalizePaymentAttempt({
++    ...db.attempts[index],
++    ...patch,
++    updatedAt: new Date().toISOString(),
++  }, { allowExistingTimestamps: true });
++  db.attempts[index] = updated;
++  savePaymentAttemptDb(db);
++  return updated;
++}
++
+ function ensureDataDir() {
+   fs.mkdirSync(DATA_DIR, { recursive: true });
+ }
+@@ -501,6 +569,14 @@ function normalizeStoredWebhookLog(log) {
+   }
+ }
+ 
++function normalizeStoredPaymentAttempt(attempt) {
++  try {
++    return normalizePaymentAttempt(attempt, { allowExistingTimestamps: true });
++  } catch {
++    return null;
++  }
++}
++
+ function normalizeAgentInvoice(input, db) {
+   const requestedId = String(input.id || "").trim().toLowerCase();
+   let id = /^[a-f0-9]{20}$/i.test(requestedId) ? requestedId : makeId(10);
+@@ -627,6 +703,78 @@ function normalizeWebhookLog(input, options = {}) {
+   };
+ }
+ 
++function normalizePaymentAttempt(input, options = {}) {
++  const id = /^[a-f0-9]{20}$/i.test(String(input.id || "")) ? String(input.id).toLowerCase() : makeId(10);
++  const invoiceId = /^[a-f0-9]{20}$/i.test(String(input.invoiceId || "")) ? String(input.invoiceId).toLowerCase() : "";
++  if (!invoiceId) throw new Error("Invalid invoice ID");
++  const amount = roundMoney(input.amount);
++  if (amount <= 0) throw new Error("Invalid payment attempt amount");
++  const status = ["pending", "verified", "failed"].includes(String(input.status || "").trim().toLowerCase())
++    ? String(input.status).trim().toLowerCase()
++    : "pending";
++  const createdAt = options.allowExistingTimestamps && input.createdAt ? String(input.createdAt) : new Date().toISOString();
++  const updatedAt = options.allowExistingTimestamps && input.updatedAt ? String(input.updatedAt) : createdAt;
++
++  return {
++    id,
++    invoiceId,
++    invoiceNumber: String(input.invoiceNumber || "").trim().slice(0, 48),
++    chain: String(input.chain || ARC_NETWORK_NAME).trim().slice(0, 80),
++    chainId: Number(input.chainId || ARC_CHAIN_ID),
++    payerWallet: normalizeAddress(input.payerWallet),
++    merchantWallet: normalizeAddress(input.merchantWallet),
++    amount,
++    tokenSymbol: String(input.tokenSymbol || "USDC").trim().slice(0, 20),
++    tokenAddress: normalizeAddress(input.tokenAddress) || ARC_USDC_TOKEN_ADDRESS,
++    onchainInvoiceId: normalizeBytes32(input.onchainInvoiceId),
++    txHash: normalizeTxHash(input.txHash),
++    status,
++    error: String(input.error || "").trim().slice(0, 500),
++    verifiedAt: String(input.verifiedAt || "").trim(),
++    match: input.match && typeof input.match === "object" ? sanitizePaymentMatch(input.match) : null,
++    createdAt,
++    updatedAt,
++  };
++}
++
++function sanitizePaymentMatch(input = {}) {
++  return {
++    source: String(input.source || "").trim().slice(0, 80),
++    txHash: normalizeTxHash(input.txHash),
++    explorerUrl: String(input.explorerUrl || "").trim().slice(0, 500),
++    from: normalizeAddress(input.from),
++    to: normalizeAddress(input.to),
++    timestamp: String(input.timestamp || "").trim(),
++    blockNumber: String(input.blockNumber || "").trim().slice(0, 80),
++    tokenSymbol: String(input.tokenSymbol || "USDC").trim().slice(0, 20),
++    tokenAddress: normalizeAddress(input.tokenAddress) || String(input.tokenAddress || "").trim().slice(0, 80),
++    rawAmount: String(input.rawAmount || "").trim().slice(0, 120),
++    onchainInvoiceId: normalizeBytes32(input.onchainInvoiceId),
++    referenceVerified: Boolean(input.referenceVerified),
++    transferVerified: Boolean(input.transferVerified),
++    paymentAttemptId: /^[a-f0-9]{20}$/i.test(String(input.paymentAttemptId || "")) ? String(input.paymentAttemptId).toLowerCase() : "",
++  };
++}
++
++function findTxHashPaymentOwner(invoices, txHash, excludeInvoiceId = "") {
++  const normalized = normalizeTxHash(txHash);
++  if (!normalized) return null;
++  const excluded = String(excludeInvoiceId || "").toLowerCase();
++
++  const ownerInvoice = (invoices || []).find((invoice) => {
++    if (!invoice || invoice.id === excluded) return false;
++    if (normalizeTxHash(invoice.txHash) === normalized) return true;
++    return normalizeTxHash(invoice.verifiedPayment?.txHash) === normalized;
++  });
++  if (ownerInvoice) return ownerInvoice;
++
++  const ownerAttempt = loadPaymentAttemptDb().attempts.find((attempt) => {
++    if (!attempt || attempt.invoiceId === excluded || attempt.status !== "verified") return false;
++    return normalizeTxHash(attempt.txHash || attempt.match?.txHash) === normalized;
++  });
++  return ownerAttempt ? { id: ownerAttempt.invoiceId, number: ownerAttempt.invoiceNumber } : null;
++}
++
+ function normalizeInvoicePatch(existing, patch) {
+   const allowed = {
+     ...existing,
+@@ -775,18 +923,27 @@ async function dispatchInvoicePaidWebhooks(invoice, req) {
+     invoice: decorateInvoiceForAgent(invoice, req),
+   };
+ 
+-  const results = await Promise.allSettled(webhooks.map((webhook) => sendWebhookWithLog(webhook, payload, invoice)));
+-  const sent = results.filter((result) => result.status === "fulfilled").length;
+-  const failed = results.length - sent;
+-  if (failed) console.log(`Webhook invoice.paid delivered to ${sent}/${results.length} endpoint(s)`);
++  const results = await Promise.allSettled(webhooks.map(async (webhook) => {
++    if (!invoice.webhookEventId) return Promise.resolve(null);
++    const idKey = `${invoice.webhookEventId}:${webhook.id}`;
++    if (dispatchedEventIds.has(idKey)) return Promise.resolve(null);
++    
++    const res = await sendWebhookWithLog(webhook, payload, invoice, invoice.webhookEventId);
++    dispatchedEventIds.add(idKey);
++    saveDispatchedEventIds();
++    return res;
++  }));
++  const sent = results.filter((result) => result.status === "fulfilled" && result.value !== null).length;
++  const failed = results.filter((result) => result.status === "rejected").length;
++  if (failed || sent) console.log(`Webhook invoice.paid delivered to ${sent}/${results.length} endpoint(s)`);
+   return { sent, failed };
+ }
+ 
+-async function sendWebhookWithLog(webhook, payload, invoice) {
++async function sendWebhookWithLog(webhook, payload, invoice, idempotencyKey) {
+   const deliveryId = makeId(10);
+   const startedAt = Date.now();
+   try {
+-    const result = await sendWebhook(webhook, payload, deliveryId);
++    const result = await sendWebhook(webhook, payload, deliveryId, idempotencyKey);
+     appendWebhookLog({
+       deliveryId,
+       webhookId: webhook.id,
+@@ -819,7 +976,7 @@ async function sendWebhookWithLog(webhook, payload, invoice) {
+   }
+ }
+ 
+-function sendWebhook(webhook, payload, deliveryId = makeId(10)) {
++function sendWebhook(webhook, payload, deliveryId = makeId(10), idempotencyKey = "") {
+   return new Promise((resolve, reject) => {
+     const target = new URL(webhook.url);
+     const transport = target.protocol === "http:" ? http : https;
+@@ -831,6 +988,9 @@ function sendWebhook(webhook, payload, deliveryId = makeId(10)) {
+       "X-Fundline-Event": payload.event,
+       "X-Fundline-Delivery": deliveryId,
+     };
++    if (idempotencyKey) {
++      headers["Idempotency-Key"] = idempotencyKey;
++    }
+     if (webhook.secret) {
+       const signature = `sha256=${crypto.createHmac("sha256", webhook.secret).update(body).digest("hex")}`;
+       headers["X-Fundline-Signature"] = signature;
+@@ -874,14 +1034,31 @@ async function handleVerifyPayment(req, res) {
+     return;
+   }
+ 
++  let attempt = null;
+   try {
+     const body = await readJsonBody(req);
++    const invoiceId = String(body.invoiceId || "").trim().toLowerCase();
+     const payerWallet = normalizeAddress(body.payerWallet);
+-    const merchantWallet = normalizeAddress(body.merchantWallet);
+-    const amount = Number(body.amount);
+     const txHash = normalizeTxHash(body.txHash);
+-    const onchainInvoiceId = normalizeBytes32(body.onchainInvoiceId);
+-    const createdAt = body.createdAt ? new Date(body.createdAt) : null;
++
++    if (!/^[a-f0-9]{20}$/i.test(invoiceId)) {
++      sendJson(res, 400, { error: "Invoice ID is required" });
++      return;
++    }
++
++    const db = loadInvoiceDb();
++    const invoiceIndex = db.invoices.findIndex((item) => item.id === invoiceId);
++    const invoice = invoiceIndex >= 0 ? db.invoices[invoiceIndex] : null;
++    if (!invoice) {
++      sendJson(res, 404, { error: "Invoice not found" });
++      return;
++    }
++
++    const merchantWallet = invoice.merchantWallet;
++    const amount = Number(invoice.total);
++    const onchainInvoiceId = normalizeBytes32(invoice.onchainInvoiceId);
++    const createdAt = invoice.createdAt ? new Date(invoice.createdAt) : null;
++    const now = new Date().toISOString();
+ 
+     if (!payerWallet) {
+       sendJson(res, 400, { error: "Payer wallet is required" });
+@@ -899,43 +1076,204 @@ async function handleVerifyPayment(req, res) {
+       sendJson(res, 400, { error: "Invoice amount is invalid" });
+       return;
+     }
++    if (ARC_PAYMENT_ROUTER_ADDRESS && !onchainInvoiceId) {
++      sendJson(res, 400, { error: "Invoice payment reference is missing" });
++      return;
++    }
++
++    attempt = createPaymentAttempt({
++      invoiceId: invoice.id,
++      invoiceNumber: invoice.number,
++      payerWallet,
++      merchantWallet,
++      amount,
++      tokenSymbol: "USDC",
++      tokenAddress: ARC_USDC_TOKEN_ADDRESS,
++      onchainInvoiceId,
++      txHash,
++      chain: ARC_NETWORK_NAME,
++      chainId: ARC_CHAIN_ID,
++    });
++
++    if (invoice.status === "paid") {
++      const existingHash = normalizeTxHash(invoice.txHash);
++      if (txHash && existingHash && txHash !== existingHash) {
++        const failedAttempt = updatePaymentAttempt(attempt.id, {
++          status: "failed",
++          error: "Invoice is already paid with a different transaction",
++        });
++        sendJson(res, 409, { error: "Invoice is already paid with a different transaction", attempt: failedAttempt });
++        return;
++      }
++      const match = sanitizePaymentMatch(invoice.verifiedPayment || {
++        source: invoice.verificationSource || "stored_verified_payment",
++        txHash: existingHash,
++        explorerUrl: existingHash ? `${ARCSCAN_EXPLORER_BASE}/tx/${existingHash}` : "",
++        from: invoice.payerWallet,
++        to: invoice.merchantWallet,
++        timestamp: invoice.paidAt,
++        tokenSymbol: "USDC",
++        tokenAddress: ARC_USDC_TOKEN_ADDRESS,
++        onchainInvoiceId,
++        referenceVerified: Boolean(onchainInvoiceId),
++        transferVerified: true,
++      });
++      const verifiedAttempt = updatePaymentAttempt(attempt.id, {
++        status: "verified",
++        verifiedAt: now,
++        txHash: match.txHash,
++        match,
++      });
++      sendJson(res, 200, { verified: true, match, invoice, attempt: verifiedAttempt });
++      return;
++    }
++
++    const duplicateBeforeScan = txHash ? findTxHashPaymentOwner(db.invoices, txHash, invoice.id) : null;
++    if (duplicateBeforeScan) {
++      if (invoice.status === "verifying") {
++        db.invoices[invoiceIndex] = normalizeInvoice(
++          {
++            ...invoice,
++            status: "open",
++            lastVerificationAt: now,
++          },
++          { allowExistingTimestamps: true },
++        );
++        saveInvoiceDb(db);
++      }
++      const failedAttempt = updatePaymentAttempt(attempt.id, {
++        status: "failed",
++        error: `Transaction already verifies invoice ${duplicateBeforeScan.number || duplicateBeforeScan.id}`,
++      });
++      sendJson(res, 409, { error: "This transaction is already used for another invoice", attempt: failedAttempt });
++      return;
++    }
+ 
+     const match = await findArcPayment({
++      invoiceId: invoice.id,
+       payerWallet,
+       merchantWallet,
+       amount,
+       onchainInvoiceId,
+       createdAt: createdAt && Number.isFinite(createdAt.getTime()) ? createdAt : null,
+       txHash,
++      requireInvoiceReference: Boolean(ARC_PAYMENT_ROUTER_ADDRESS && onchainInvoiceId),
+     });
+ 
+     if (!match) {
++      if (invoice.status === "verifying") {
++        db.invoices[invoiceIndex] = normalizeInvoice(
++          {
++            ...invoice,
++            status: "open",
++            lastVerificationAt: now,
++          },
++          { allowExistingTimestamps: true },
++        );
++        saveInvoiceDb(db);
++      }
++      const pendingAttempt = updatePaymentAttempt(attempt.id, {
++        status: "pending",
++        error: ARC_PAYMENT_ROUTER_ADDRESS && onchainInvoiceId
++          ? "No matching USDC Transfer with the invoice reference was found yet."
++          : "No matching USDC payment was found on Arcscan yet.",
++      });
+       sendJson(res, 200, {
+         verified: false,
+-        error: "No matching USDC payment was found on Arcscan yet.",
++        status: "pending",
++        error: pendingAttempt.error,
++        attempt: pendingAttempt,
++      });
++      return;
++    }
++
++    const duplicateAfterScan = findTxHashPaymentOwner(db.invoices, match.txHash, invoice.id);
++    if (duplicateAfterScan) {
++      if (invoice.status === "verifying") {
++        db.invoices[invoiceIndex] = normalizeInvoice(
++          {
++            ...invoice,
++            status: "open",
++            lastVerificationAt: now,
++          },
++          { allowExistingTimestamps: true },
++        );
++        saveInvoiceDb(db);
++      }
++      const failedAttempt = updatePaymentAttempt(attempt.id, {
++        status: "failed",
++        txHash: match.txHash,
++        error: `Transaction already verifies invoice ${duplicateAfterScan.number || duplicateAfterScan.id}`,
++        match,
+       });
++      sendJson(res, 409, { error: "This transaction is already used for another invoice", attempt: failedAttempt });
+       return;
+     }
+ 
+-    sendJson(res, 200, { verified: true, match });
++    const sanitizedMatch = sanitizePaymentMatch({
++      ...match,
++      paymentAttemptId: attempt.id,
++      onchainInvoiceId,
++    });
++    const updated = normalizeInvoice(
++      {
++        ...invoice,
++        status: "paid",
++        paidAt: sanitizedMatch.timestamp || now,
++        payerWallet,
++        txHash: sanitizedMatch.txHash,
++        verifiedAt: now,
++        verificationSource: sanitizedMatch.source,
++        verifiedPayment: sanitizedMatch,
++        lastVerificationAt: now,
++        webhookEventId: invoice.webhookEventId || crypto.randomUUID(),
++      },
++      { allowExistingTimestamps: true },
++    );
++    db.invoices[invoiceIndex] = updated;
++    saveInvoiceDb(db);
++
++    const verifiedAttempt = updatePaymentAttempt(attempt.id, {
++      status: "verified",
++      verifiedAt: now,
++      txHash: sanitizedMatch.txHash,
++      match: sanitizedMatch,
++    });
++
++    if (invoice.status !== "paid") {
++      dispatchInvoicePaidWebhooks(updated, req).catch((error) => {
++        console.log(`Webhook dispatch failed: ${error.message || "Unknown error"}`);
++      });
++    }
++
++    sendJson(res, 200, { verified: true, match: sanitizedMatch, invoice: updated, attempt: verifiedAttempt });
+   } catch (error) {
++    if (attempt?.id) {
++      updatePaymentAttempt(attempt.id, {
++        status: "failed",
++        error: error.message || "Arcscan verification failed",
++      });
++    }
+     sendJson(res, 500, { error: error.message || "Arcscan verification failed" });
+   }
+ }
+ 
+ async function findArcPayment(criteria) {
++  if (criteria.requireInvoiceReference) {
++    if (criteria.txHash) return findPaymentInRpcReceipt(criteria);
++    return findRecentReferencedPayment(criteria);
++  }
++
+   if (criteria.txHash) {
+     const receiptMatch = await findPaymentInRpcReceipt(criteria);
+     if (receiptMatch) return receiptMatch;
+     const transferMatch = await findTokenTransferByTx(criteria);
+     if (transferMatch) return transferMatch;
+-    const txMatch = await findNativeTransferByTx(criteria);
+-    if (txMatch) return txMatch;
+   }
+ 
+   const transferMatch = await findRecentTokenTransfer(criteria);
+   if (transferMatch) return transferMatch;
+-  return findRecentNativeTransfer(criteria);
++  return null;
+ }
+ 
+ async function findPaymentInRpcReceipt(criteria) {
+@@ -946,6 +1284,7 @@ async function findPaymentInRpcReceipt(criteria) {
+     const logs = Array.isArray(receipt.logs) ? receipt.logs : [];
+     const routerEvent = findInvoicePaidLog(logs, criteria);
+     const transferEvent = findUsdcTransferLog(logs, criteria);
++    if (criteria.requireInvoiceReference && (!routerEvent || !transferEvent)) return null;
+     if (!routerEvent && !transferEvent) return null;
+     return {
+       source: routerEvent ? "rpc_payment_router_event" : "rpc_usdc_transfer_log",
+@@ -958,12 +1297,29 @@ async function findPaymentInRpcReceipt(criteria) {
+       tokenSymbol: "USDC",
+       tokenAddress: ARC_USDC_TOKEN_ADDRESS,
+       rawAmount: String((routerEvent || transferEvent).amount),
++      onchainInvoiceId: routerEvent ? criteria.onchainInvoiceId : "",
++      referenceVerified: Boolean(routerEvent),
++      transferVerified: Boolean(transferEvent),
+     };
+   } catch {
+     return null;
+   }
+ }
+ 
++async function findRecentReferencedPayment(criteria) {
++  const transactions = await fetchArcscanItems(`/addresses/${criteria.payerWallet}/transactions`, {}, 3);
++  for (const transaction of transactions) {
++    const txHash = normalizeTxHash(transaction.hash || transaction.transaction_hash);
++    if (!txHash) continue;
++    const from = normalizeAddress(transaction.from?.hash || transaction.from);
++    if (from && !sameAddress(from, criteria.payerWallet)) continue;
++    if (!isRecentEnough(transaction.timestamp, criteria.createdAt)) continue;
++    const match = await findPaymentInRpcReceipt({ ...criteria, txHash });
++    if (match) return { ...match, timestamp: transaction.timestamp || match.timestamp };
++  }
++  return null;
++}
++
+ function findInvoicePaidLog(logs, criteria) {
+   if (!ARC_PAYMENT_ROUTER_ADDRESS) return null;
+   const expectedAmount = amountToUnits(criteria.amount, ARC_USDC_DECIMALS);
+@@ -977,7 +1333,7 @@ function findInvoicePaidLog(logs, criteria) {
+     const amount = words[0] ? BigInt(words[0]) : 0n;
+     const token = words[1] ? topicToAddress(words[1]) : "";
+     if (ARC_USDC_TOKEN_ADDRESS && token && !sameAddress(token, ARC_USDC_TOKEN_ADDRESS)) continue;
+-    if (amount >= expectedAmount) return { ...log, amount };
++    if (amount === expectedAmount) return { ...log, amount };
+   }
+   return null;
+ }
+@@ -990,7 +1346,7 @@ function findUsdcTransferLog(logs, criteria) {
+     if (!sameAddress(topicToAddress(log.topics[1]), criteria.payerWallet)) continue;
+     if (!sameAddress(topicToAddress(log.topics[2]), criteria.merchantWallet)) continue;
+     const amount = log.data && /^0x[0-9a-f]+$/i.test(log.data) ? BigInt(log.data) : 0n;
+-    if (amount >= expectedAmount) return { ...log, amount };
++    if (amount === expectedAmount) return { ...log, amount };
+   }
+   return null;
+ }
+@@ -1044,7 +1400,7 @@ function isMatchingTokenTransfer(transfer, criteria) {
+   const decimals = Number(transfer.total?.decimals ?? transfer.token?.decimals ?? 6);
+   const rawValue = parseUnitsValue(transfer.total?.value ?? transfer.value);
+   const expected = amountToUnits(criteria.amount, Number.isFinite(decimals) ? decimals : 6);
+-  return rawValue >= expected;
++  return rawValue === expected;
+ }
+ 
+ function toTokenTransferMatch(transfer) {
+diff --git a/styles.css b/styles.css
+index 5fd81a9..9e73566 100644
+--- a/styles.css
++++ b/styles.css
+@@ -1463,3 +1463,6 @@ select {
+     width: 100%;
+   }
+ }
++
++@keyframes errorRing { 0% { box-shadow: 0 0 0 0px rgba(255, 77, 79, 0.6); } 100% { box-shadow: 0 0 0 6px rgba(255, 77, 79, 0); } } .error-ring { animation: errorRing 0.4s ease-out; border-color: #ff4d4f !important; color: #ff4d4f !important; }
++
