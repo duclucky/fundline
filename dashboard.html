@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Seller Dashboard - Fundline</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="side">
+        <div class="brand">
+          <img src="/assets/fundline-logo.png?v=2" alt="" class="brand-img" />
+          <div>
+            <strong>Fundline</strong>
+            <span>Seller Dashboard</span>
+          </div>
+        </div>
+        <nav class="nav" aria-label="Dashboard navigation">
+          <button class="nav-item is-active" data-view="metrics" type="button">Dashboard</button>
+          <button class="nav-item" data-view="products" type="button">Products</button>
+          <button class="nav-item" data-view="webhooks" type="button">Webhooks</button>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Seller</p>
+            <h1>Dashboard</h1>
+          </div>
+          <div class="top-actions">
+            <div class="wallet-control" id="walletControl">
+              <button class="primary-action" id="walletButton" type="button">Connect Wallet</button>
+              <div class="wallet-menu" id="walletMenu" hidden>
+                <div class="wallet-menu-head">
+                  <span>Wallet</span>
+                  <strong id="walletMenuStatus">Connected</strong>
+                </div>
+                <div class="wallet-menu-row">
+                  <span>Address</span>
+                  <strong id="walletMenuAddress">-</strong>
+                </div>
+                <div class="wallet-menu-actions">
+                  <a id="storefrontLink" href="#" target="_blank" class="ghost-action">View Storefront</a>
+                  <button class="danger-action" id="walletDisconnect" type="button">Logout</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <section id="gateSection">
+          <div class="wallet-gate">
+            <div>
+              <p class="eyebrow">Authentication required</p>
+              <h2>Sign in to view dashboard</h2>
+              <p>Connect your wallet and sign the message to verify ownership.</p>
+            </div>
+            <button class="primary-action" id="walletGateConnect" type="button">Sign In</button>
+          </div>
+        </section>
+
+        <section id="dashboardSection" hidden>
+          <section class="stats-grid">
+            <article class="stat">
+              <span>Paid revenue</span>
+              <strong id="totalRevenue">0.00 USDC</strong>
+            </article>
+            <article class="stat">
+              <span>Open invoices</span>
+              <strong id="openCount">0</strong>
+            </article>
+            <article class="stat">
+              <span>Paid invoices</span>
+              <strong id="paidCount">0</strong>
+            </article>
+            <article class="stat">
+              <span>Expired</span>
+              <strong id="expiredCount">0</strong>
+            </article>
+          </section>
+
+          <section class="view is-active" data-panel="metrics">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">History</p>
+                <h2>Payment History</h2>
+              </div>
+            </div>
+            <div class="invoice-list" id="paymentHistoryList"></div>
+
+            <div class="section-head" style="margin-top: 32px;">
+              <div>
+                <p class="eyebrow">Customers</p>
+                <h2>Recent Customers</h2>
+              </div>
+            </div>
+            <div class="invoice-list" id="customersList"></div>
+          </section>
+
+          <section class="view" data-panel="products" hidden>
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Storefront</p>
+                <h2>Products</h2>
+              </div>
+              <button class="primary-action" id="newProductBtn">New Product</button>
+            </div>
+            
+            <form id="productForm" class="invoice-form" hidden style="margin-bottom: 24px;">
+              <div class="form-grid">
+                <label>
+                  <span class="field-label">Title</span>
+                  <input name="title" required placeholder="Consulting Hour" />
+                </label>
+                <label>
+                  <span class="field-label">Price (USDC)</span>
+                  <input type="number" step="0.01" min="0.01" name="priceUSDC" required placeholder="100.00" />
+                </label>
+                <label style="grid-column: 1 / -1">
+                  <span class="field-label">Description</span>
+                  <input name="description" placeholder="1 hour of frontend consulting" />
+                </label>
+                <label style="grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;">
+                  <input type="checkbox" name="active" checked />
+                  <span class="field-label" style="margin: 0;">Active (visible on storefront)</span>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-action" id="cancelProductBtn">Cancel</button>
+                <button type="submit" class="primary-action">Save Product</button>
+              </div>
+            </form>
+
+            <div class="invoice-list" id="productsList"></div>
+          </section>
+        
+          <section class="view" data-panel="webhooks" hidden>
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Integrations</p>
+                <h2>Webhooks</h2>
+              </div>
+              <button class="primary-action" id="newWebhookBtn">Add Webhook</button>
+            </div>
+            
+            <form id="webhookForm" class="invoice-form" hidden style="margin-bottom: 24px;">
+              <div class="form-grid">
+                <label>
+                  <span class="field-label">Endpoint URL</span>
+                  <input type="url" name="url" required placeholder="https://api.example.com/webhook" />
+                </label>
+                <label>
+                  <span class="field-label">Event Type</span>
+                  <select name="event" class="form-select" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); color: var(--text-base);">
+                    <option value="*">All Events (*)</option>
+                    <option value="invoice.paid">invoice.paid</option>
+                    <option value="invoice.failed">invoice.failed</option>
+                    <option value="invoice.overdue">invoice.overdue</option>
+                  </select>
+                </label>
+                <label style="grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;">
+                  <input type="checkbox" name="enabled" checked />
+                  <span class="field-label" style="margin: 0;">Enabled</span>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-action" id="cancelWebhookBtn">Cancel</button>
+                <button type="submit" class="primary-action">Save Webhook</button>
+              </div>
+            </form>
+
+            <div class="invoice-list" id="webhooksList"></div>
+
+            <div class="section-head" style="margin-top: 32px;">
+              <div>
+                <p class="eyebrow">Logs</p>
+                <h2>Recent Deliveries</h2>
+              </div>
+            </div>
+            <div class="invoice-list" id="webhookLogsList"></div>
+          </section>
+
+        </section>
+      </main>
+    </div>
+    <script src="/dashboard.js"></script>
+  </body>
+</html>
+

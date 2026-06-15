@@ -20,10 +20,9 @@ const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
 const ERC20_DECIMALS_SELECTOR = "0x313ce567";
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
-const CCTP_GET_MIN_FEE_SELECTOR = "0x516990e3";
 const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
-const CCTP_STANDARD_FINALITY_THRESHOLD = 1000;
-const CCTP_FAST_FINALITY_THRESHOLD = 500;
+const CCTP_STANDARD_FINALITY_THRESHOLD = 2000;
+const CCTP_FAST_FINALITY_THRESHOLD = 1000;
 const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 const CCTP_IRIS_SANDBOX_BASE = "https://iris-api-sandbox.circle.com";
 
@@ -127,6 +126,7 @@ const els = {
 };
 
 let toastTimer = null;
+let _activeBridgeContext = null; // holds state for retry across both pay paths
 
 init();
 
@@ -388,6 +388,10 @@ function disconnectWallet(options = {}) {
     state.settings = { ...state.settings, merchantWallet: "" };
     saveSettings();
   }
+  
+  state.invoices = [];
+  saveInvoices();
+  
   refreshCurrentView();
   if (!options.silent) showToast("Wallet disconnected.");
 }
@@ -618,9 +622,12 @@ function renderSettings() {
   els.settingsForm.elements.merchantName.value = state.settings.merchantName || "";
   els.settingsForm.elements.merchantWallet.value = getConnectedWallet() || "";
   els.settingsForm.elements.telegramChatId.value = state.settings.telegramChatId || "";
-  els.settingsForm.elements.telegramEnabled.checked = Boolean(state.settings.telegramEnabled);
+  if (state.settings.alerts) {
+    if (els.settingsForm.elements["alerts.paid"]) els.settingsForm.elements["alerts.paid"].checked = Boolean(state.settings.alerts.paid);
+    if (els.settingsForm.elements["alerts.failed"]) els.settingsForm.elements["alerts.failed"].checked = Boolean(state.settings.alerts.failed);
+    if (els.settingsForm.elements["alerts.overdue"]) els.settingsForm.elements["alerts.overdue"].checked = Boolean(state.settings.alerts.overdue);
+  }
 }
-
 function seedLineItems() {
   if (!els.lineItems || els.lineItems.children.length) return;
   setDefaultDueDate();
@@ -777,7 +784,7 @@ function validateSettings() {
   return "";
 }
 
-function saveSettingsFromForm(event) {
+async function saveSettingsFromForm(event) {
   event.preventDefault();
   const settings = readSettingsDraft();
   const merchantName = settings.merchantName;
@@ -785,14 +792,64 @@ function saveSettingsFromForm(event) {
     showToast("Display name is required.");
     return;
   }
-  if (settings.telegramEnabled && !settings.telegramChatId) {
-    showToast("Add Telegram chat ID before enabling alerts.");
+  
+  const connected = getConnectedWallet();
+  if (!connected) {
+    showToast("Please connect your wallet to save settings.");
     return;
   }
+
+  try {
+    let sessionStr = localStorage.getItem("fundline_dashboard_session");
+    let session = sessionStr ? JSON.parse(sessionStr) : null;
+    if (!session || session.wallet.toLowerCase() !== connected.toLowerCase()) {
+      const issuedAt = new Date().toISOString();
+      const message = [
+        "Sign in to Fundline",
+        "",
+        "This signature proves you control this wallet.",
+        "It does not move funds or create an on-chain transaction.",
+        "",
+        `Issued at: ${issuedAt}`,
+      ].join("\n");
+      
+      let signature = "";
+      try {
+        signature = await window.ethereum.request({ method: "personal_sign", params: ["0x" + [...message].map(c => c.charCodeAt(0).toString(16)).join(''), connected] });
+      } catch (e) {
+        if (Number(e?.code) === 4001) throw e;
+        signature = await window.ethereum.request({ method: "personal_sign", params: [message, connected] });
+      }
+      session = { wallet: connected, signature, issuedAt };
+      localStorage.setItem("fundline_dashboard_session", JSON.stringify(session));
+    }
+
+    const res = await fetch("/api/dashboard/settings", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "x-fundline-wallet": session.wallet,
+        "x-fundline-signature": session.signature,
+        "x-fundline-issued-at": session.issuedAt,
+      },
+      body: JSON.stringify({
+        telegramChatId: settings.telegramChatId,
+        alerts: settings.alerts
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Failed to save settings to server");
+    }
+  } catch (err) {
+    if (err.code !== 4001) showToast(err.message);
+    return;
+  }
+
   state.settings = {
     ...state.settings,
     ...settings,
-    merchantWallet: getConnectedWallet(),
+    merchantWallet: connected,
   };
   saveSettings();
   renderSettings();
@@ -804,10 +861,13 @@ function readSettingsDraft() {
   return {
     merchantName: String(form.get("merchantName") || "").trim(),
     telegramChatId: String(form.get("telegramChatId") || "").trim(),
-    telegramEnabled: Boolean(form.get("telegramEnabled")),
+    alerts: {
+      paid: form.get("alerts.paid") === "on",
+      failed: form.get("alerts.failed") === "on",
+      overdue: form.get("alerts.overdue") === "on",
+    }
   };
 }
-
 function handleInvoiceAction(event) {
   const target = event.target.closest("[data-action]");
   if (!target) return;
@@ -1162,12 +1222,14 @@ function renderPayItems(invoice) {
   `;
 }
 
-function createBridgePayProgress() {
+// isBridge: if false (direct Arc pay), the bridge step is shown as "skipped".
+function createBridgePayProgress(isBridge = true) {
   return [
-    { key: "check", label: "Check source balance", status: "pending", detail: "Waiting" },
-    { key: "bridge", label: "Bridge USDC to Arc", status: "pending", detail: "Waiting" },
-    { key: "pay", label: "Pay invoice", status: "pending", detail: "Waiting" },
-    { key: "verify", label: "Verify payment", status: "pending", detail: "Waiting" },
+    { key: "check",    label: "Check balance",     status: "pending", detail: "Waiting",  skipped: false },
+    { key: "bridge",   label: "Bridge USDC to Arc",status: isBridge ? "pending" : "skipped", detail: isBridge ? "Waiting" : "Paying on Arc directly", skipped: !isBridge },
+    { key: "pay",      label: "Pay invoice",        status: "pending", detail: "Waiting",  skipped: false },
+    { key: "verify",   label: "Verify payment",     status: "pending", detail: "Waiting",  skipped: false },
+    { key: "receipt",  label: "Receipt issued",     status: "pending", detail: "Waiting",  skipped: false },
   ];
 }
 
@@ -1186,14 +1248,30 @@ function renderBridgePayProgress(steps) {
   container.hidden = false;
   container.innerHTML = steps
     .map(
-      (step) => `
-        <div class="progress-step progress-${escapeHtml(step.status)}">
-          <span>${escapeHtml(step.label)}</span>
-          <strong>${escapeHtml(step.detail)}</strong>
-        </div>
-      `,
+      (step) => {
+        const isError = step.status === "error";
+        const isSkipped = step.status === "skipped";
+        return `
+          <div class="progress-step progress-${escapeHtml(step.status)}">
+            <span>${escapeHtml(step.label)}</span>
+            <span class="progress-step-right">
+              ${isError ? `<button class="progress-retry-btn" data-retry-step="${escapeHtml(step.key)}" type="button">Retry</button>` : ""}
+              <strong>${escapeHtml(step.detail)}</strong>
+            </span>
+          </div>
+        `;
+      },
     )
     .join("");
+  // Bind retry buttons
+  container.querySelectorAll(".progress-retry-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const step = btn.dataset.retryStep;
+      if (_activeBridgeContext?.retry) {
+        _activeBridgeContext.retry(step);
+      }
+    });
+  });
 }
 
 async function handleInvoicePaymentAction(id) {
@@ -1247,23 +1325,101 @@ async function payInvoiceWithWallet(id) {
   }
 
   const button = document.querySelector("#payWithWallet");
-  setButtonBusy(button, "Preparing payment...");
+  button?.classList.remove("error-ring");
+
+  // Direct Arc pay — uses the same 5-step stepper, bridge step shown as skipped
+  const progress = createBridgePayProgress(false);
+  renderBridgePayProgress(progress);
+  _activeBridgeContext = {
+    retry: (fromStep) => _retryDirectPay(id, fromStep),
+    payerWallet,
+    steps: progress,
+  };
+
   try {
-    button.classList.remove("error-ring");
-    await submitArcPayment(invoice, payerWallet, button);
+    setProgressStep(progress, "check", "active", "Checking Arc USDC balance...");
+    setButtonBusy(button, "Checking balance...");
+    const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+    const balance = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payerWallet);
+    if (balance < amountUnits) {
+      throw new Error(`Insufficient Arc USDC. Need ${formatUsdc(invoice.total)} USDC, wallet has ${formatUnits(balance, ARC_USDC_DECIMALS)} USDC.`);
+    }
+    setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
+
+    setProgressStep(progress, "pay", "active", "Preparing payment...");
+    setButtonBusy(button, "Preparing payment...");
+    await submitArcPaymentWithProgress(invoice, payerWallet, button, progress);
   } catch (error) {
     const isRejected = error?.code === 4001 || String(error?.message).toLowerCase().includes("rejected") || String(error?.message).toLowerCase().includes("denied");
-    const msg = isRejected ? "Transaction rejected by user." : error?.message || "Wallet payment failed.";
-    showToast(msg);
+    const msg = isRejected ? "Rejected by user" : error?.message || "Wallet payment failed";
+    const activeStep = progress.find((s) => s.status === "active");
+    if (activeStep) setProgressStep(progress, activeStep.key, "error", msg);
+    showToast(isRejected ? "Transaction rejected by user." : error?.message || "Wallet payment failed.");
     if (isRejected) {
-      button.classList.add("error-ring");
-      setTimeout(() => button.classList.remove("error-ring"), 3000);
+      button?.classList.add("error-ring");
+      setTimeout(() => button?.classList.remove("error-ring"), 3000);
     }
   } finally {
     resetPayWithWalletButton(button, invoice);
+    await refreshPaymentSourceStatus(id, { silent: true });
   }
 }
 
+// Internal: retry direct pay from a given step
+async function _retryDirectPay(id, fromStep) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice || invoice.status === "paid") return;
+  const ctx = _activeBridgeContext;
+  if (!ctx) return;
+  const progress = ctx.steps;
+  // Reset error on fromStep and downstream steps
+  const keys = ["check", "bridge", "pay", "verify", "receipt"];
+  const fromIdx = keys.indexOf(fromStep);
+  keys.slice(fromIdx).forEach((k) => {
+    const s = progress.find((x) => x.key === k);
+    if (s && s.status === "error") { s.status = "pending"; s.detail = "Waiting"; }
+  });
+  renderBridgePayProgress(progress);
+  const button = document.querySelector("#payWithWallet");
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  const provider = window.ethereum;
+  const payerWallet = ctx.payerWallet || getConnectedWallet();
+  if (!payerWallet) return;
+  try {
+    if (fromStep === "check") {
+      setProgressStep(progress, "check", "active", "Checking Arc USDC balance...");
+      setButtonBusy(button, "Checking balance...");
+      const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+      const balance = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payerWallet);
+      if (balance < amountUnits) throw new Error(`Insufficient Arc USDC. Need ${formatUsdc(invoice.total)} USDC.`);
+      setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
+    }
+    if (fromStep === "check" || fromStep === "pay") {
+      setProgressStep(progress, "pay", "active", "Preparing payment...");
+      setButtonBusy(button, "Paying invoice...");
+      await submitArcPaymentWithProgress(invoice, payerWallet, button, progress);
+    }
+    if (fromStep === "verify") {
+      setProgressStep(progress, "verify", "active", "Verifying on Arcscan...");
+      setButtonBusy(button, "Verifying...");
+      const txHash = ctx.arcTxHash || "";
+      const verified = await autoVerifyWithProgress(id, payerWallet, txHash, progress);
+      if (verified) {
+        setProgressStep(progress, "receipt", "done", "Receipt available");
+      }
+    }
+  } catch (error) {
+    const activeStep = progress.find((s) => s.status === "active");
+    if (activeStep) setProgressStep(progress, activeStep.key, "error", error?.message || "Failed");
+    showToast(error?.message || "Retry failed.");
+  } finally {
+    resetPayWithWalletButton(button, invoice);
+    await refreshPaymentSourceStatus(id, { silent: true });
+  }
+}
+
+// Legacy wrapper — kept for backward compat; bridge path calls this directly.
+// Direct pay path now calls submitArcPaymentWithProgress instead.
 async function submitArcPayment(invoice, payerWallet, button) {
   const provider = window.ethereum;
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
@@ -1309,6 +1465,79 @@ async function submitArcPayment(invoice, payerWallet, button) {
   return autoVerifySubmittedPayment(invoice.id, { payerWallet, txHash, button });
 }
 
+// Stepper-aware version used by direct pay path.
+async function submitArcPaymentWithProgress(invoice, payerWallet, button, progress) {
+  const provider = window.ethereum;
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  setProgressStep(progress, "pay", "active", "Switching to Arc network...");
+  await ensurePaymentNetwork(provider, config);
+  const onchainDecimals = await readUsdcDecimals(provider, config.usdcTokenAddress);
+  if (onchainDecimals !== 6) {
+    throw new Error(`Critical Error: Expected Arc USDC to have 6 decimals but found ${onchainDecimals}.`);
+  }
+  const amountUnits = parseTokenUnits(invoice.total, config.usdcDecimals);
+  const allowance = await readUsdcAllowance(provider, config.usdcTokenAddress, payerWallet, config.paymentRouterAddress);
+  if (allowance < amountUnits) {
+    setProgressStep(progress, "pay", "active", "Approving USDC spend...");
+    setButtonBusy(button, "Approving USDC...");
+    const approveTx = await sendUsdcApprove(provider, {
+      from: payerWallet,
+      token: config.usdcTokenAddress,
+      spender: config.paymentRouterAddress,
+      amount: amountUnits,
+    });
+    showToast("USDC approval submitted. Waiting for confirmation...");
+    await waitForTransaction(provider, approveTx);
+  }
+  setProgressStep(progress, "pay", "active", "Sending payment transaction...");
+  setButtonBusy(button, "Paying invoice...");
+  const txHash = await sendRouterPayment(provider, {
+    from: payerWallet,
+    router: config.paymentRouterAddress,
+    invoiceId: invoice.onchainInvoiceId,
+    merchantWallet: invoice.merchantWallet,
+    amount: amountUnits,
+  });
+  setProgressStep(progress, "pay", "done", "Payment submitted");
+  // Store txHash in context for retry
+  if (_activeBridgeContext) _activeBridgeContext.arcTxHash = txHash;
+  const form = document.querySelector("#paymentVerifyForm");
+  if (form?.elements.payerWallet) form.elements.payerWallet.value = payerWallet;
+  if (form?.elements.txHash) form.elements.txHash.value = txHash;
+  showToast("Payment submitted. Verification will start in 10 seconds.");
+  setButtonBusy(button, "Waiting for confirmation...");
+  setProgressStep(progress, "verify", "active", "Waiting 10 s before checking Arcscan...");
+  const verified = await autoVerifyWithProgress(invoice.id, payerWallet, txHash, progress);
+  return verified;
+}
+
+// Runs auto-verify loop and drives verify+receipt steps.
+async function autoVerifyWithProgress(id, payerWallet, txHash, progress) {
+  await delay(10000);
+  setProgressStep(progress, "verify", "active", "Checking Arcscan...");
+  const attempts = 6;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const verified = await verifyPaymentAndMarkPaid(
+      id,
+      { preventDefault() {} },
+      { payerWallet, txHash, auto: true, showPendingToast: attempt === 1 },
+    );
+    if (verified) {
+      setProgressStep(progress, "verify", "done", "Payment confirmed on Arcscan");
+      setProgressStep(progress, "receipt", "done", "Receipt available");
+      return true;
+    }
+    if (attempt < attempts) {
+      showToast(`Payment not indexed yet. Checking again (${attempt + 1}/${attempts})...`);
+      setProgressStep(progress, "verify", "active", `Retry ${attempt + 1}/${attempts}...`);
+      await delay(10000);
+    }
+  }
+  setProgressStep(progress, "verify", "error", "Not yet indexed — press Retry");
+  showToast("Payment submitted, but Arcscan has not indexed it yet. Press Retry on the Verify step.");
+  return false;
+}
+
 async function bridgeAndPayInvoice(id, sourceKey) {
   const invoice = state.invoices.find((item) => item.id === id);
   if (!invoice) return;
@@ -1334,8 +1563,19 @@ async function bridgeAndPayInvoice(id, sourceKey) {
   }
 
   const button = document.querySelector("#payWithWallet");
-  const progress = createBridgePayProgress();
+  const progress = createBridgePayProgress(true); // 5-step bridge flow
   renderBridgePayProgress(progress);
+
+  // Bridge context — used by Retry buttons
+  _activeBridgeContext = {
+    retry: (fromStep) => _retryBridgePay(id, sourceKey, fromStep),
+    payerWallet,
+    steps: progress,
+    burnTx: null,
+    cctpMessage: null,
+    arcTxHash: null,
+  };
+
   try {
     setProgressStep(progress, "check", "active", `Checking ${source.shortName} USDC...`);
     setButtonBusy(button, "Checking source...");
@@ -1348,6 +1588,7 @@ async function bridgeAndPayInvoice(id, sourceKey) {
     setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
 
     setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
+    setButtonBusy(button, "Approving bridge...");
     const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, CCTP_TOKEN_MESSENGER_V2);
     if (allowance < amountUnits) {
       const approveTx = await sendUsdcApprove(provider, {
@@ -1359,8 +1600,8 @@ async function bridgeAndPayInvoice(id, sourceKey) {
       await waitForTransaction(provider, approveTx);
     }
 
-    setButtonBusy(button, "Starting bridge...");
     setProgressStep(progress, "bridge", "active", `Moving USDC from ${source.shortName} to Arc...`);
+    setButtonBusy(button, "Starting bridge...");
     const burnTx = await sendCctpBurn(provider, {
       from: payerWallet,
       source,
@@ -1368,29 +1609,37 @@ async function bridgeAndPayInvoice(id, sourceKey) {
       amount: amountUnits,
       recipient: payerWallet,
       fast: true,
+      onFeeResolved: (feeInfo) => {
+        const modeLabel = feeInfo.mode === "fast" ? "Fast" : "Standard";
+        const feeDetail = feeInfo.mode === "fast" ? `fee ${feeInfo.feeText}` : feeInfo.feeText;
+        setProgressStep(progress, "bridge", "active", `Bridging via ${modeLabel} (${feeDetail})...`);
+      }
     });
+    _activeBridgeContext.burnTx = burnTx;
     await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
     setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
     const message = await fetchCctpAttestation(source.domain, burnTx);
+    _activeBridgeContext.cctpMessage = message;
 
     setProgressStep(progress, "bridge", "active", "Minting USDC on Arc...");
+    setButtonBusy(button, "Minting on Arc...");
     await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
     const mintTx = await sendCctpMint(provider, { from: payerWallet, message: message.message, attestation: message.attestation });
     await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
     setProgressStep(progress, "bridge", "done", "USDC received on Arc");
 
     setProgressStep(progress, "pay", "active", "Paying invoice on Arc...");
-    const verified = await submitArcPayment(invoice, payerWallet, button);
-    setProgressStep(progress, "pay", "done", "Payment submitted");
-    setProgressStep(progress, "verify", verified ? "done" : "active", verified ? "Payment verified" : "Waiting for Arcscan");
+    setButtonBusy(button, "Paying invoice...");
+    // Use stepper-aware version for the pay step
+    await submitArcPaymentWithProgress(invoice, payerWallet, button, progress);
   } catch (error) {
     const isRejected = error?.code === 4001 || String(error?.message).toLowerCase().includes("rejected") || String(error?.message).toLowerCase().includes("denied");
     const active = progress.find((step) => step.status === "active");
     if (active) setProgressStep(progress, active.key, "error", isRejected ? "Rejected by user" : error?.message || "Stopped");
     showToast(isRejected ? "Transaction rejected by user." : error?.message || "Bridge and pay failed.");
     if (isRejected) {
-      button.classList.add("error-ring");
-      setTimeout(() => button.classList.remove("error-ring"), 3000);
+      button?.classList.add("error-ring");
+      setTimeout(() => button?.classList.remove("error-ring"), 3000);
     }
   } finally {
     resetPayWithWalletButton(button, invoice);
@@ -1398,9 +1647,106 @@ async function bridgeAndPayInvoice(id, sourceKey) {
   }
 }
 
+// Internal: retry bridge-and-pay from a specific step
+async function _retryBridgePay(id, sourceKey, fromStep) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice || invoice.status === "paid") return;
+  const ctx = _activeBridgeContext;
+  if (!ctx) return;
+  const progress = ctx.steps;
+  const source = getPaymentSourceChain(sourceKey);
+  const provider = window.ethereum;
+  const payerWallet = ctx.payerWallet || getConnectedWallet();
+  if (!payerWallet) return;
+  const button = document.querySelector("#payWithWallet");
+  // Reset error status for this step and later
+  const keys = ["check", "bridge", "pay", "verify", "receipt"];
+  const fromIdx = keys.indexOf(fromStep);
+  keys.slice(fromIdx).forEach((k) => {
+    const s = progress.find((x) => x.key === k);
+    if (s && !s.skipped && s.status === "error") { s.status = "pending"; s.detail = "Waiting"; }
+  });
+  renderBridgePayProgress(progress);
+  const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+  try {
+    if (fromStep === "check") {
+      setProgressStep(progress, "check", "active", `Checking ${source.shortName} USDC...`);
+      setButtonBusy(button, "Checking source...");
+      await ensureWalletNetwork(provider, source);
+      const balance = await readUsdcBalance(provider, source.usdc, payerWallet);
+      if (balance < amountUnits) throw new Error(`Insufficient USDC on ${source.shortName}.`);
+      setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
+    }
+    if (["check", "bridge"].includes(fromStep) && !ctx.cctpMessage) {
+      setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
+      setButtonBusy(button, "Approving bridge...");
+      const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, CCTP_TOKEN_MESSENGER_V2);
+      if (allowance < amountUnits) {
+        const approveTx = await sendUsdcApprove(provider, { from: payerWallet, token: source.usdc, spender: CCTP_TOKEN_MESSENGER_V2, amount: amountUnits });
+        await waitForTransaction(provider, approveTx);
+      }
+      setProgressStep(progress, "bridge", "active", `Moving USDC from ${source.shortName} to Arc...`);
+      setButtonBusy(button, "Starting bridge...");
+      const burnTx = await sendCctpBurn(provider, { 
+        from: payerWallet, 
+        source, 
+        destination: CCTP_TESTNET_CHAINS.arcTestnet, 
+        amount: amountUnits, 
+        recipient: payerWallet, 
+        fast: true,
+        onFeeResolved: (feeInfo) => {
+          const modeLabel = feeInfo.mode === "fast" ? "Fast" : "Standard";
+          const feeDetail = feeInfo.mode === "fast" ? `fee ${feeInfo.feeText}` : feeInfo.feeText;
+          setProgressStep(progress, "bridge", "active", `Bridging via ${modeLabel} (${feeDetail})...`);
+        }
+      });
+      ctx.burnTx = burnTx;
+      await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
+      setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
+      const message = await fetchCctpAttestation(source.domain, burnTx);
+      ctx.cctpMessage = message;
+      setProgressStep(progress, "bridge", "active", "Minting USDC on Arc...");
+      setButtonBusy(button, "Minting on Arc...");
+      await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
+      const mintTx = await sendCctpMint(provider, { from: payerWallet, message: message.message, attestation: message.attestation });
+      await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
+      setProgressStep(progress, "bridge", "done", "USDC received on Arc");
+    } else if (["check", "bridge"].includes(fromStep) && ctx.cctpMessage) {
+      // Already have attestation, just mint
+      setProgressStep(progress, "bridge", "active", "Minting USDC on Arc (retry)...");
+      setButtonBusy(button, "Minting on Arc...");
+      await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
+      const mintTx = await sendCctpMint(provider, { from: payerWallet, message: ctx.cctpMessage.message, attestation: ctx.cctpMessage.attestation });
+      await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
+      setProgressStep(progress, "bridge", "done", "USDC received on Arc");
+    }
+    if (["check", "bridge", "pay"].includes(fromStep)) {
+      setProgressStep(progress, "pay", "active", "Paying invoice on Arc...");
+      setButtonBusy(button, "Paying invoice...");
+      await submitArcPaymentWithProgress(invoice, payerWallet, button, progress);
+    }
+    if (fromStep === "verify") {
+      setProgressStep(progress, "verify", "active", "Verifying on Arcscan...");
+      const txHash = ctx.arcTxHash || "";
+      const verified = await autoVerifyWithProgress(id, payerWallet, txHash, progress);
+      if (!verified) {
+        setProgressStep(progress, "verify", "error", "Not yet indexed — press Retry");
+      }
+    }
+  } catch (error) {
+    const active = progress.find((s) => s.status === "active");
+    if (active) setProgressStep(progress, active.key, "error", error?.message || "Failed");
+    showToast(error?.message || "Retry failed.");
+  } finally {
+    resetPayWithWalletButton(button, invoice);
+    await refreshPaymentSourceStatus(id, { silent: true });
+  }
+}
+
+// Legacy auto-verify used by old submitArcPayment path (bridge flow calls submitArcPaymentWithProgress now).
 async function autoVerifySubmittedPayment(id, { payerWallet, txHash, button }) {
   await delay(10000);
-  setButtonBusy(button, "Verify payment...");
+  setButtonBusy(button, "Verifying payment...");
   const attempts = 6;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const verified = await verifyPaymentAndMarkPaid(
@@ -1538,19 +1884,76 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, 
   });
 }
 
-async function sendCctpBurn(provider, { from, source, destination, amount, recipient, fast = false }) {
-  const minFeeRaw = await provider
-    .request({
-      method: "eth_call",
-      params: [
-        {
-          to: CCTP_TOKEN_MESSENGER_V2,
-          data: CCTP_GET_MIN_FEE_SELECTOR + encodeUint256(amount),
-        },
-        "latest",
-      ],
-    })
-    .catch(() => "0x0");
+async function resolveCctpFee({ sourceDomain, destinationDomain, amountUnits, fast }) {
+  let mode = fast ? "fast" : "standard";
+  let maxFee = 0n;
+  let minFinalityThreshold = fast ? CCTP_FAST_FINALITY_THRESHOLD : CCTP_STANDARD_FINALITY_THRESHOLD;
+  let feeText = fast ? "calculating..." : "free, slower (~13-19 min)";
+
+  try {
+    const url = `${CCTP_IRIS_SANDBOX_BASE}/v2/burn/USDC/fees/${sourceDomain}/${destinationDomain}`;
+    const response = await fetch(url, { cache: "no-store" });
+    const payload = await response.json();
+    const tiers = Array.isArray(payload) ? payload : [];
+    if (tiers.length > 0) {
+      let tier = null;
+      if (fast) {
+        tier = tiers.find((f) => Number(f.minimumFee) > 0);
+        if (!tier) {
+          tier = tiers.reduce((prev, curr) => (Number(curr.finalityThreshold) < Number(prev.finalityThreshold) ? curr : prev), tiers[0]);
+        }
+      } else {
+        tier = tiers.find((f) => Number(f.minimumFee) === 0);
+        if (!tier) {
+          tier = tiers.reduce((prev, curr) => (Number(curr.finalityThreshold) > Number(prev.finalityThreshold) ? curr : prev), tiers[0]);
+        }
+      }
+      if (tier) {
+        minFinalityThreshold = Number(tier.finalityThreshold) || minFinalityThreshold;
+        const bps = Number(tier.minimumFee) || 0;
+        if (bps > 0) {
+          // bps might be a float like 1.3, so scale it up by 100 to make it an integer
+          const bpsScaled = BigInt(Math.ceil(bps * 100));
+          // Divisor is now 10,000 * 100 = 1,000,000
+          let feeUnits = (amountUnits * bpsScaled + 999999n) / 1000000n;
+          maxFee = (feeUnits * 125n) / 100n;
+          feeText = formatUnits(maxFee, ARC_USDC_DECIMALS) + " USDC";
+        } else {
+          maxFee = 0n;
+          feeText = "free, slower (~13-19 min)";
+        }
+      }
+    }
+  } catch (error) {
+    console.error("CCTP fee API failed:", error);
+  }
+
+  if (fast && maxFee === 0n) {
+    mode = "standard";
+    minFinalityThreshold = CCTP_STANDARD_FINALITY_THRESHOLD;
+    feeText = "free, slower (~13-19 min)";
+  }
+
+  if (maxFee > 0n) {
+    const onePercent = amountUnits / 100n;
+    if (maxFee > onePercent) {
+      throw new Error("Bridge fee exceeds 1% of the transfer amount. Please retry later or pay directly on Arc.");
+    }
+  }
+
+  return { maxFee, minFinalityThreshold, mode, feeText };
+}
+
+async function sendCctpBurn(provider, { from, source, destination, amount, recipient, fast = false, onFeeResolved }) {
+  const feeInfo = await resolveCctpFee({
+    sourceDomain: source.domain,
+    destinationDomain: destination.domain,
+    amountUnits: amount,
+    fast,
+  });
+
+  if (onFeeResolved) onFeeResolved(feeInfo);
+
   const data =
     CCTP_DEPOSIT_FOR_BURN_SELECTOR +
     encodeUint256(amount) +
@@ -1558,8 +1961,9 @@ async function sendCctpBurn(provider, { from, source, destination, amount, recip
     encodeBytes32(addressToBytes32(recipient)) +
     encodeAddress(source.usdc) +
     encodeBytes32(ZERO_BYTES32) +
-    encodeUint256(hexToBigInt(minFeeRaw)) +
-    encodeUint256(fast ? CCTP_FAST_FINALITY_THRESHOLD : CCTP_STANDARD_FINALITY_THRESHOLD);
+    encodeUint256(feeInfo.maxFee) +
+    encodeUint256(feeInfo.minFinalityThreshold);
+    
   return provider.request({
     method: "eth_sendTransaction",
     params: [{ from, to: CCTP_TOKEN_MESSENGER_V2, data, value: "0x0" }],
@@ -1627,6 +2031,7 @@ function resetPayWithWalletButton(button, invoice) {
   button.innerHTML =
     button.dataset.originalHtml ||
     `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg> Pay ${escapeHtml(formatUsdc(invoice.total))} USDC`;
+  delete button.dataset.originalHtml;
 }
 
 async function verifyPaymentAndMarkPaid(id, event, options = {}) {
@@ -2158,10 +2563,10 @@ function loadSettings() {
       merchantName: parsed.merchantName || "",
       merchantWallet: normalizeAddress(parsed.merchantWallet || ""),
       telegramChatId: String(parsed.telegramChatId || ""),
-      telegramEnabled: Boolean(parsed.telegramEnabled),
+      alerts: parsed.alerts || { paid: true, failed: true, overdue: true },
     };
   } catch {
-    return { merchantName: "", merchantWallet: "", telegramChatId: "", telegramEnabled: false };
+    return { merchantName: "", merchantWallet: "", telegramChatId: "", alerts: { paid: true, failed: true, overdue: true } };
   }
 }
 
@@ -2285,8 +2690,8 @@ function encodeUint256(value) {
 }
 
 function hexToBigInt(value) {
-  const text = String(value || "0x0");
-  return /^0x[0-9a-fA-F]*$/.test(text) ? BigInt(text || "0x0") : 0n;
+  const text = String(value || "").trim();
+  return /^0x[0-9a-fA-F]+$/.test(text) ? BigInt(text) : 0n;
 }
 
 function parseTokenUnits(value, decimals) {
@@ -2387,4 +2792,34 @@ function escapePdfText(value) {
     .replaceAll("\\", "\\\\")
     .replaceAll("(", "\\(")
     .replaceAll(")", "\\)");
+}
+
+
+async function fetchServerSettings() {
+  const sessionStr = localStorage.getItem("fundline_dashboard_session");
+  const connected = getConnectedWallet();
+  if (!sessionStr || !connected) return;
+  const session = JSON.parse(sessionStr);
+  if (session.wallet.toLowerCase() !== connected.toLowerCase()) return;
+
+  try {
+    const res = await fetch("/api/dashboard/settings", {
+      headers: {
+        "x-fundline-wallet": session.wallet,
+        "x-fundline-signature": session.signature,
+        "x-fundline-issued-at": session.issuedAt,
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.settings) {
+        state.settings.telegramChatId = data.settings.telegramChatId || "";
+        if (data.settings.alerts) {
+          state.settings.alerts = { ...state.settings.alerts, ...data.settings.alerts };
+        }
+        saveSettings();
+        renderSettings();
+      }
+    }
+  } catch(e) {}
 }

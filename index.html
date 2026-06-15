@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fundline - USDC Invoicing and Direct Settlement</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk. API-first for developers and AI agents." />
 
     <!-- Open Graph -->
@@ -32,7 +33,7 @@
          ============================================= -->
     <header class="home-nav" role="banner">
       <a class="home-brand" href="/" aria-label="Fundline home">
-        <span class="brand-symbol" aria-hidden="true"></span>
+        <img src="/assets/fundline-logo.png?v=2" alt="Fundline Logo" style="height: 32px; margin-right: 8px;">
         <span class="brand-word">Fundline</span>
         <span class="testnet-pill">TESTNET</span>
       </a>
@@ -81,23 +82,22 @@
            ============================================= -->
       <section class="hero-section" aria-labelledby="hero-title">
         <div class="live-pill" id="live-pill">
-          <span class="live-dot" aria-hidden="true"></span>
-          PaymentRouter live on Arc Testnet
+          <span class="live-dot" aria-hidden="true" style="background: var(--gold)"></span>
+          USDC invoicing on Arc
         </div>
 
         <h1 id="hero-title" class="reveal">
-          <span class="hero-line">Get paid in USDC in minutes</span>
-          <span class="hero-line hero-gradient">No escrow</span>
-          <span class="hero-line hero-gradient">No custody risk</span>
+          <span class="hero-line">Get paid in USDC,</span>
+          <span class="hero-line hero-gradient">settled in seconds.</span>
         </h1>
 
         <p class="hero-copy reveal">
-          Create professional invoices and get paid directly to your wallet
+          Send professional invoices and accept stablecoin payments from any chain. Funds move wallet to wallet on Arc, with no custody and no middlemen.
         </p>
 
         <div class="hero-actions reveal">
-          <a class="launch-cta" href="/app" id="hero-cta-primary">Create invoice</a>
-          <a class="docs-cta" href="/docs" id="hero-cta-secondary">Read docs</a>
+          <a class="launch-cta" href="/app" id="hero-cta-primary">Create an invoice</a>
+          <a class="docs-cta" href="/docs" id="hero-cta-secondary">Read the docs</a>
         </div>
 
         <p class="hero-micro">
@@ -282,7 +282,9 @@
                   <span>Merchant</span>
                   <code>0x1a2b...cd3e</code>
                 </div>
-                <div class="mock-btn-primary">Pay with wallet</div>
+                <div class="mock-actions">
+                  <div class="mock-btn-primary">Pay with wallet</div>
+                </div>
               </div>
             </div>
           </figure>
@@ -613,12 +615,7 @@ Content-Type: application/json
             <a href="#developers">Agent API</a>
             <a href="/docs#webhooks">Webhooks</a>
           </div>
-          <div class="footer-col">
-            <p class="footer-col-title">Community</p>
-            <a href="#" rel="noopener noreferrer">Twitter / X</a>
-            <a href="#" rel="noopener noreferrer">GitHub</a>
-            <a href="#" rel="noopener noreferrer">Telegram</a>
-          </div>
+
         </nav>
 
       </div>

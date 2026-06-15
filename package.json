@@ -8,7 +8,8 @@
     "deploy:payment-router": "node scripts/deploy-payment-router.js"
   },
   "dependencies": {
-    "ethers": "^6.13.5",
+    "acorn": "^8.17.0",
+    "ethers": "^6.16.0",
     "solc": "^0.8.30"
   }
 }

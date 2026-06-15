@@ -4,13 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fundline USDC</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="shell">
       <aside class="side">
         <div class="brand">
-          <div class="brand-mark" aria-hidden="true"></div>
+          <img src="/assets/fundline-logo.png?v=2" alt="" class="brand-img" />
           <div>
             <strong>Fundline</strong>
             <span>USDC invoices</span>
@@ -236,10 +240,24 @@
                   <input name="telegramChatId" inputmode="numeric" placeholder="123456789" />
                 </label>
                 <label class="toggle-field">
-                  <input name="telegramEnabled" type="checkbox" />
+                  <input name="alerts.paid" type="checkbox" checked />
                   <span>
                     <strong>Notify when paid</strong>
                     <small>Send a Telegram message after successful payment.</small>
+                  </span>
+                </label>
+                <label class="toggle-field">
+                  <input name="alerts.failed" type="checkbox" checked />
+                  <span>
+                    <strong>Notify on failed</strong>
+                    <small>Send a Telegram message when a payment attempt fails.</small>
+                  </span>
+                </label>
+                <label class="toggle-field">
+                  <input name="alerts.overdue" type="checkbox" checked />
+                  <span>
+                    <strong>Notify on overdue</strong>
+                    <small>Send a Telegram message when an invoice becomes overdue.</small>
                   </span>
                 </label>
               </div>
@@ -263,3 +281,4 @@
     <script src="/app.js"></script>
   </body>
 </html>
+

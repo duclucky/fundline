@@ -1,19 +1,20 @@
 :root {
   color-scheme: dark;
-  --bg: #07111d;
-  --bg-2: #0c1c31;
-  --panel: rgba(24, 39, 61, 0.78);
-  --panel-2: rgba(31, 51, 78, 0.72);
-  --line: rgba(157, 190, 230, 0.18);
-  --line-strong: rgba(176, 211, 255, 0.32);
-  --ink: #f4f8ff;
-  --muted: #9badc9;
-  --muted-2: #71849f;
-  --cyan: #36dfff;
-  --blue: #638aff;
-  --green: #6ef7a2;
-  --amber: #ffbd67;
-  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --bg: #0a0a0c;
+  --bg-2: #121317;
+  --panel: rgba(18, 19, 23, 0.78);
+  --panel-2: rgba(26, 27, 32, 0.72);
+  --line: rgba(212,175,55,0.16);
+  --line-strong: rgba(212,175,55,0.3);
+  --ink: #f6f1e6;
+  --muted: #b7b1a1;
+  --muted-2: #8a8474;
+  --cyan: #d4af37;
+  --blue: #f2d27a;
+  --green: #d4af37;
+  --gold: #d4af37;
+  --gold-bright: #f2d27a;
+  --gold-deep: #b8860b;
   --radius: 14px;
 }
 
@@ -33,7 +34,9 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background: linear-gradient(135deg, #07111d 0%, #0d213a 56%, #133f58 100%);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 17px;
+  line-height: 1.65;
 }
 
 a {
@@ -78,8 +81,8 @@ pre {
   width: 31px;
   height: 31px;
   border-radius: 10px;
-  background: linear-gradient(145deg, var(--cyan) 0%, var(--blue) 58%, #71f4c4 100%);
-  box-shadow: 0 12px 28px rgba(54, 223, 255, 0.2);
+  background: linear-gradient(145deg, var(--gold) 0%, var(--gold-bright) 58%, var(--gold-deep) 100%);
+  box-shadow: 0 12px 28px rgba(212, 175, 55, 0.2);
   overflow: hidden;
 }
 
@@ -139,7 +142,7 @@ pre {
 .docs-topnav a:hover,
 .on-page a:hover,
 .side-link:hover {
-  color: var(--cyan);
+  color: var(--gold);
 }
 
 .docs-actions {
@@ -169,7 +172,7 @@ pre {
 
 .primary-link {
   color: #07111d;
-  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  background: linear-gradient(135deg, var(--gold), var(--gold-bright));
   border: 1px solid rgba(170, 218, 255, 0.72);
 }
 
@@ -203,7 +206,7 @@ pre {
 
 .nav-label {
   margin: 0 0 12px;
-  color: var(--cyan);
+  color: var(--gold);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 950;
@@ -232,7 +235,7 @@ pre {
 }
 
 .side-link.is-active {
-  color: var(--cyan);
+  color: var(--gold);
   background: rgba(43, 215, 255, 0.08);
   border-color: rgba(43, 215, 255, 0.4);
 }
@@ -242,7 +245,7 @@ pre {
 }
 
 .on-page a.is-active {
-  color: var(--cyan);
+  color: var(--gold);
 }
 
 .docs-main {
@@ -268,7 +271,7 @@ pre {
 }
 
 .breadcrumb a {
-  color: var(--cyan);
+  color: var(--gold);
 }
 
 h1,
@@ -302,7 +305,7 @@ h2 {
 
 .eyebrow {
   margin-bottom: 12px;
-  color: var(--cyan);
+  color: var(--gold);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 950;
@@ -334,7 +337,7 @@ h2 {
 .status-row i {
   width: 8px;
   height: 8px;
-  background: var(--green);
+  background: var(--gold);
   border-radius: 999px;
   box-shadow: 0 0 14px rgba(110, 247, 162, 0.72);
 }
@@ -398,7 +401,7 @@ table code {
 .surface-grid span {
   display: block;
   margin-bottom: 9px;
-  color: var(--cyan);
+  color: var(--gold);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 950;
@@ -447,7 +450,7 @@ td {
 }
 
 td a {
-  color: var(--cyan);
+  color: var(--gold);
 }
 
 .steps {
@@ -478,7 +481,7 @@ td a {
   width: 30px;
   height: 30px;
   color: #07111d;
-  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  background: linear-gradient(135deg, var(--gold), var(--gold-bright));
   border-radius: 999px;
   counter-increment: step;
   content: counter(step);
@@ -503,7 +506,7 @@ td a {
   gap: 8px;
   margin-top: 18px;
   padding: 16px 18px;
-  border-left: 3px solid var(--cyan);
+  border-left: 3px solid var(--gold);
 }
 
 .flow {
@@ -600,7 +603,7 @@ details p {
   z-index: 40;
   padding: 10px 14px;
   color: #07111d;
-  background: linear-gradient(135deg, var(--cyan), var(--green));
+  background: linear-gradient(135deg, var(--gold), var(--gold));
   border-radius: 10px;
   font-size: 13px;
   font-weight: 950;

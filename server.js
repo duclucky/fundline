@@ -3,6 +3,7 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { ethers } = require("ethers");
 
 const PORT = Number(process.env.PORT || 5190);
 const ROOT = __dirname;
@@ -11,9 +12,33 @@ loadEnvFiles();
 const DATA_DIR = path.join(ROOT, "data");
 const INVOICE_DB_PATH = path.join(DATA_DIR, "invoices.json");
 const WEBHOOK_DB_PATH = path.join(DATA_DIR, "webhooks.json");
+const PRODUCT_DB_PATH = path.join(DATA_DIR, "products.json");
 const WEBHOOK_LOG_DB_PATH = path.join(DATA_DIR, "webhook-logs.json");
 const PAYMENT_ATTEMPT_DB_PATH = path.join(DATA_DIR, "payment-attempts.json");
+const SELLER_DB_PATH = path.join(DATA_DIR, "sellers.json");
 const DISPATCHED_WEBHOOKS_PATH = path.join(DATA_DIR, "dispatched_webhooks.json");
+const API_KEY_DB_PATH = path.join(DATA_DIR, "api-keys.json");
+const EVENT_DB_PATH = path.join(DATA_DIR, "events.json");
+
+const AGENT_RATE_LIMIT_PER_MIN = Number(process.env.AGENT_RATE_LIMIT_PER_MIN || 60);
+const rateLimits = new Map();
+
+function checkRateLimit(req, res, identifier) {
+  console.log("AGENT_RATE_LIMIT_PER_MIN:", AGENT_RATE_LIMIT_PER_MIN, typeof AGENT_RATE_LIMIT_PER_MIN);
+  const now = Date.now();
+  const windowStart = now - 60000;
+  if (!rateLimits.has(identifier)) rateLimits.set(identifier, []);
+  const timestamps = rateLimits.get(identifier).filter(t => t > windowStart);
+  if (timestamps.length >= AGENT_RATE_LIMIT_PER_MIN) {
+    res.setHeader("Retry-After", "60");
+    sendJson(res, 429, { error: { code: "RATE_LIMITED", message: "Too many requests, please try again later" } });
+    rateLimits.set(identifier, timestamps);
+    return false;
+  }
+  timestamps.push(now);
+  rateLimits.set(identifier, timestamps);
+  return true;
+}
 
 let dispatchedEventIds = new Set();
 try {
@@ -51,6 +76,9 @@ const MIME_TYPES = {
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".sol": "text/plain; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
 };
 
 const server = http.createServer((req, res) => {
@@ -68,6 +96,26 @@ const server = http.createServer((req, res) => {
   const agentInvoiceMatch = url.pathname.match(/^\/api\/agent\/invoices\/([a-f0-9]{20})$/i);
   if (agentInvoiceMatch) {
     handleAgentInvoiceById(req, res, agentInvoiceMatch[1]);
+    return;
+  }
+
+  
+  if (url.pathname === "/api/agent/events") {
+    handleAgentEvents(req, res, url);
+    return;
+  }
+  if (url.pathname === "/api/agent/webhooks/test") {
+    handleAgentWebhooksTest(req, res);
+    return;
+  }
+  const verifyMatch = url.pathname.match(/^\/api\/agent\/invoices\/([a-f0-9]{20})\/verify$/i);
+  if (verifyMatch) {
+    handleAgentVerify(req, res, verifyMatch[1]);
+    return;
+  }
+  const x402Match = url.pathname.match(/^\/api\/x402\/invoices\/([a-f0-9]{20})$/i);
+  if (x402Match) {
+    handleX402Invoice(req, res, x402Match[1]);
     return;
   }
 
@@ -109,6 +157,50 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/dashboard/summary") {
+    handleDashboardSummary(req, res);
+    return;
+  }
+
+  if (url.pathname === "/api/dashboard/settings") {
+    handleDashboardSettings(req, res);
+    return;
+  }
+
+  if (url.pathname === "/api/dashboard/webhooks") {
+    handleDashboardWebhooks(req, res);
+    return;
+  }
+
+  const sellerWebhookMatch = url.pathname.match(/^\/api\/dashboard\/webhooks\/([a-f0-9]{20})$/i);
+  if (sellerWebhookMatch) {
+    handleDashboardWebhookById(req, res, sellerWebhookMatch[1]);
+    return;
+  }
+
+  if (url.pathname === "/api/dashboard/webhook-logs") {
+    handleDashboardWebhookLogs(req, res);
+    return;
+  }
+
+  const sellerWebhookLogResendMatch = url.pathname.match(/^\/api\/dashboard\/webhook-logs\/([a-f0-9]{20})\/resend$/i);
+  if (sellerWebhookLogResendMatch) {
+    handleDashboardWebhookLogResend(req, res, sellerWebhookLogResendMatch[1]);
+    return;
+  }
+
+
+  if (url.pathname === "/api/products") {
+    handleProducts(req, res, url);
+    return;
+  }
+
+  const productMatch = url.pathname.match(/^\/api\/products\/([^\/]+)$/i);
+  if (productMatch) {
+    handleProductById(req, res, productMatch[1]);
+    return;
+  }
+
   if (url.pathname === "/api/telegram/payment-paid") {
     handleTelegramPayment(req, res);
     return;
@@ -139,6 +231,8 @@ const server = http.createServer((req, res) => {
 });
 
 function resolveRequestPath(pathname) {
+  if (pathname === "/dashboard" || pathname === "/dashboard/") return "/dashboard.html";
+  if (pathname.startsWith("/s/")) return "/storefront.html";
   if (pathname === "/docs") return "/docs.html";
   if (pathname === "/") return "/index.html";
   if (pathname === "/app" || pathname === "/app/" || pathname.startsWith("/pay/")) return "/app.html";
@@ -148,6 +242,7 @@ function resolveRequestPath(pathname) {
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Fundline running at http://127.0.0.1:${PORT}`);
   startTelegramPolling();
+  startOverdueJob();
 });
 
 function loadEnvFiles() {
@@ -173,7 +268,7 @@ function loadEnvFiles() {
 
 function handlePublicConfig(req, res) {
   if (req.method !== "GET") {
-    sendJson(res, 405, { error: "Method not allowed" });
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
 
@@ -202,6 +297,8 @@ async function handleInvoices(req, res, url) {
   if (req.method === "POST") {
     try {
       const input = await readJsonBody(req);
+      if (!input.id) input.id = makeId();
+      if (!input.onchainInvoiceId && !input.onchain_invoice_id) input.onchainInvoiceId = randomBytes32();
       const invoice = normalizeInvoice(input);
       const db = loadInvoiceDb();
       if (db.invoices.some((item) => item.id === invoice.id)) {
@@ -212,19 +309,27 @@ async function handleInvoices(req, res, url) {
       saveInvoiceDb(db);
       sendJson(res, 201, { invoice });
     } catch (error) {
-      sendJson(res, 400, { error: error.message || "Could not create invoice" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Could not create invoice" } });
     }
     return;
   }
 
-  sendJson(res, 405, { error: "Method not allowed" });
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
 }
 
 async function handleAgentInvoices(req, res, url) {
   if (!requireAgentApiKey(req, res)) return;
 
   if (req.method === "GET") {
-    const merchantWallet = normalizeAddress(url.searchParams.get("merchantWallet"));
+    let merchantWallet = normalizeAddress(url.searchParams.get("merchantWallet"));
+    if (req.agentSellerId) {
+      if (merchantWallet && !sameAddress(merchantWallet, req.agentSellerId)) {
+        merchantWallet = "0x0000000000000000000000000000000000000000"; // Force empty result
+      } else {
+        merchantWallet = req.agentSellerId;
+      }
+    }
+
     const status = String(url.searchParams.get("status") || "").trim().toLowerCase();
     const limit = clampListLimit(url.searchParams.get("limit"), 100, 500);
     const db = loadInvoiceDb();
@@ -237,45 +342,82 @@ async function handleAgentInvoices(req, res, url) {
   if (req.method === "POST") {
     try {
       const input = await readJsonBody(req);
+      let merchantWallet = normalizeAddress(input.merchantWallet);
+      if (req.agentSellerId) merchantWallet = req.agentSellerId;
+      if (!merchantWallet) throw new Error("merchantWallet is required");
+      
       const db = loadInvoiceDb();
       const idempotencyKey = getAgentIdempotencyKey(req, input);
-      const merchantWallet = normalizeAddress(input.merchantWallet);
-      if (idempotencyKey && merchantWallet) {
+      if (idempotencyKey) {
         const existing = db.invoices.find((invoice) => sameAddress(invoice.merchantWallet, merchantWallet) && invoice.idempotencyKey === idempotencyKey);
         if (existing) {
           sendJson(res, 200, { invoice: decorateInvoiceForAgent(existing, req), idempotent: true });
           return;
         }
       }
-      const invoice = normalizeAgentInvoice({ ...input, idempotencyKey }, db);
+      
+      const invoice = normalizeAgentInvoice({ ...input, idempotencyKey, merchantWallet }, db);
+      // Ensure IDs are set if missing
+      if (!invoice.id) invoice.id = makeId(20);
+      if (!invoice.onchainInvoiceId) invoice.onchainInvoiceId = randomBytes32();
+      
       db.invoices = [invoice, ...db.invoices];
       saveInvoiceDb(db);
       sendJson(res, 201, { invoice: decorateInvoiceForAgent(invoice, req) });
     } catch (error) {
-      sendJson(res, 400, { error: error.message || "Could not create invoice" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Could not create invoice" } });
     }
     return;
   }
 
-  sendJson(res, 405, { error: "Method not allowed" });
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
 }
 
 async function handleAgentInvoiceById(req, res, invoiceId) {
   if (!requireAgentApiKey(req, res)) return;
 
-  if (req.method !== "GET") {
-    sendJson(res, 405, { error: "Method not allowed" });
+  if (req.method !== "GET" && req.method !== "PATCH" && req.method !== "DELETE") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
 
   const db = loadInvoiceDb();
-  const invoice = db.invoices.find((item) => item.id === invoiceId);
+  const index = db.invoices.findIndex((item) => item.id === invoiceId);
+  const invoice = index >= 0 ? db.invoices[index] : null;
   if (!invoice) {
-    sendJson(res, 404, { error: "Invoice not found" });
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Invoice not found" } });
     return;
   }
 
-  sendJson(res, 200, { invoice: decorateInvoiceForAgent(invoice, req) });
+  if (req.agentSellerId && !sameAddress(invoice.merchantWallet, req.agentSellerId)) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Invoice not found" } });
+    return;
+  }
+
+  if (req.method === "GET") {
+    sendJson(res, 200, { invoice: decorateInvoiceForAgent(invoice, req) });
+    return;
+  }
+  
+  if (req.method === "PATCH") {
+    try {
+      const input = await readJsonBody(req);
+      const patched = normalizeInvoicePatch(invoice, input);
+      db.invoices[index] = patched;
+      saveInvoiceDb(db);
+      sendJson(res, 200, { invoice: decorateInvoiceForAgent(patched, req) });
+    } catch (error) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid patch" } });
+    }
+    return;
+  }
+
+  if (req.method === "DELETE") {
+    db.invoices.splice(index, 1);
+    saveInvoiceDb(db);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
 }
 
 async function handleInvoiceById(req, res, invoiceId) {
@@ -285,7 +427,7 @@ async function handleInvoiceById(req, res, invoiceId) {
 
   if (req.method === "GET") {
     if (!invoice) {
-      sendJson(res, 404, { error: "Invoice not found" });
+      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Invoice not found" } });
       return;
     }
     sendJson(res, 200, { invoice });
@@ -294,7 +436,7 @@ async function handleInvoiceById(req, res, invoiceId) {
 
   if (req.method === "PATCH") {
     if (!invoice) {
-      sendJson(res, 404, { error: "Invoice not found" });
+      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Invoice not found" } });
       return;
     }
     try {
@@ -312,28 +454,29 @@ async function handleInvoiceById(req, res, invoiceId) {
       db.invoices[index] = updated;
       saveInvoiceDb(db);
       if (invoice.status !== "paid" && updated.status === "paid") {
-        dispatchInvoicePaidWebhooks(updated, req).catch((error) => {
+        dispatchInvoiceTelegramAlert(updated, "invoice.paid").catch(console.error);
+        dispatchInvoiceWebhooks(updated, "invoice.paid", req).catch((error) => {
           console.log(`Webhook dispatch failed: ${error.message || "Unknown error"}`);
         });
       }
       sendJson(res, 200, { invoice: updated });
     } catch (error) {
-      sendJson(res, 400, { error: error.message || "Could not update invoice" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Could not update invoice" } });
     }
     return;
   }
 
-  sendJson(res, 405, { error: "Method not allowed" });
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
 }
 
 async function handleAgentWebhooks(req, res, url) {
   if (!requireAgentApiKey(req, res)) return;
 
   if (req.method === "GET") {
-    const merchantWallet = normalizeAddress(url.searchParams.get("merchantWallet"));
     const db = loadWebhookDb();
-    const webhooks = merchantWallet ? db.webhooks.filter((webhook) => sameAddress(webhook.merchantWallet, merchantWallet)) : db.webhooks;
-    sendJson(res, 200, { webhooks: webhooks.map(redactWebhook) });
+    let webhooks = db.webhooks;
+    if (req.agentSellerId) webhooks = webhooks.filter(w => sameAddress(w.merchantWallet, req.agentSellerId));
+    sendJson(res, 200, { webhooks });
     return;
   }
 
@@ -341,17 +484,29 @@ async function handleAgentWebhooks(req, res, url) {
     try {
       const input = await readJsonBody(req);
       const db = loadWebhookDb();
-      const webhook = normalizeWebhook(input);
-      db.webhooks = [webhook, ...db.webhooks.filter((item) => item.id !== webhook.id)];
+      let merchantWallet = normalizeAddress(input.merchantWallet);
+      if (req.agentSellerId) merchantWallet = req.agentSellerId;
+      if (!merchantWallet) throw new Error("merchantWallet is required");
+      
+      const webhook = {
+        id: makeId(20),
+        merchantWallet,
+        url: String(input.url || "").trim(),
+        event: String(input.event || "").trim() || "*",
+        secret: String(input.secret || "").trim() || crypto.randomBytes(32).toString("hex"),
+        enabled: input.enabled !== false,
+        createdAt: new Date().toISOString()
+      };
+      db.webhooks.push(webhook);
       saveWebhookDb(db);
-      sendJson(res, 201, { webhook: redactWebhook(webhook) });
-    } catch (error) {
-      sendJson(res, 400, { error: error.message || "Could not save webhook" });
+      sendJson(res, 201, { webhook });
+    } catch (err) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: err.message || "Invalid webhook" } });
     }
     return;
   }
 
-  sendJson(res, 405, { error: "Method not allowed" });
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
 }
 
 async function handleAgentWebhookById(req, res, webhookId) {
@@ -363,7 +518,7 @@ async function handleAgentWebhookById(req, res, webhookId) {
 
   if (req.method === "GET") {
     if (!webhook) {
-      sendJson(res, 404, { error: "Webhook not found" });
+      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Webhook not found" } });
       return;
     }
     sendJson(res, 200, { webhook: redactWebhook(webhook) });
@@ -372,7 +527,7 @@ async function handleAgentWebhookById(req, res, webhookId) {
 
   if (req.method === "PATCH") {
     if (!webhook) {
-      sendJson(res, 404, { error: "Webhook not found" });
+      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Webhook not found" } });
       return;
     }
     try {
@@ -382,14 +537,14 @@ async function handleAgentWebhookById(req, res, webhookId) {
       saveWebhookDb(db);
       sendJson(res, 200, { webhook: redactWebhook(updated) });
     } catch (error) {
-      sendJson(res, 400, { error: error.message || "Could not update webhook" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Could not update webhook" } });
     }
     return;
   }
 
   if (req.method === "DELETE") {
     if (!webhook) {
-      sendJson(res, 404, { error: "Webhook not found" });
+      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Webhook not found" } });
       return;
     }
     db.webhooks = db.webhooks.filter((item) => item.id !== webhookId);
@@ -398,14 +553,14 @@ async function handleAgentWebhookById(req, res, webhookId) {
     return;
   }
 
-  sendJson(res, 405, { error: "Method not allowed" });
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
 }
 
 async function handleAgentWebhookLogs(req, res, url) {
   if (!requireAgentApiKey(req, res)) return;
 
   if (req.method !== "GET") {
-    sendJson(res, 405, { error: "Method not allowed" });
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
 
@@ -430,13 +585,13 @@ async function handleAgentWebhookLogById(req, res, logId) {
   if (!requireAgentApiKey(req, res)) return;
 
   if (req.method !== "GET") {
-    sendJson(res, 405, { error: "Method not allowed" });
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
 
   const log = loadWebhookLogDb().logs.find((item) => item.id === logId);
   if (!log) {
-    sendJson(res, 404, { error: "Webhook log not found" });
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Webhook log not found" } });
     return;
   }
 
@@ -457,6 +612,51 @@ function loadInvoiceDb() {
 function saveInvoiceDb(db) {
   ensureDataDir();
   fs.writeFileSync(INVOICE_DB_PATH, `${JSON.stringify({ invoices: db.invoices || [] }, null, 2)}\n`);
+}
+
+function loadApiKeyDb() {
+  ensureDataDir();
+  if (!fs.existsSync(API_KEY_DB_PATH)) return { apiKeys: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(API_KEY_DB_PATH, "utf8"));
+    return { apiKeys: Array.isArray(parsed.apiKeys) ? parsed.apiKeys : [] };
+  } catch {
+    return { apiKeys: [] };
+  }
+}
+
+function saveApiKeyDb(db) {
+  fs.writeFileSync(API_KEY_DB_PATH, JSON.stringify(db, null, 2));
+}
+
+function loadEventDb() {
+  ensureDataDir();
+  if (!fs.existsSync(EVENT_DB_PATH)) return { events: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(EVENT_DB_PATH, "utf8"));
+    return { events: Array.isArray(parsed.events) ? parsed.events : [] };
+  } catch {
+    return { events: [] };
+  }
+}
+
+function saveEventDb(db) {
+  fs.writeFileSync(EVENT_DB_PATH, JSON.stringify(db, null, 2));
+}
+function loadSellerDb() {
+  ensureDataDir();
+  if (!fs.existsSync(SELLER_DB_PATH)) return { sellers: {} };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(SELLER_DB_PATH, "utf8"));
+    return { sellers: typeof parsed.sellers === "object" && parsed.sellers !== null ? parsed.sellers : {} };
+  } catch {
+    return { sellers: {} };
+  }
+}
+
+function saveSellerDb(db) {
+  ensureDataDir();
+  fs.writeFileSync(SELLER_DB_PATH, `${JSON.stringify({ sellers: db.sellers || {} }, null, 2)}\n`);
 }
 
 function loadWebhookDb() {
@@ -616,6 +816,10 @@ function normalizeInvoice(input, options = {}) {
   const status = ["open", "verifying", "paid"].includes(input.status) ? input.status : "open";
   const createdAt = options.allowExistingTimestamps && input.createdAt ? String(input.createdAt) : new Date().toISOString();
 
+  let defaultDueDate = new Date(createdAt);
+  defaultDueDate.setDate(defaultDueDate.getDate() + 7);
+  const dueDate = String(input.dueDate || "").trim().slice(0, 24) || defaultDueDate.toISOString();
+
   return {
     id,
     number: String(input.number || "").trim().slice(0, 48) || `INV-${new Date().getFullYear()}-${id.slice(0, 6)}`,
@@ -626,7 +830,7 @@ function normalizeInvoice(input, options = {}) {
     telegramEnabled: Boolean(input.telegramEnabled),
     clientName: String(input.clientName || "").trim().slice(0, 160),
     clientEmail: String(input.clientEmail || "").trim().slice(0, 180),
-    dueDate: String(input.dueDate || "").trim().slice(0, 24),
+    dueDate,
     note: String(input.note || "").trim().slice(0, 1000),
     items,
     total,
@@ -640,6 +844,10 @@ function normalizeInvoice(input, options = {}) {
     verifiedPayment: input.verifiedPayment && typeof input.verifiedPayment === "object" ? input.verifiedPayment : null,
     lastVerificationAt: String(input.lastVerificationAt || ""),
     idempotencyKey: normalizeIdempotencyKey(input.idempotencyKey),
+    telegramPaidNotifiedAt: String(input.telegramPaidNotifiedAt || ""),
+    telegramFailedNotifiedAt: String(input.telegramFailedNotifiedAt || ""),
+    overdueNotifiedAt: String(input.overdueNotifiedAt || ""),
+    webhookEventId: String(input.webhookEventId || "").trim().slice(0, 48),
   };
 }
 
@@ -650,7 +858,9 @@ function normalizeWebhook(input, options = {}) {
   if (!merchantWallet) throw new Error("Invalid merchant wallet");
 
   const event = String(input.event || "invoice.paid").trim();
-  if (event !== "invoice.paid") throw new Error("Unsupported webhook event");
+  if (!["invoice.paid", "invoice.failed", "invoice.overdue", "*"].includes(event)) {
+    throw new Error("Unsupported webhook event");
+  }
 
   const url = normalizeWebhookUrl(input.url);
   const createdAt = options.allowExistingTimestamps && input.createdAt ? String(input.createdAt) : new Date().toISOString();
@@ -805,20 +1015,37 @@ function clampListLimit(value, fallback, max) {
 }
 
 function requireAgentApiKey(req, res) {
-  const expected = getAgentApiKey();
-  if (!expected) {
-    sendJson(res, 503, { error: "Missing FUNDLINE_API_KEY in server environment" });
-    return false;
-  }
-
   const authorization = String(req.headers.authorization || "");
   const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
   const received = String((bearerMatch && bearerMatch[1]) || req.headers["x-api-key"] || "").trim();
-  if (!safeEqualString(received, expected)) {
-    sendJson(res, 401, { error: "Invalid or missing API key" });
+  
+  if (!received) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } });
     return false;
   }
 
+  const expectedGlobal = getAgentApiKey();
+  if (expectedGlobal && safeEqualString(received, expectedGlobal)) {
+    if (!checkRateLimit(req, res, `ip:${req.socket.remoteAddress}`)) return false;
+    req.agentSellerId = null; 
+    return true;
+  }
+
+  const db = loadApiKeyDb();
+  const keyHash = crypto.createHash("sha256").update(received).digest("hex");
+  const record = db.apiKeys.find(k => k.keyHash === keyHash);
+  
+  if (!record || record.revokedAt) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } });
+    return false;
+  }
+  
+  if (!checkRateLimit(req, res, `key:${keyHash}`)) return false;
+
+  record.lastUsedAt = new Date().toISOString();
+  saveApiKeyDb(db);
+  
+  req.agentSellerId = normalizeAddress(record.sellerId);
   return true;
 }
 
@@ -841,9 +1068,19 @@ function decorateInvoiceForAgent(invoice, req) {
   };
 }
 
+const DEFAULT_PUBLIC_BASE_URL = "https://fundline.xyz";
+function getPublicBaseUrl() {
+  const publicBase = process.env.PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL;
+  return String(publicBase).trim().replace(/\/$/, "");
+}
+
 function getRequestBaseUrl(req) {
-  const host = String(req.headers.host || `127.0.0.1:${PORT}`).trim();
-  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  if (!req || !req.headers || !req.headers.host) {
+    const pub = getPublicBaseUrl();
+    if (pub) return pub;
+  }
+  const host = req && req.headers && req.headers.host ? String(req.headers.host).trim() : `127.0.0.1:${PORT}`;
+  const forwardedProto = req && req.headers ? String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() : "";
   const proto = forwardedProto || (host.startsWith("127.0.0.1") || host.startsWith("localhost") ? "http" : "https");
   return `${proto}://${host}`;
 }
@@ -912,30 +1149,47 @@ function randomBytes32() {
   return `0x${crypto.randomBytes(32).toString("hex")}`;
 }
 
-async function dispatchInvoicePaidWebhooks(invoice, req) {
+async function dispatchInvoiceWebhooks(invoice, event, req) {
   const db = loadWebhookDb();
-  const webhooks = db.webhooks.filter((webhook) => webhook.enabled && webhook.event === "invoice.paid" && sameAddress(webhook.merchantWallet, invoice.merchantWallet));
+  const webhooks = db.webhooks.filter((webhook) => webhook.enabled && (webhook.event === event || webhook.event === "*") && sameAddress(webhook.merchantWallet, invoice.merchantWallet));
   if (!webhooks.length) return { sent: 0 };
 
   const payload = {
-    event: "invoice.paid",
+    event,
     sentAt: new Date().toISOString(),
     invoice: decorateInvoiceForAgent(invoice, req),
   };
 
   const results = await Promise.allSettled(webhooks.map(async (webhook) => {
-    if (!invoice.webhookEventId) return Promise.resolve(null);
-    const idKey = `${invoice.webhookEventId}:${webhook.id}`;
+    const eventId = event === "invoice.paid" && invoice.webhookEventId ? invoice.webhookEventId : `${invoice.id}-${event}`;
+    if (!eventId) return Promise.resolve(null);
+    const idKey = `${eventId}:${webhook.id}`;
     if (dispatchedEventIds.has(idKey)) return Promise.resolve(null);
     
-    const res = await sendWebhookWithLog(webhook, payload, invoice, invoice.webhookEventId);
+    const res = await sendWebhookWithLog(webhook, payload, invoice, eventId);
     dispatchedEventIds.add(idKey);
     saveDispatchedEventIds();
     return res;
   }));
   const sent = results.filter((result) => result.status === "fulfilled" && result.value !== null).length;
   const failed = results.filter((result) => result.status === "rejected").length;
-  if (failed || sent) console.log(`Webhook invoice.paid delivered to ${sent}/${results.length} endpoint(s)`);
+  if (failed || sent) console.log(`Webhook ${event} delivered to ${sent}/${results.length} endpoint(s)`);
+  
+  // Save to events DB
+  try {
+    const eventDb = loadEventDb();
+    eventDb.events.push({
+      id: crypto.randomBytes(12).toString("hex"),
+      type: event,
+      sellerId: invoice.merchantWallet,
+      invoiceId: invoice.id,
+      createdAt: new Date().toISOString(),
+      payload: { invoice: decorateInvoiceForAgent(invoice, req) }
+    });
+    saveEventDb(eventDb);
+  } catch (err) {
+    console.error("Failed to save event log", err);
+  }
   return { sent, failed };
 }
 
@@ -1030,7 +1284,7 @@ function sendWebhook(webhook, payload, deliveryId = makeId(10), idempotencyKey =
 
 async function handleVerifyPayment(req, res) {
   if (req.method !== "POST") {
-    sendJson(res, 405, { error: "Method not allowed" });
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
 
@@ -1042,7 +1296,7 @@ async function handleVerifyPayment(req, res) {
     const txHash = normalizeTxHash(body.txHash);
 
     if (!/^[a-f0-9]{20}$/i.test(invoiceId)) {
-      sendJson(res, 400, { error: "Invoice ID is required" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invoice ID is required" } });
       return;
     }
 
@@ -1050,7 +1304,7 @@ async function handleVerifyPayment(req, res) {
     const invoiceIndex = db.invoices.findIndex((item) => item.id === invoiceId);
     const invoice = invoiceIndex >= 0 ? db.invoices[invoiceIndex] : null;
     if (!invoice) {
-      sendJson(res, 404, { error: "Invoice not found" });
+      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Invoice not found" } });
       return;
     }
 
@@ -1061,23 +1315,23 @@ async function handleVerifyPayment(req, res) {
     const now = new Date().toISOString();
 
     if (!payerWallet) {
-      sendJson(res, 400, { error: "Payer wallet is required" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Payer wallet is required" } });
       return;
     }
     if (!merchantWallet) {
-      sendJson(res, 400, { error: "Merchant receiving wallet is invalid" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Merchant receiving wallet is invalid" } });
       return;
     }
     if (sameAddress(payerWallet, merchantWallet)) {
-      sendJson(res, 400, { error: "Payer wallet must be different from the receiving wallet" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Payer wallet must be different from the receiving wallet" } });
       return;
     }
     if (!Number.isFinite(amount) || amount <= 0) {
-      sendJson(res, 400, { error: "Invoice amount is invalid" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invoice amount is invalid" } });
       return;
     }
     if (ARC_PAYMENT_ROUTER_ADDRESS && !onchainInvoiceId) {
-      sendJson(res, 400, { error: "Invoice payment reference is missing" });
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invoice payment reference is missing" } });
       return;
     }
 
@@ -1102,6 +1356,8 @@ async function handleVerifyPayment(req, res) {
           status: "failed",
           error: "Invoice is already paid with a different transaction",
         });
+        dispatchInvoiceTelegramAlert(invoice, "invoice.failed", failedAttempt.error).catch(console.error);
+        dispatchInvoiceWebhooks(invoice, "invoice.failed", req).catch(console.error);
         sendJson(res, 409, { error: "Invoice is already paid with a different transaction", attempt: failedAttempt });
         return;
       }
@@ -1145,6 +1401,8 @@ async function handleVerifyPayment(req, res) {
         status: "failed",
         error: `Transaction already verifies invoice ${duplicateBeforeScan.number || duplicateBeforeScan.id}`,
       });
+      dispatchInvoiceTelegramAlert(invoice, "invoice.failed", failedAttempt.error).catch(console.error);
+      dispatchInvoiceWebhooks(invoice, "invoice.failed", req).catch(console.error);
       sendJson(res, 409, { error: "This transaction is already used for another invoice", attempt: failedAttempt });
       return;
     }
@@ -1206,6 +1464,8 @@ async function handleVerifyPayment(req, res) {
         error: `Transaction already verifies invoice ${duplicateAfterScan.number || duplicateAfterScan.id}`,
         match,
       });
+      dispatchInvoiceTelegramAlert(invoice, "invoice.failed", failedAttempt.error).catch(console.error);
+      dispatchInvoiceWebhooks(invoice, "invoice.failed", req).catch(console.error);
       sendJson(res, 409, { error: "This transaction is already used for another invoice", attempt: failedAttempt });
       return;
     }
@@ -1241,7 +1501,8 @@ async function handleVerifyPayment(req, res) {
     });
 
     if (invoice.status !== "paid") {
-      dispatchInvoicePaidWebhooks(updated, req).catch((error) => {
+      dispatchInvoiceTelegramAlert(updated, "invoice.paid").catch(console.error);
+      dispatchInvoiceWebhooks(updated, "invoice.paid", req).catch((error) => {
         console.log(`Webhook dispatch failed: ${error.message || "Unknown error"}`);
       });
     }
@@ -1475,32 +1736,56 @@ function fetchArcscanJson(pathname, params = {}) {
 
 async function handleTelegramPayment(req, res) {
   if (req.method !== "POST") {
-    sendJson(res, 405, { error: "Method not allowed" });
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
 
   try {
     const body = await readJsonBody(req);
     const chatId = String(body.chatId || "").trim();
-    const invoice = body.invoice || {};
+    const clientInvoice = body.invoice || {};
     if (!chatId) {
       sendJson(res, 400, { error: "Telegram chat ID is required" });
       return;
     }
-    if (!invoice.number || !invoice.total) {
+    if (!clientInvoice.number || !clientInvoice.total) {
       sendJson(res, 400, { error: "Invoice number and total are required" });
       return;
     }
 
-    const token = process.env.TELEGRAM_BOT_TOKEN || process.env.FUNDLINE_TELEGRAM_BOT_TOKEN || process.env.ARC_INVOICE_TELEGRAM_BOT_TOKEN;
+    const token = getTelegramToken();
     if (!token) {
-      sendJson(res, 500, { error: "Missing TELEGRAM_BOT_TOKEN in server environment" });
+      console.error("[Telegram] handleTelegramPayment: TELEGRAM_BOT_TOKEN not set");
+      sendJson(res, 500, { error: "TELEGRAM_BOT_TOKEN is not configured on the server" });
       return;
     }
 
-    await sendTelegramMessage(token, chatId, buildPaymentMessage(invoice));
+    const db = loadInvoiceDb();
+    const storedInvoice = db.invoices.find((item) => item.id === clientInvoice.id);
+    const invoice = storedInvoice || clientInvoice;
+
+    if (invoice.telegramPaidNotifiedAt) {
+      sendJson(res, 200, { ok: true, skipped: true });
+      return;
+    }
+
+    const sendResult = await sendTelegramMessage(token, chatId, buildPaymentMessage(invoice));
+    if (!sendResult.ok) {
+      sendJson(res, 502, { error: sendResult.error || "Telegram delivery failed" });
+      return;
+    }
+
+    // Set guard only after confirmed delivery
+    const db2 = loadInvoiceDb();
+    const index = db2.invoices.findIndex((item) => item.id === invoice.id);
+    if (index >= 0) {
+      db2.invoices[index].telegramPaidNotifiedAt = new Date().toISOString();
+      saveInvoiceDb(db2);
+    }
+
     sendJson(res, 200, { ok: true });
   } catch (error) {
+    console.error("[Telegram] handleTelegramPayment error:", error.message);
     sendJson(res, 500, { error: error.message || "Telegram notification failed" });
   }
 }
@@ -1545,17 +1830,110 @@ function buildPaymentMessage(invoice) {
     .join("\n");
 }
 
+async function dispatchInvoiceTelegramAlert(invoice, event, reason = "") {
+  const token = getTelegramToken();
+  if (!token) {
+    console.error("[Telegram] dispatchInvoiceTelegramAlert: TELEGRAM_BOT_TOKEN not set, skipping alert");
+    return;
+  }
+
+  const sellerDb = loadSellerDb();
+  const sellerSettings = sellerDb.sellers[invoice.merchantWallet] || {};
+  const alerts = sellerSettings.alerts || { paid: true, failed: true, overdue: true };
+
+  const chatId = invoice.telegramChatId || sellerSettings.telegramChatId;
+  if (!chatId) {
+    console.log("[Telegram] No chat ID configured for invoice", invoice.id, "- skipping");
+    return;
+  }
+
+  const db = loadInvoiceDb();
+  const index = db.invoices.findIndex(i => i.id === invoice.id);
+  if (index < 0) return;
+
+  if (event === "invoice.paid") {
+    if (invoice.telegramEnabled === false || alerts.paid === false) return;
+    if (invoice.telegramPaidNotifiedAt || db.invoices[index].telegramPaidNotifiedAt) return;
+
+    const text = buildPaymentMessage(invoice);
+    const result = await sendTelegramMessage(token, chatId, text);
+    if (result.ok) {
+      db.invoices[index].telegramPaidNotifiedAt = new Date().toISOString();
+      invoice.telegramPaidNotifiedAt = db.invoices[index].telegramPaidNotifiedAt;
+      saveInvoiceDb(db);
+    } else {
+      console.error("[Telegram] Paid alert failed for invoice", invoice.id, ":", result.error);
+    }
+  } else if (event === "invoice.failed") {
+    if (alerts.failed === false) return;
+    if (invoice.telegramFailedNotifiedAt || db.invoices[index].telegramFailedNotifiedAt) return;
+
+    const text = `Fundline payment failed\n\nInvoice: ${invoice.number}\nClient: ${invoice.clientName || "-"}\nReason: ${reason}`;
+    const result = await sendTelegramMessage(token, chatId, text);
+    if (result.ok) {
+      db.invoices[index].telegramFailedNotifiedAt = new Date().toISOString();
+      invoice.telegramFailedNotifiedAt = db.invoices[index].telegramFailedNotifiedAt;
+      saveInvoiceDb(db);
+    } else {
+      console.error("[Telegram] Failed alert failed for invoice", invoice.id, ":", result.error);
+    }
+  } else if (event === "invoice.overdue") {
+    if (alerts.overdue === false) return;
+    if (invoice.overdueNotifiedAt || db.invoices[index].overdueNotifiedAt) return;
+
+    const text = `Fundline invoice overdue\n\nInvoice: ${invoice.number}\nClient: ${invoice.clientName || "-"}\nDue Date: ${invoice.dueDate || "-"}`;
+    const result = await sendTelegramMessage(token, chatId, text);
+    if (result.ok) {
+      db.invoices[index].overdueNotifiedAt = new Date().toISOString();
+      invoice.overdueNotifiedAt = db.invoices[index].overdueNotifiedAt;
+      saveInvoiceDb(db);
+    } else {
+      console.error("[Telegram] Overdue alert failed for invoice", invoice.id, ":", result.error);
+    }
+  }
+}
+
 function startTelegramPolling() {
   if (telegramPollTimer || !getTelegramToken()) {
     if (!getTelegramToken()) console.log("Telegram bot: no token loaded");
     return;
   }
-  console.log("Telegram bot: polling /start for chat ID");
+  console.log("Telegram bot: starting polling...");
   setTelegramCommands().catch((error) => console.log(`Telegram command setup failed: ${error.message || "Unknown error"}`));
   pollTelegramUpdates().catch((error) => console.log(`Telegram polling failed: ${error.message || "Unknown error"}`));
   telegramPollTimer = setInterval(() => {
     pollTelegramUpdates().catch((error) => console.log(`Telegram polling failed: ${error.message || "Unknown error"}`));
-  }, TELEGRAM_UPDATE_INTERVAL_MS);
+  }, getTelegramUpdateIntervalMs());
+}
+
+let overdueJobTimer = null;
+function startOverdueJob() {
+  if (overdueJobTimer) return;
+  const interval = Number(process.env.OVERDUE_SCAN_INTERVAL_MS) || 5 * 60 * 1000;
+  console.log(`Overdue job: scanning every ${interval}ms`);
+  
+  overdueJobTimer = setInterval(() => {
+    const db = loadInvoiceDb();
+    const now = Date.now();
+    let modified = false;
+
+    for (const invoice of db.invoices) {
+      if (invoice.status === "paid") continue;
+      if (!invoice.dueDate) continue;
+      
+      const dueTime = new Date(invoice.dueDate).getTime();
+      if (Number.isNaN(dueTime) || now <= dueTime) continue;
+
+      if (!invoice.overdueNotifiedAt) {
+        dispatchInvoiceTelegramAlert(invoice, "invoice.overdue").catch(console.error);
+        dispatchInvoiceWebhooks(invoice, "invoice.overdue", { headers: {} }).catch(console.error);
+        invoice.overdueNotifiedAt = new Date().toISOString();
+        modified = true;
+      }
+    }
+    
+    if (modified) saveInvoiceDb(db);
+  }, Math.max(interval, 5000));
 }
 
 async function pollTelegramUpdates() {
@@ -1632,13 +2010,32 @@ async function setTelegramCommands() {
   telegramCommandsReady = true;
 }
 
-function sendTelegramMessage(token, chatId, text, options = {}) {
-  return requestTelegramWithToken(token, "sendMessage", {
-    chat_id: chatId,
-    text,
-    disable_web_page_preview: true,
-    ...options,
-  });
+async function sendTelegramMessage(token, chatId, text, options = {}) {
+  if (!token) return { ok: false, error: "TELEGRAM_BOT_TOKEN is not configured" };
+  if (!chatId) return { ok: false, error: "Telegram chat ID is empty" };
+  try {
+    const result = await requestTelegramWithToken(token, "sendMessage", {
+      chat_id: chatId,
+      text,
+      disable_web_page_preview: true,
+      ...options,
+    });
+    console.log("[Telegram] sendMessage ok, chat_id:", chatId);
+    return { ok: true, result };
+  } catch (err) {
+    // Parse Telegram error JSON for clear logging
+    let telegramDesc = err.message;
+    try {
+      const m = err.message.match(/Telegram API \d+: (.+)/);
+      if (m) {
+        const parsed = JSON.parse(m[1]);
+        telegramDesc = `error_code=${parsed.error_code} description=${parsed.description}`;
+      }
+    } catch (_) {}
+    const maskedToken = token ? token.substring(0, 8) + "..." + token.slice(-4) : "(empty)";
+    console.error(`[Telegram] sendMessage FAILED token=${maskedToken} chat_id=${chatId}: ${telegramDesc}`);
+    return { ok: false, error: telegramDesc };
+  }
 }
 
 function requestTelegram(method, payload) {
@@ -1871,4 +2268,655 @@ function sendJson(res, status, payload) {
     "Cache-Control": "no-store",
   });
   res.end(JSON.stringify(payload));
+}
+
+// --- DASHBOARD & STOREFRONT ---
+
+function requireSellerAuth(req, res) {
+  const wallet = normalizeAddress(req.headers["x-fundline-wallet"]);
+  const signature = String(req.headers["x-fundline-signature"] || "");
+  const issuedAt = req.headers["x-fundline-issued-at"];
+
+  if (!wallet || !signature || !issuedAt) {
+    sendJson(res, 401, { error: "Missing authentication headers" });
+    return null;
+  }
+
+  const issuedDate = new Date(issuedAt);
+  if (isNaN(issuedDate.getTime()) || Date.now() - issuedDate.getTime() > 24 * 60 * 60 * 1000 || issuedDate.getTime() > Date.now() + 60000) {
+    sendJson(res, 401, { error: "Signature expired or invalid. Please sign in again." });
+    return null;
+  }
+
+  const message = [
+    "Sign in to Fundline",
+    "",
+    "This signature proves you control this wallet.",
+    "It does not move funds or create an on-chain transaction.",
+    "",
+    `Issued at: ${issuedAt}`,
+  ].join("\n");
+
+  try {
+    const recovered = normalizeAddress(ethers.verifyMessage(message, signature));
+    if (recovered !== wallet) {
+      sendJson(res, 401, { error: "Invalid signature: recovered address does not match claimed wallet" });
+      return null;
+    }
+    return recovered;
+  } catch (err) {
+    sendJson(res, 401, { error: "Invalid signature format" });
+    return null;
+  }
+}
+
+function loadProductDb() {
+  ensureDataDir();
+  if (!fs.existsSync(PRODUCT_DB_PATH)) return { products: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(PRODUCT_DB_PATH, "utf8"));
+    return { products: Array.isArray(parsed.products) ? parsed.products : [] };
+  } catch {
+    return { products: [] };
+  }
+}
+
+function saveProductDb(db) {
+  ensureDataDir();
+  fs.writeFileSync(PRODUCT_DB_PATH, `${JSON.stringify({ products: db.products || [] }, null, 2)}\n`);
+}
+
+async function handleDashboardSummary(req, res) {
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+
+  const sellerId = requireSellerAuth(req, res);
+  if (!sellerId) return; // Error already sent
+
+  const db = loadInvoiceDb();
+  const invoices = db.invoices.filter(inv => sameAddress(inv.merchantWallet, sellerId));
+  
+  let totalRevenue = 0;
+  const counts = { open: 0, paid: 0, expired: 0 };
+  
+  invoices.forEach(inv => {
+    if (inv.status === "paid") {
+      counts.paid++;
+      totalRevenue += Number(inv.total || 0);
+    } else if (inv.status === "open" || inv.status === "verifying") {
+      counts.open++;
+    } else if (inv.status === "expired") {
+      counts.expired++;
+    }
+  });
+
+  const attemptsDb = loadPaymentAttemptDb();
+  
+  const paymentHistory = invoices.map(inv => {
+    const successfulAttempt = attemptsDb.attempts.find(a => a.invoiceId === inv.id && a.status === "verified");
+    return {
+      id: inv.id,
+      number: inv.number,
+      payerWallet: inv.payerWallet || (successfulAttempt ? successfulAttempt.payerWallet : ""),
+      total: Math.round(Number(inv.total || 0) * 1e6),
+      txHash: inv.txHash || (successfulAttempt ? successfulAttempt.txHash : ""),
+      status: inv.status,
+      createdAt: inv.createdAt,
+      paidAt: inv.paidAt
+    };
+  }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const customersMap = {};
+  invoices.forEach(inv => {
+    if (inv.status === "paid" && inv.payerWallet) {
+      const payer = normalizeAddress(inv.payerWallet);
+      if (!customersMap[payer]) {
+        customersMap[payer] = { wallet: payer, count: 0, lastSeen: inv.paidAt };
+      }
+      customersMap[payer].count++;
+      if (new Date(inv.paidAt).getTime() > new Date(customersMap[payer].lastSeen).getTime()) {
+        customersMap[payer].lastSeen = inv.paidAt;
+      }
+    }
+  });
+  
+  const customers = Object.values(customersMap).sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());
+
+  sendJson(res, 200, {
+    revenue: Math.round(totalRevenue * 1e6),
+    counts,
+    paymentHistory,
+    customers
+  });
+}
+
+async function handleProducts(req, res, url) {
+  if (req.method === "GET") {
+    const hasAuth = req.headers["x-fundline-wallet"] && req.headers["x-fundline-signature"] && req.headers["x-fundline-issued-at"];
+    let authenticatedSellerId = null;
+    
+    if (hasAuth) {
+      authenticatedSellerId = requireSellerAuth(req, res);
+      if (!authenticatedSellerId) return; // 401 already sent
+    }
+
+    const sellerId = normalizeAddress(url.searchParams.get("sellerId"));
+    const db = loadProductDb();
+    let products = db.products;
+
+    if (authenticatedSellerId) {
+      products = products.filter(p => sameAddress(p.sellerId, authenticatedSellerId));
+    } else if (sellerId) {
+      products = products.filter(p => sameAddress(p.sellerId, sellerId) && p.active !== false);
+    } else {
+      // If neither auth nor sellerId, return active only
+      products = products.filter(p => p.active !== false);
+    }
+
+    sendJson(res, 200, { products });
+    return;
+  }
+
+  if (req.method === "POST") {
+    const sellerId = requireSellerAuth(req, res);
+    if (!sellerId) return;
+
+    try {
+      const input = await readJsonBody(req);
+      const product = {
+        id: crypto.randomUUID().replace(/-/g, ""),
+        sellerId,
+        title: String(input.title || "").trim(),
+        description: String(input.description || "").trim(),
+        priceUSDC: Number(input.priceUSDC || 0),
+        active: input.active !== false,
+        createdAt: new Date().toISOString()
+      };
+      
+      if (!product.title) throw new Error("Title is required");
+      if (product.priceUSDC <= 0) throw new Error("Price must be > 0");
+
+      const db = loadProductDb();
+      db.products = [product, ...db.products];
+      saveProductDb(db);
+      
+      sendJson(res, 201, { product });
+    } catch (err) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: err.message } });
+    }
+    return;
+  }
+
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+async function handleProductById(req, res, productId) {
+  const sellerId = requireSellerAuth(req, res);
+  if (!sellerId) return;
+
+  const db = loadProductDb();
+  const index = db.products.findIndex(p => p.id === productId);
+  const product = index >= 0 ? db.products[index] : null;
+
+  if (!product) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Product not found" } });
+    return;
+  }
+
+  if (!sameAddress(product.sellerId, sellerId)) {
+    sendJson(res, 403, { error: "Forbidden" });
+    return;
+  }
+
+  if (req.method === "PATCH") {
+    try {
+      const input = await readJsonBody(req);
+      const updated = { ...product };
+      if (input.title !== undefined) updated.title = String(input.title).trim();
+      if (input.description !== undefined) updated.description = String(input.description).trim();
+      if (input.priceUSDC !== undefined) updated.priceUSDC = Number(input.priceUSDC);
+      if (input.active !== undefined) updated.active = Boolean(input.active);
+      
+      if (!updated.title) throw new Error("Title is required");
+      if (updated.priceUSDC <= 0) throw new Error("Price must be > 0");
+
+      db.products[index] = updated;
+      saveProductDb(db);
+      sendJson(res, 200, { product: updated });
+    } catch (err) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: err.message } });
+    }
+    return;
+  }
+
+  if (req.method === "DELETE") {
+    db.products.splice(index, 1);
+    saveProductDb(db);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+
+async function handleDashboardSettings(req, res) {
+  const sellerId = requireSellerAuth(req, res);
+  if (!sellerId) return;
+
+  if (req.method === "GET") {
+    const db = loadSellerDb();
+    const settings = db.sellers[sellerId] || { wallet: sellerId, telegramChatId: "", alerts: { paid: true, failed: true, overdue: true } };
+    sendJson(res, 200, { settings });
+    return;
+  }
+
+  if (req.method === "PUT") {
+    try {
+      const patch = await readJsonBody(req);
+      const db = loadSellerDb();
+      const existing = db.sellers[sellerId] || { wallet: sellerId, telegramChatId: "", alerts: { paid: true, failed: true, overdue: true } };
+      
+      const alerts = { ...existing.alerts };
+      if (patch.alerts) {
+        if (typeof patch.alerts.paid === "boolean") alerts.paid = patch.alerts.paid;
+        if (typeof patch.alerts.failed === "boolean") alerts.failed = patch.alerts.failed;
+        if (typeof patch.alerts.overdue === "boolean") alerts.overdue = patch.alerts.overdue;
+      }
+      
+      db.sellers[sellerId] = {
+        wallet: sellerId,
+        telegramChatId: patch.telegramChatId !== undefined ? String(patch.telegramChatId).trim() : existing.telegramChatId,
+        alerts
+      };
+      saveSellerDb(db);
+      sendJson(res, 200, { settings: db.sellers[sellerId] });
+    } catch (err) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: err.message } });
+    }
+    return;
+  }
+
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+async function handleDashboardWebhooks(req, res) {
+  const sellerId = requireSellerAuth(req, res);
+  if (!sellerId) return;
+
+  if (req.method === "GET") {
+    const db = loadWebhookDb();
+    const webhooks = db.webhooks.filter((w) => sameAddress(w.merchantWallet, sellerId));
+    sendJson(res, 200, { webhooks: webhooks.map(redactWebhook) });
+    return;
+  }
+
+  if (req.method === "POST") {
+    try {
+      const input = await readJsonBody(req);
+      input.merchantWallet = sellerId;
+      const webhook = normalizeWebhook(input);
+      const db = loadWebhookDb();
+      db.webhooks = [webhook, ...db.webhooks];
+      saveWebhookDb(db);
+      sendJson(res, 201, { webhook: redactWebhook(webhook), secret: webhook.secret });
+    } catch (err) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: err.message } });
+    }
+    return;
+  }
+
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+async function handleDashboardWebhookById(req, res, webhookId) {
+  const sellerId = requireSellerAuth(req, res);
+  if (!sellerId) return;
+
+  const db = loadWebhookDb();
+  const index = db.webhooks.findIndex(w => w.id === webhookId);
+  if (index < 0) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Webhook not found" } });
+    return;
+  }
+  const webhook = db.webhooks[index];
+  if (!sameAddress(webhook.merchantWallet, sellerId)) {
+    sendJson(res, 403, { error: "Forbidden" });
+    return;
+  }
+
+  if (req.method === "PATCH") {
+    try {
+      const patch = await readJsonBody(req);
+      const updated = normalizeWebhookPatch(webhook, patch);
+      db.webhooks[index] = updated;
+      saveWebhookDb(db);
+      sendJson(res, 200, { webhook: redactWebhook(updated) });
+    } catch (err) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: err.message } });
+    }
+    return;
+  }
+
+  if (req.method === "DELETE") {
+    db.webhooks.splice(index, 1);
+    saveWebhookDb(db);
+    sendJson(res, 200, { ok: true });
+    return;
+  }
+
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+async function handleDashboardWebhookLogs(req, res) {
+  const sellerId = requireSellerAuth(req, res);
+  if (!sellerId) return;
+
+  if (req.method === "GET") {
+    const db = loadWebhookLogDb();
+    const logs = db.logs.filter((log) => sameAddress(log.merchantWallet, sellerId));
+    sendJson(res, 200, { logs: logs.slice(0, 100).map(redactWebhookLog) });
+    return;
+  }
+
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+async function handleDashboardWebhookLogResend(req, res, logId) {
+  const sellerId = requireSellerAuth(req, res);
+  if (!sellerId) return;
+
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+
+  const db = loadWebhookLogDb();
+  const log = db.logs.find((l) => l.id === logId);
+  if (!log) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Log not found" } });
+    return;
+  }
+  if (!sameAddress(log.merchantWallet, sellerId)) {
+    sendJson(res, 403, { error: "Forbidden" });
+    return;
+  }
+
+  const webhookDb = loadWebhookDb();
+  const webhook = webhookDb.webhooks.find(w => w.id === log.webhookId);
+  if (!webhook) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Webhook endpoint no longer exists" } });
+    return;
+  }
+
+  const invoiceDb = loadInvoiceDb();
+  const invoice = invoiceDb.invoices.find(i => i.id === log.invoiceId);
+  if (!invoice) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Associated invoice no longer exists" } });
+    return;
+  }
+
+  const eventId = log.event === "invoice.paid" && invoice.webhookEventId ? invoice.webhookEventId : `${invoice.id}-${log.event}`;
+
+  try {
+    const result = await sendWebhookWithLog(webhook, log.payload, invoice, eventId);
+    sendJson(res, 200, { result });
+  } catch (error) {
+    sendJson(res, 500, { error: error.message || "Failed to resend webhook" });
+  }
+}
+
+
+async function handleDashboardApiKeys(req, res, wallet, url) {
+  const db = loadApiKeyDb();
+  if (req.method === "GET") {
+    const keys = db.apiKeys.filter(k => sameAddress(k.sellerId, wallet)).map(k => ({
+      id: k.id,
+      name: k.name,
+      keyPrefix: k.keyPrefix,
+      createdAt: k.createdAt,
+      lastUsedAt: k.lastUsedAt,
+      revokedAt: k.revokedAt
+    }));
+    sendJson(res, 200, { apiKeys: keys });
+    return;
+  }
+  if (req.method === "POST") {
+    try {
+      const body = await readJsonBody(req);
+      const name = String(body.name || "Agent Key").trim().slice(0, 100);
+      const randomPart = crypto.randomBytes(24).toString('hex');
+      const fullKey = `fdl_live_${randomPart}`;
+      const keyHash = crypto.createHash("sha256").update(fullKey).digest("hex");
+      const keyPrefix = fullKey.substring(0, 17); // fdl_live_ + 8 chars
+      
+      const record = {
+        id: crypto.randomBytes(8).toString('hex'),
+        sellerId: normalizeAddress(wallet),
+        name,
+        keyPrefix,
+        keyHash,
+        createdAt: new Date().toISOString(),
+        lastUsedAt: null,
+        revokedAt: null
+      };
+      db.apiKeys.push(record);
+      saveApiKeyDb(db);
+      
+      sendJson(res, 201, { apiKey: { ...record, secret: fullKey } });
+    } catch (err) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Failed to create API key" } });
+    }
+    return;
+  }
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+async function handleDashboardApiKeyById(req, res, wallet, keyId) {
+  if (req.method === "DELETE") {
+    const db = loadApiKeyDb();
+    const index = db.apiKeys.findIndex(k => k.id === keyId && sameAddress(k.sellerId, wallet));
+    if (index >= 0) {
+      db.apiKeys[index].revokedAt = new Date().toISOString();
+      saveApiKeyDb(db);
+      sendJson(res, 200, { ok: true });
+    } else {
+      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "API key not found" } });
+    }
+    return;
+  }
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+
+async function handleAgentEvents(req, res, url) {
+  if (!requireAgentApiKey(req, res)) return;
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  
+  const since = url.searchParams.get("since");
+  const type = url.searchParams.get("type");
+  const db = loadEventDb();
+  
+  let events = db.events;
+  if (req.agentSellerId) {
+    events = events.filter(e => sameAddress(e.sellerId, req.agentSellerId));
+  }
+  if (type) {
+    events = events.filter(e => e.type === type);
+  }
+  if (since) {
+    events = events.filter(e => e.createdAt > since || e.id === since || e.createdAt >= since);
+  }
+  
+  events.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); // Most recent first
+  sendJson(res, 200, { events });
+}
+
+async function handleAgentVerify(req, res, invoiceId) {
+  if (!requireAgentApiKey(req, res)) return;
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  
+  const db = loadInvoiceDb();
+  const invoice = db.invoices.find(i => i.id === invoiceId);
+  if (!invoice) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Invoice not found" } });
+    return;
+  }
+  if (req.agentSellerId && !sameAddress(invoice.merchantWallet, req.agentSellerId)) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Invoice not found" } });
+    return;
+  }
+  
+  // Call handleVerifyPayment, intercepting the response
+  let verifyResStatus = 200;
+  let verifyResBody = null;
+  const mockRes = {
+    setHeader: () => {},
+    end: (data) => { verifyResBody = data; }
+  };
+  
+  // Actually, handleVerifyPayment uses sendJson(res, status, data), we can monkey-patch mockRes
+  mockRes.sendJson = (status, data) => {
+    verifyResStatus = status;
+    verifyResBody = JSON.stringify(data);
+  };
+  // But wait, handleVerifyPayment calls sendJson which requires res to have setHeader, writeHead, end
+  mockRes.writeHead = (status, headers) => { verifyResStatus = status; };
+  
+  try {
+    await handleVerifyPayment(req, mockRes);
+    if (!verifyResBody) throw new Error("No response from verify");
+    sendJson(res, verifyResStatus, JSON.parse(verifyResBody));
+  } catch (err) {
+    sendJson(res, 500, { error: { code: "INTERNAL_ERROR", message: "Verification failed" } });
+  }
+}
+
+async function handleAgentWebhooksTest(req, res) {
+  if (!requireAgentApiKey(req, res)) return;
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  
+  try {
+    const body = await readJsonBody(req);
+    const merchantWallet = req.agentSellerId || normalizeAddress(body.merchantWallet);
+    if (!merchantWallet) throw new Error("merchantWallet is required");
+    
+    const webhookDb = loadWebhookDb();
+    const webhooks = webhookDb.webhooks.filter(w => sameAddress(w.merchantWallet, merchantWallet) && w.enabled);
+    
+    if (webhooks.length === 0) {
+      sendJson(res, 404, { error: { code: "NOT_FOUND", message: "No active webhooks found for this seller" } });
+      return;
+    }
+    
+    const testInvoice = { id: makeId(20), total: "1.000000", merchantWallet };
+    const payload = { event: "invoice.paid", sentAt: new Date().toISOString(), invoice: testInvoice, test: true };
+    const results = await Promise.allSettled(webhooks.map(w => sendWebhookWithLog(w, payload, testInvoice, makeId(10))));
+    
+    const sent = results.filter(r => r.status === "fulfilled" && r.value !== null).length;
+    sendJson(res, 200, { ok: true, sent, total: webhooks.length });
+  } catch (err) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: err.message || "Test failed" } });
+  }
+}
+
+async function handleX402Invoice(req, res, invoiceId) {
+  if (!checkRateLimit(req, res, `ip:${req.socket.remoteAddress}`)) return;
+
+  const db = loadInvoiceDb();
+  const invoice = db.invoices.find(i => i.id === invoiceId);
+  if (!invoice) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Invoice not found" } });
+    return;
+  }
+
+  const xpayment = req.headers["x-payment"];
+  
+  if (!xpayment) {
+    // Return 402 with accepts array
+    res.writeHead(402, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({
+      accepts: [
+        {
+          scheme: "exact",
+          network: "eip155:5042002",
+          maxAmountRequired: invoice.total,
+          asset: "0x3600000000000000000000000000000000000000",
+          payTo: invoice.merchantWallet,
+          resource: getRequestBaseUrl(req) + req.url,
+          description: invoice.description || "Invoice payment",
+          maxTimeoutSeconds: 3600,
+          extra: {
+            invoiceId: invoice.id,
+            onchainInvoiceId: invoice.onchainInvoiceId
+          }
+        }
+      ]
+    }));
+    return;
+  }
+
+  // Parse x-payment
+  let decoded;
+  try {
+    decoded = JSON.parse(Buffer.from(xpayment, "base64").toString("utf8"));
+  } catch (e) {
+    res.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: { code: "BAD_REQUEST", message: "Invalid X-PAYMENT header" } }));
+    return;
+  }
+
+  // Construct mock request for handleVerifyPayment
+  const verifyReq = {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    socket: req.socket,
+    bodyData: JSON.stringify({
+      invoiceId: invoice.id,
+      payerWallet: decoded.payerWallet || decoded.payer,
+      txHash: decoded.txHash || decoded.transactionHash
+    })
+  };
+  
+  // Custom mock for reading body
+  verifyReq.on = (event, cb) => {
+    if (event === "data") cb(verifyReq.bodyData);
+    if (event === "end") cb();
+  };
+  
+  let verifyResStatus = 200;
+  let verifyResBody = null;
+  const mockRes = {
+    setHeader: () => {},
+    writeHead: (status) => { verifyResStatus = status; },
+    end: (data) => { verifyResBody = data; }
+  };
+  
+  await handleVerifyPayment(verifyReq, mockRes);
+  
+  if (verifyResStatus !== 200) {
+    // If verify failed, return 402 with reason
+    const reason = verifyResBody ? JSON.parse(verifyResBody).error : "Verification failed";
+    res.writeHead(402, { "Content-Type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({ error: { code: "PAYMENT_REQUIRED", message: reason } }));
+    return;
+  }
+  
+  // Success! Send 200 with X-PAYMENT-RESPONSE
+  const settlement = Buffer.from(JSON.stringify({ txHash: decoded.txHash || decoded.transactionHash })).toString("base64");
+  res.setHeader("X-PAYMENT-RESPONSE", settlement);
+  
+  const updatedInvoice = loadInvoiceDb().invoices.find(i => i.id === invoiceId);
+  sendJson(res, 200, { invoice: decorateInvoiceForAgent(updatedInvoice, req) });
 }

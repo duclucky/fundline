@@ -4,18 +4,21 @@
 
 :root {
   color-scheme: dark;
-  --bg:           #050505;
-  --ink:          #ffffff;
-  --muted:        #9ca3af;
-  --muted-2:      #6b7280;
-  --line:         rgba(255, 255, 255, 0.08);
-  --line-strong:  rgba(255, 255, 255, 0.15);
-  --panel:        rgba(255, 255, 255, 0.02);
-  --cyan:         #00f0ff;
-  --blue:         #2b58ff;
-  --green:        #00ff9d;
-  --warm:         #ffb86c;
-  --mono:         "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --bg: #0a0a0c;
+  --ink: #f6f1e6;
+  --muted: #b7b1a1;
+  --muted-2: #8a8474;
+  --line: rgba(212,175,55,0.16);
+  --line-strong: rgba(212,175,55,0.3);
+  --panel: rgba(26, 27, 32, 0.9);
+  --cyan: #d4af37;
+  --blue: #f2d27a;
+  --green: #d4af37;
+  --warm: #f2d27a;
+  --gold: #f2d27a;
+  --gold-bright: #d4af37;
+  --gold-deep: #b8860b;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --radius-sm:    12px;
   --radius-md:    16px;
   --radius-lg:    24px;
@@ -37,8 +40,8 @@ body {
   color: var(--ink);
   background: var(--bg);
   background-image:
-    radial-gradient(ellipse at 50% -20%, rgba(43, 88, 255, 0.2) 0%, transparent 60%),
-    radial-gradient(circle at 85% 60%, rgba(0, 240, 255, 0.06) 0%, transparent 40%);
+    radial-gradient(ellipse at 50% -20%, rgba(212, 175, 55, 0.2) 0%, transparent 60%),
+    radial-gradient(circle at 85% 60%, rgba(212, 175, 55, 0.06) 0%, transparent 40%);
   background-attachment: fixed;
   font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 17px;
@@ -46,7 +49,7 @@ body {
 }
 
 a { color: inherit; text-decoration: none; }
-a:hover { color: var(--cyan); }
+a:hover { color: var(--gold); }
 
 h1, h2, h3, h4, p { margin-top: 0; }
 ul { margin: 0; padding: 0; list-style: none; }
@@ -95,7 +98,7 @@ h3 {
 
 /* ---- Eyebrow ---- */
 .eyebrow {
-  color: var(--cyan);
+  color: var(--gold);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 950;
@@ -177,9 +180,9 @@ h3 {
 .launch-cta,
 .audience-cta-primary {
   color: #000000;
-  background: linear-gradient(135deg, var(--cyan), #00d4ff, var(--green));
+  background: linear-gradient(135deg, var(--gold-deep), var(--gold-bright));
   border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.2);
+  box-shadow: 0 4px 20px rgba(212, 175, 55, 0.2);
 }
 
 .nav-button:hover,
@@ -188,7 +191,7 @@ h3 {
 .audience-cta:hover {
   opacity: 1;
   transform: translateY(-2px);
-  box-shadow: 0 12px 32px rgba(0, 240, 255, 0.35);
+  box-shadow: 0 12px 32px rgba(212, 175, 55, 0.35);
   border-color: rgba(255, 255, 255, 0.6);
 }
 
@@ -269,8 +272,8 @@ h3 {
   width: 31px;
   height: 31px;
   border-radius: 10px;
-  background: linear-gradient(145deg, var(--cyan) 0%, var(--blue) 58%, #71f4c4 100%);
-  box-shadow: 0 14px 30px rgba(53, 221, 255, 0.2);
+  background: linear-gradient(145deg, var(--gold) 0%, var(--gold-bright) 58%, var(--gold-deep) 100%);
+  box-shadow: 0 14px 30px rgba(212, 175, 55, 0.2);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -340,7 +343,7 @@ h3 {
 }
 
 .nav-link.nav-link-active {
-  color: var(--cyan);
+  color: var(--gold);
   background: rgba(53, 221, 255, 0.08);
 }
 
@@ -423,7 +426,7 @@ h3 {
   transition: color 0.15s;
 }
 
-.mobile-link:hover { color: var(--cyan); }
+.mobile-link:hover { color: var(--gold); }
 
 .mobile-cta-btn {
   display: inline-flex;
@@ -436,7 +439,7 @@ h3 {
   font-size: 18px;
   font-weight: 950;
   color: #07111d;
-  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  background: linear-gradient(135deg, var(--gold), var(--gold-bright));
   border: 1px solid rgba(170, 218, 255, 0.72);
   transition: opacity 0.15s;
   align-self: flex-start;
@@ -462,8 +465,8 @@ h3 {
   z-index: -1;
   content: "";
   background:
-    radial-gradient(ellipse at center top, rgba(0, 240, 255, 0.12), transparent 45%),
-    radial-gradient(circle at 50% 30%, rgba(43, 88, 255, 0.1), transparent 50%);
+    radial-gradient(ellipse at center top, rgba(212, 175, 55, 0.15), transparent 45%),
+    radial-gradient(circle at 50% 30%, rgba(184, 134, 11, 0.1), transparent 50%);
 }
 
 .live-pill {
@@ -474,7 +477,7 @@ h3 {
   min-height: 32px;
   margin-top: 10px;
   padding: 0 14px;
-  color: var(--warm);
+  color: var(--gold-bright);
   background: rgba(24, 81, 95, 0.4);
   border: 1px solid rgba(53, 221, 255, 0.36);
   font-size: 11px;
@@ -489,14 +492,14 @@ h3 {
   display: inline-block;
   width: 8px;
   height: 8px;
-  background: var(--green);
+  background: var(--gold);
   border-radius: 999px;
   box-shadow: 0 0 14px rgba(114, 246, 166, 0.82);
   flex-shrink: 0;
 }
 
 .hero-gradient {
-  background: linear-gradient(90deg, var(--cyan), var(--blue), var(--warm));
+  background: linear-gradient(90deg, var(--gold), var(--gold-bright), var(--gold-bright));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -620,12 +623,12 @@ h3 {
 
 .audience-card:hover {
   transform: translateY(-6px);
-  border-color: rgba(0, 240, 255, 0.4);
-  box-shadow: 0 12px 40px rgba(0, 240, 255, 0.12), inset 0 0 0 1px rgba(0, 240, 255, 0.2);
+  border-color: rgba(212, 175, 55, 0.4);
+  box-shadow: 0 12px 40px rgba(212, 175, 55, 0.12), inset 0 0 0 1px rgba(212, 175, 55, 0.2);
 }
 
 .card-eyebrow {
-  color: var(--cyan);
+  color: var(--gold);
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 950;
@@ -662,7 +665,7 @@ h3 {
   left: 0; top: 9px;
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: var(--cyan);
+  background: var(--gold);
   opacity: 0.65;
 }
 
@@ -695,7 +698,7 @@ h3 {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  background: linear-gradient(135deg, var(--gold), var(--gold-bright));
   color: #07111d;
   font-family: var(--mono);
   font-size: 13px;
@@ -825,7 +828,7 @@ h3 {
 
 .mock-input-accent {
   border-color: rgba(53, 221, 255, 0.45);
-  color: var(--cyan);
+  color: var(--gold);
   font-weight: 700;
 }
 
@@ -849,7 +852,7 @@ h3 {
   justify-content: center;
   height: 34px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--cyan), var(--blue));
+  background: linear-gradient(135deg, var(--gold), var(--gold-bright));
   color: #07111d;
   font-size: 12px;
   font-weight: 950;
@@ -893,7 +896,7 @@ h3 {
 .mock-amt-value {
   font-size: 24px;
   font-weight: 950;
-  color: var(--cyan);
+  color: var(--gold);
   letter-spacing: -0.04em;
   line-height: 1;
 }
@@ -952,14 +955,14 @@ h3 {
   border-radius: 8px;
   background: rgba(114, 246, 166, 0.11);
   border: 1px solid rgba(114, 246, 166, 0.28);
-  color: var(--green);
+  color: var(--gold);
   font-size: 12px;
   font-weight: 700;
   text-align: center;
 }
 
 .mock-status-paid {
-  color: var(--green);
+  color: var(--gold);
   font-weight: 700;
   font-size: 12px;
 }
@@ -986,7 +989,7 @@ h3 {
 .feature-card:hover {
   transform: translateY(-4px);
   border-color: rgba(43, 88, 255, 0.5);
-  box-shadow: 0 8px 32px rgba(43, 88, 255, 0.15), inset 0 0 0 1px rgba(43, 88, 255, 0.2);
+  box-shadow: 0 8px 32px rgba(43, 88, 255, 0.15), inset 0 0 0 1px rgba(212, 175, 55, 0.2);
 }
 
 .feature-card .eyebrow { margin-bottom: 8px; }
@@ -1133,7 +1136,7 @@ h3 {
   font-weight: 950;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--cyan);
+  color: var(--gold);
   margin-bottom: 0;
 }
 
@@ -1176,7 +1179,7 @@ h3 {
   left: 0; top: 8px;
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: var(--green);
+  background: var(--gold);
   opacity: 0.8;
 }
 
@@ -1243,7 +1246,7 @@ h3 {
   content: "+";
   font-size: 22px;
   font-weight: 300;
-  color: var(--cyan);
+  color: var(--gold);
   flex-shrink: 0;
   transition: transform 0.25s;
   line-height: 1;
@@ -1339,7 +1342,7 @@ h3 {
 
 .footer-nav {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
   justify-self: end;
 }
@@ -1365,7 +1368,7 @@ h3 {
   transition: color 0.15s;
 }
 
-.footer-col a:hover { color: var(--cyan); }
+.footer-col a:hover { color: var(--gold); }
 
 .footer-bottom {
   width: var(--container);
