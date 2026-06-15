@@ -815,7 +815,7 @@ async function saveSettingsFromForm(event) {
       
       let signature = "";
       try {
-        signature = await window.ethereum.request({ method: "personal_sign", params: ["0x" + [...message].map(c => c.charCodeAt(0).toString(16)).join(''), connected] });
+        signature = await window.ethereum.request({ method: "personal_sign", params: [stringToHex(message), connected] });
       } catch (e) {
         if (Number(e?.code) === 4001) throw e;
         signature = await window.ethereum.request({ method: "personal_sign", params: [message, connected] });
