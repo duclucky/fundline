@@ -239,8 +239,9 @@ function resolveRequestPath(pathname) {
   return pathname;
 }
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Fundline running at http://127.0.0.1:${PORT}`);
+const HOST = process.env.HOST || "0.0.0.0";
+server.listen(PORT, HOST, () => {
+  console.log(`Fundline running at http://${HOST}:${PORT}`);
   startTelegramPolling();
   startOverdueJob();
 });
