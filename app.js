@@ -789,6 +789,52 @@ function validateSettings() {
   return "";
 }
 
+const SELLER_SESSION_KEY = "fundline_dashboard_session";
+const SELLER_SESSION_MAX_AGE_MS = 23 * 60 * 60 * 1000;
+
+async function getSellerSession(connected, forceNew = false) {
+  if (!forceNew) {
+    let stored = null;
+    try {
+      stored = JSON.parse(localStorage.getItem(SELLER_SESSION_KEY) || "null");
+    } catch {
+      stored = null;
+    }
+    if (
+      stored &&
+      typeof stored.wallet === "string" &&
+      stored.wallet.toLowerCase() === connected.toLowerCase() &&
+      stored.signature &&
+      stored.issuedAt &&
+      Date.now() - new Date(stored.issuedAt).getTime() < SELLER_SESSION_MAX_AGE_MS
+    ) {
+      return stored;
+    }
+  }
+
+  const issuedAt = new Date().toISOString();
+  const message = [
+    "Sign in to Fundline",
+    "",
+    "This signature proves you control this wallet.",
+    "It does not move funds or create an on-chain transaction.",
+    "",
+    `Issued at: ${issuedAt}`,
+  ].join("\n");
+
+  let signature = "";
+  try {
+    signature = await window.ethereum.request({ method: "personal_sign", params: [stringToHex(message), connected] });
+  } catch (e) {
+    if (Number(e?.code) === 4001) throw e;
+    signature = await window.ethereum.request({ method: "personal_sign", params: [message, connected] });
+  }
+
+  const session = { wallet: connected, signature, issuedAt };
+  localStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session));
+  return session;
+}
+
 async function saveSettingsFromForm(event) {
   event.preventDefault();
   const settings = readSettingsDraft();
@@ -805,45 +851,29 @@ async function saveSettingsFromForm(event) {
   }
 
   try {
-    let sessionStr = localStorage.getItem("fundline_dashboard_session");
-    let session = sessionStr ? JSON.parse(sessionStr) : null;
-    if (!session || session.wallet.toLowerCase() !== connected.toLowerCase()) {
-      const issuedAt = new Date().toISOString();
-      const message = [
-        "Sign in to Fundline",
-        "",
-        "This signature proves you control this wallet.",
-        "It does not move funds or create an on-chain transaction.",
-        "",
-        `Issued at: ${issuedAt}`,
-      ].join("\n");
-      
-      let signature = "";
-      try {
-        signature = await window.ethereum.request({ method: "personal_sign", params: [stringToHex(message), connected] });
-      } catch (e) {
-        if (Number(e?.code) === 4001) throw e;
-        signature = await window.ethereum.request({ method: "personal_sign", params: [message, connected] });
-      }
-      session = { wallet: connected, signature, issuedAt };
-      localStorage.setItem("fundline_dashboard_session", JSON.stringify(session));
-    }
+    const sendSettings = (session) =>
+      fetch("/api/dashboard/settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "x-fundline-wallet": session.wallet,
+          "x-fundline-signature": session.signature,
+          "x-fundline-issued-at": session.issuedAt,
+        },
+        body: JSON.stringify({
+          telegramChatId: settings.telegramChatId,
+          alerts: settings.alerts,
+        }),
+      });
 
-    const res = await fetch("/api/dashboard/settings", {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "x-fundline-wallet": session.wallet,
-        "x-fundline-signature": session.signature,
-        "x-fundline-issued-at": session.issuedAt,
-      },
-      body: JSON.stringify({
-        telegramChatId: settings.telegramChatId,
-        alerts: settings.alerts
-      })
-    });
+    let res = await sendSettings(await getSellerSession(connected));
+    if (res.status === 401) {
+      // Stored signature is stale or rejected; drop it, re-sign once, and retry.
+      localStorage.removeItem(SELLER_SESSION_KEY);
+      res = await sendSettings(await getSellerSession(connected, true));
+    }
     if (!res.ok) {
-      const err = await res.json();
+      const err = await res.json().catch(() => ({}));
       throw new Error(err.error || "Failed to save settings to server");
     }
   } catch (err) {
