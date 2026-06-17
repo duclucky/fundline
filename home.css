@@ -23,7 +23,7 @@
   --radius-md:    16px;
   --radius-lg:    24px;
   --container:    min(1200px, calc(100% - 48px));
-  --section-y:    120px;
+  --section-y:    88px;
 }
 
 /* ---- Reset ---- */
@@ -42,7 +42,6 @@ body {
   background-image:
     radial-gradient(ellipse at 50% -20%, rgba(212, 175, 55, 0.2) 0%, transparent 60%),
     radial-gradient(circle at 85% 60%, rgba(212, 175, 55, 0.06) 0%, transparent 40%);
-  background-attachment: fixed;
   font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 17px;
   line-height: 1.65;
@@ -84,8 +83,7 @@ h2 {
 }
 
 .single-line-title {
-  white-space: nowrap;
-  font-size: clamp(16px, 4vw, 64px);
+  font-size: clamp(26px, 4.5vw, 56px);
 }
 
 h3 {
@@ -344,7 +342,7 @@ h3 {
 
 .nav-link.nav-link-active {
   color: var(--gold);
-  background: rgba(53, 221, 255, 0.08);
+  background: rgba(212, 175, 55, 0.1);
 }
 
 .nav-actions {
@@ -455,7 +453,7 @@ h3 {
   display: grid;
   justify-items: center;
   min-height: 100svh;
-  padding: 128px 24px 120px;
+  padding: 140px 24px 88px;
   text-align: center;
 }
 
@@ -478,8 +476,8 @@ h3 {
   margin-top: 10px;
   padding: 0 14px;
   color: var(--gold-bright);
-  background: rgba(24, 81, 95, 0.4);
-  border: 1px solid rgba(53, 221, 255, 0.36);
+  background: rgba(212, 175, 55, 0.1);
+  border: 1px solid rgba(212, 175, 55, 0.32);
   font-size: 11px;
   border-radius: 999px;
   font-family: var(--mono);
@@ -535,7 +533,7 @@ h3 {
   flex-wrap: wrap;
   justify-content: center;
   padding-top: 28px;
-  border-top: 1px solid rgba(184, 218, 255, 0.18);
+  border-top: 1px solid var(--line-strong);
   width: min(780px, 100%);
 }
 
@@ -689,7 +687,7 @@ h3 {
   transition: border-color 0.2s;
 }
 
-.how-card:hover { border-color: rgba(53, 221, 255, 0.25); }
+.how-card:hover { border-color: rgba(212, 175, 55, 0.4); }
 
 .step-num {
   display: inline-flex;
@@ -728,7 +726,7 @@ h3 {
    ==================================================== */
 .showcase-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
   align-items: stretch;
 }
@@ -955,7 +953,7 @@ h3 {
   border-radius: 8px;
   background: rgba(114, 246, 166, 0.11);
   border: 1px solid rgba(114, 246, 166, 0.28);
-  color: var(--gold);
+  color: var(--green);
   font-size: 12px;
   font-weight: 700;
   text-align: center;
@@ -988,8 +986,8 @@ h3 {
 
 .feature-card:hover {
   transform: translateY(-4px);
-  border-color: rgba(43, 88, 255, 0.5);
-  box-shadow: 0 8px 32px rgba(43, 88, 255, 0.15), inset 0 0 0 1px rgba(212, 175, 55, 0.2);
+  border-color: rgba(212, 175, 55, 0.45);
+  box-shadow: 0 8px 32px rgba(212, 175, 55, 0.12), inset 0 0 0 1px rgba(212, 175, 55, 0.15);
 }
 
 .feature-card .eyebrow { margin-bottom: 8px; }
@@ -1019,8 +1017,7 @@ h3 {
 }
 
 #dev-title {
-  white-space: nowrap;
-  font-size: clamp(12px, 4vw, 56px);
+  font-size: clamp(26px, 4.5vw, 56px);
   letter-spacing: -0.04em;
 }
 
@@ -1120,9 +1117,9 @@ h3 {
 }
 
 .pricing-card-active {
-  background: rgba(18, 36, 62, 0.85);
-  border: 1px solid rgba(53, 221, 255, 0.35);
-  box-shadow: 0 0 48px rgba(53, 221, 255, 0.07);
+  background: rgba(22, 17, 6, 0.88);
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  box-shadow: 0 0 48px rgba(212, 175, 55, 0.1);
 }
 
 .pricing-card-future {
@@ -1221,7 +1218,7 @@ h3 {
 }
 
 .faq-item:focus-within {
-  border-color: rgba(53, 221, 255, 0.3);
+  border-color: rgba(212, 175, 55, 0.4);
 }
 
 .faq-question {
@@ -1288,7 +1285,7 @@ h3 {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at center, rgba(53, 221, 255, 0.06), transparent 65%);
+  background: radial-gradient(ellipse at center, rgba(212, 175, 55, 0.07), transparent 65%);
   pointer-events: none;
 }
 
@@ -1402,10 +1399,6 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .showcase-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .footer-inner {
     grid-template-columns: 1fr;
     gap: 32px;
@@ -1476,4 +1469,36 @@ h3 {
   }
 
   .dev-grid { grid-template-columns: 1fr; }
+}
+
+/* ====================================================
+   Telegram mockup helper classes (replaces inline styles)
+   ==================================================== */
+.mock-tg-body { background: rgba(8, 15, 30, 0.7); }
+
+.mock-tg-bubble {
+  background: rgba(212, 175, 55, 0.07);
+  border: 1px solid rgba(212, 175, 55, 0.18);
+  border-radius: 12px 12px 12px 2px;
+  padding: 14px;
+  margin-top: 10px;
+}
+
+.mock-tg-sender {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mock-tg-message {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.mock-tg-highlight {
+  color: var(--green);
+  font-weight: 700;
 }

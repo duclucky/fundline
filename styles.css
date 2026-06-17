@@ -1353,7 +1353,10 @@ select {
     height: auto;
   }
 
-  .stats-grid,
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .form-grid,
   .payment-source-box,
   .progress-step,

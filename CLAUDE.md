@@ -1,0 +1,44 @@
+# CLAUDE.md - Fundline (fundline.xyz)
+
+Persistent context for coding sessions. Keep it accurate. If something here drifts
+from the code, fix the code or fix this file.
+
+Fundline is a non-custodial verification-and-settlement layer on Arc that turns a raw
+USDC transfer into a trusted business event (human invoices, AI-agent x402 pay-per-call,
+creator pay-per-item). Stack: plain Node.js `http` server plus vanilla browser JS, no
+framework, no build step. This directory (`outputs/arc-invoice-usdc/`) is the git-tracked
+app repo.
+
+## Rules
+
+Detailed, per-topic guidance lives in `.claude/rules/`. Files there with no `paths:`
+frontmatter load automatically at session start. Read them before working:
+
+- `.claude/rules/project-overview.md` - what Fundline is and current build status
+- `.claude/rules/architecture.md` - tech stack, directory map, agent + x402 surface
+- `.claude/rules/onchain-reference.md` - contract addresses, chainId, RPC, CCTP, decimals
+- `.claude/rules/commands.md` - install, run, test, contract deploy
+- `.claude/rules/coding-conventions.md` - hard requirements (style, language, invariants)
+- `.claude/rules/glossary.md` - domain terms (PaymentRouter, x402, CCTP, SBT, etc.)
+- `.claude/rules/gotchas.md` - fragile areas and "do not touch"
+- `.claude/rules/git-workflow.md` - git layout, commit style, CI/CD
+
+To make a rule load only for specific files instead of every session, add a `paths:`
+glob frontmatter block to that rule file (Claude Code rule spec). None are scoped today
+because all current rules are project-wide.
+
+## Critical rules summary (full detail in the rule files above)
+
+These must always hold, even if the rules directory is not loaded:
+
+- Code, comments, UI copy, and docs are in English.
+- Do NOT use long em dashes in code, comments, or UI text.
+- Do NOT attach icons or emojis to text on the website.
+- USDC has 6 decimals on Arc and is also the gas token. Never assume 18 decimals.
+  Centralize decimal handling. `10.50 USDC` is `10500000` base units.
+- Non-custodial invariant: no owner or admin path may withdraw user or escrowed funds.
+  Flag any code that violates this.
+- Follow the existing style (CommonJS, two-space indent, double quotes). Do not introduce
+  a new formatter/linter or restyle untouched code.
+- Run git and npm commands from this directory (`outputs/arc-invoice-usdc/`), which is the
+  real repo. The outer `fundline/` folder is not its own git repo.
