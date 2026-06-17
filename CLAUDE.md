@@ -78,3 +78,21 @@ These must always hold, even if the rules directory is not loaded:
   a new formatter/linter or restyle untouched code.
 - Run git and npm commands from this directory (`outputs/arc-invoice-usdc/`), which is the
   real repo. The outer `fundline/` folder is not its own git repo.
+
+## Docs publishing policy (public docs.html / docs.js)
+
+The docs page deploys to the public site. When writing or editing it, publish only what an
+integrator needs to USE the product; keep anything that helps an attacker probe the system
+or a competitor clone it OUT of the public page.
+
+- No secrets and no full server `.env` surface. Do not enumerate secret env vars (API key,
+  Telegram bot token, deployer private key) on the public docs; point self-hosters to the
+  repo `.env.example` instead.
+- Public, on-chain-verifiable references are fine (chainId, RPC, USDC address, explorer,
+  deployed contract address) since they are already public.
+- Do NOT publish the internal verification / anti-double-spend implementation, or the
+  phase-2 trust-layer design (Competence exams, Reputation, SBT, Matching). A high-level
+  non-custodial / correctness claim is acceptable for transparency; the recipe is not.
+- Use placeholder values in examples (e.g., `0xYourMerchantWallet`), never real operational
+  wallets, tokens, or keys. Generalize internal paths (say "stored on the server", not a
+  concrete `data/*.json` path).

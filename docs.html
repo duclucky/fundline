@@ -188,8 +188,8 @@
           <p class="eyebrow">Product</p>
           <h2>Create invoice</h2>
           <p>
-            An invoice contains client name, client email, due date, note and line items. The server stores invoices in
-            <code>data/invoices.json</code> for local demo usage. Production should move this storage to Supabase,
+            An invoice contains client name, client email, due date, note and line items. The server stores invoices
+            locally for demo usage. Production should move this storage to Supabase,
             Postgres, or another durable database.
           </p>
           <table>
@@ -392,7 +392,7 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
   -H "Idempotency-Key: client-ltd-2026-06-retainer" \
   -H "Content-Type: application/json" \
   -d '{
-    "merchantWallet": "0x8124ca3f0ca935e6beb69f2857e33d32fa3b54ea",
+    "merchantWallet": "0xYourMerchantWallet",
     "merchantName": "Fundline Studio",
     "clientName": "Client Ltd",
     "clientEmail": "billing@client.com",
@@ -417,7 +417,7 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
   -H "Authorization: Bearer $FUNDLINE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "merchantWallet": "0x8124ca3f0ca935e6beb69f2857e33d32fa3b54ea",
+    "merchantWallet": "0xYourMerchantWallet",
     "url": "https://example.com/webhooks/fundline",
     "event": "invoice.paid",
     "secret": "optional_shared_secret"
@@ -451,7 +451,7 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
           </p>
           <div class="code-card">
             <div class="code-head"><span>Read delivery logs</span><button data-copy="#webhook-logs-api" type="button">Copy</button></div>
-            <pre id="webhook-logs-api"><code>curl "http://127.0.0.1:5190/api/agent/webhook-logs?merchantWallet=0x8124ca3f0ca935e6beb69f2857e33d32fa3b54ea&amp;limit=20" \
+            <pre id="webhook-logs-api"><code>curl "http://127.0.0.1:5190/api/agent/webhook-logs?merchantWallet=0xYourMerchantWallet&amp;limit=20" \
   -H "Authorization: Bearer $FUNDLINE_API_KEY"</code></pre>
           </div>
           <table>
@@ -544,19 +544,9 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
           <p class="eyebrow">Configuration</p>
           <h2>Server environment</h2>
           <p>All secrets stay on the server. Do not expose private keys, Telegram bot token or API key in browser code.</p>
-          <div class="code-card">
-            <div class="code-head"><span>.env template</span><button data-copy="#env-template" type="button">Copy</button></div>
-            <pre id="env-template"><code>TELEGRAM_BOT_TOKEN=replace_with_telegram_bot_token
-FUNDLINE_API_KEY=replace_with_a_long_random_agent_api_key
-ARC_DEPLOYER_PRIVATE_KEY=replace_with_testnet_deployer_private_key
-ARCSCAN_API_BASE=https://testnet.arcscan.app/api/v2
-ARCSCAN_EXPLORER_BASE=https://testnet.arcscan.app
-ARC_CHAIN_ID=5042002
-ARC_RPC_URL=https://rpc.testnet.arc.network
-ARC_NETWORK_NAME=Arc Testnet
-ARC_USDC_TOKEN_ADDRESS=0x3600000000000000000000000000000000000000
-ARC_NATIVE_USDC_DECIMALS=18
-ARC_PAYMENT_ROUTER_ADDRESS=0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</code></pre>
+          <div class="note">
+            <strong>Self-hosting</strong>
+            <span>Configure the server from the repository <code>.env.example</code> template. The public network values you need are listed under Network and Contracts above. Secrets such as the API key, Telegram bot token and deployer key live only in server-side environment variables.</span>
           </div>
         </section>
 
@@ -584,7 +574,7 @@ ARC_PAYMENT_ROUTER_ADDRESS=0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</code></pr
             <p>Yes. They can send USDC manually and then provide payer wallet plus optional transaction hash for verification.</p>
           </details>
           <details>
-            <summary>Is local JSON storage production ready?</summary>
+            <summary>Is the local demo storage production ready?</summary>
             <p>No. It is useful for demo and local development. Production should use a database.</p>
           </details>
           <details>
