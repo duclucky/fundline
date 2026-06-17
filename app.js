@@ -493,9 +493,14 @@ function normalizePublicConfig(config) {
 }
 
 async function syncInvoicesFromServer() {
-  state.invoiceSyncStatus = "loading";
   const merchantWallet = getConnectedWallet() || "";
-  const url = merchantWallet ? `/api/invoices?merchantWallet=${encodeURIComponent(merchantWallet)}` : "/api/invoices";
+  if (!merchantWallet) {
+    state.invoices = [];
+    state.invoiceSyncStatus = "ready";
+    return;
+  }
+  state.invoiceSyncStatus = "loading";
+  const url = `/api/invoices?merchantWallet=${encodeURIComponent(merchantWallet)}`;
   try {
     const response = await fetch(url);
     const payload = await response.json().catch(() => ({}));
