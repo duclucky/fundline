@@ -2304,9 +2304,8 @@ function makeReceiptPdf(invoice) {
     ops = [];
     pages.push(ops);
     drawRect(0, page.height - 96, page.width, 96, colors.band);
-    drawText("F", page.margin, page.height - 54, 30, "F3", colors.gold);
-    drawText("Fundline", page.margin + 28, page.height - 52, 20, "F2", colors.gold);
-    drawText("USDC payment receipt", page.margin + 28, page.height - 70, 10, "F1", colors.goldSoft);
+    drawText("Fundline", page.margin, page.height - 52, 20, "F2", colors.gold);
+    drawText("USDC payment receipt", page.margin, page.height - 70, 10, "F1", colors.goldSoft);
     drawText("RECEIPT", page.width - page.margin, page.height - 48, 25, "F2", colors.white, { align: "right" });
     drawText(invoice.number, page.width - page.margin, page.height - 70, 10, "F1", colors.goldSoft, { align: "right" });
     drawFooter();
@@ -2315,7 +2314,7 @@ function makeReceiptPdf(invoice) {
 
   const drawFirstPageIntro = () => {
     drawStatusBlock();
-    drawPartyCard("FROM", invoice.merchantName || "Merchant", ["Fundline merchant", shortAddress(invoice.merchantWallet)], page.margin, 564, 228, 92);
+    drawPartyCard("FROM", invoice.merchantName || "Merchant", ["Receiving wallet", shortAddress(invoice.merchantWallet)], page.margin, 564, 228, 92);
     drawPartyCard("BILL TO", invoice.clientName || "Client", [invoice.clientEmail || "No email provided"], 319, 564, 228, 92);
     cursorY = 540;
   };
@@ -2354,10 +2353,10 @@ function makeReceiptPdf(invoice) {
     drawStrokeRect(page.margin, 668, page.width - page.margin * 2, 48, colors.line);
     drawText("PAID", page.margin + 18, 696, 10, "F2", colors.goldDeep);
     drawText(`${formatUsdc(invoice.total)} USDC`, page.margin + 18, 677, 18, "F2", colors.ink);
-    drawText("Paid at", 331, 695, 8, "F2", colors.muted);
-    drawText(formatDateTimeZoned(invoice.paidAt), 331, 678, 10, "F1", colors.ink);
-    drawText("Network", 451, 695, 8, "F2", colors.muted);
-    drawText("Arc Testnet", 451, 678, 10, "F1", colors.ink);
+    drawText("Paid at", 250, 695, 8, "F2", colors.muted);
+    drawText(formatDateTimeZoned(invoice.paidAt), 250, 678, 10, "F1", colors.ink);
+    drawText("Network", page.width - page.margin - 16, 695, 8, "F2", colors.muted, { align: "right" });
+    drawText("Arc Testnet", page.width - page.margin - 16, 678, 10, "F1", colors.ink, { align: "right" });
   }
 
   function drawPartyCard(label, title, lines, x, y, width, height) {
@@ -2444,19 +2443,18 @@ function makeReceiptPdf(invoice) {
 }
 
 function makePdfDocument(contentStreams, page) {
-  const pageObjectNumbers = contentStreams.map((_, index) => 6 + index * 2);
+  const pageObjectNumbers = contentStreams.map((_, index) => 5 + index * 2);
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     `<< /Type /Pages /Kids [${pageObjectNumbers.map((number) => `${number} 0 R`).join(" ")}] /Count ${contentStreams.length} >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Times-BoldItalic >>",
   ];
 
   contentStreams.forEach((stream, index) => {
     const pageObjectNumber = pageObjectNumbers[index];
     const streamObjectNumber = pageObjectNumber + 1;
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${streamObjectNumber} 0 R >>`);
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${streamObjectNumber} 0 R >>`);
     objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
   });
 
