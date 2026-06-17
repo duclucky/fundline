@@ -43,6 +43,15 @@ context lean (they read/audit in their own window and return only the result):
 - `escrow-engineer` - writes FundlineEscrow.sol, its deploy script, and /api/config wiring (phase 1)
 - `trust-layer-architect` - read-only designer for the phase-2 trust layer (Competence, SBT, Reputation, Matching)
 
+## Skills
+
+Packaged procedures in `.claude/skills/<name>/SKILL.md`, invoked with `/<name>`. They encode
+repeatable workflows and orchestrate the subagents:
+
+- `predeploy-check` - the ship gate before pushing to main (syntax, tests, rule and secret scan)
+- `escrow-build` - the phase-1 FundlineEscrow pipeline (write, audit, wire, test); never deploys
+- `verify-payment-audit` - settlement-integrity audit of the on-chain payment verification path
+
 ## Memory
 
 My personal cross-session working memory for this repo (decisions, TODOs, gotchas):
