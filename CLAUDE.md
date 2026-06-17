@@ -57,6 +57,12 @@ repeatable workflows and orchestrate the subagents:
 My personal cross-session working memory for this repo (decisions, TODOs, gotchas):
 @.claude/memory.md
 
+Keep `.claude/memory.md` current. Update it as decisions land, and when the session is
+winding down or the context is about to be summarized, flush any new decisions, TODOs, and
+gotchas into it (dated, English, no duplication of CLAUDE.md or the rule files). A
+`PreCompact` hook in `.claude/settings.json` prints a reminder before compaction, but it is
+best-effort, so prefer updating memory proactively rather than relying on the reminder.
+
 ## Critical rules summary (full detail in the rule files above)
 
 These must always hold, even if the rules directory is not loaded:
