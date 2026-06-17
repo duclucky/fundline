@@ -2285,14 +2285,15 @@ function downloadReceiptPdf(invoice) {
 function makeReceiptPdf(invoice) {
   const page = { width: 595, height: 842, margin: 48 };
   const colors = {
-    navy: [7, 17, 29],
-    ink: [18, 30, 46],
-    muted: [92, 111, 137],
-    line: [218, 226, 238],
-    soft: [244, 248, 252],
-    tint: [232, 247, 255],
-    cyan: [43, 180, 222],
-    green: [28, 143, 90],
+    band: [18, 16, 10],
+    ink: [28, 24, 16],
+    muted: [120, 114, 100],
+    line: [226, 220, 206],
+    soft: [248, 245, 238],
+    tint: [248, 241, 214],
+    gold: [212, 175, 55],
+    goldDeep: [184, 134, 11],
+    goldSoft: [223, 202, 138],
     white: [255, 255, 255],
   };
   const pages = [];
@@ -2302,12 +2303,12 @@ function makeReceiptPdf(invoice) {
   const startPage = (isFirstPage = false) => {
     ops = [];
     pages.push(ops);
-    drawRect(0, page.height - 96, page.width, 96, colors.navy);
-    drawRect(page.margin, page.height - 74, 5, 35, colors.cyan);
-    drawText("Fundline", page.margin + 16, page.height - 52, 20, "F2", colors.white);
-    drawText("USDC payment receipt", page.margin + 16, page.height - 70, 10, "F1", [188, 207, 232]);
+    drawRect(0, page.height - 96, page.width, 96, colors.band);
+    drawText("F", page.margin, page.height - 54, 30, "F3", colors.gold);
+    drawText("Fundline", page.margin + 28, page.height - 52, 20, "F2", colors.gold);
+    drawText("USDC payment receipt", page.margin + 28, page.height - 70, 10, "F1", colors.goldSoft);
     drawText("RECEIPT", page.width - page.margin, page.height - 48, 25, "F2", colors.white, { align: "right" });
-    drawText(invoice.number, page.width - page.margin, page.height - 70, 10, "F1", [188, 207, 232], { align: "right" });
+    drawText(invoice.number, page.width - page.margin, page.height - 70, 10, "F1", colors.goldSoft, { align: "right" });
     drawFooter();
     cursorY = isFirstPage ? 690 : 690;
   };
@@ -2316,8 +2317,7 @@ function makeReceiptPdf(invoice) {
     drawStatusBlock();
     drawPartyCard("FROM", invoice.merchantName || "Merchant", ["Fundline merchant", shortAddress(invoice.merchantWallet)], page.margin, 564, 228, 92);
     drawPartyCard("BILL TO", invoice.clientName || "Client", [invoice.clientEmail || "No email provided"], 319, 564, 228, 92);
-    drawInfoStrip();
-    cursorY = 472;
+    cursorY = 540;
   };
 
   const ensureSpace = (heightNeeded, includeTableHeader = true) => {
@@ -2352,10 +2352,10 @@ function makeReceiptPdf(invoice) {
   function drawStatusBlock() {
     drawRect(page.margin, 668, page.width - page.margin * 2, 48, colors.soft);
     drawStrokeRect(page.margin, 668, page.width - page.margin * 2, 48, colors.line);
-    drawText("PAID", page.margin + 18, 696, 10, "F2", colors.green);
+    drawText("PAID", page.margin + 18, 696, 10, "F2", colors.goldDeep);
     drawText(`${formatUsdc(invoice.total)} USDC`, page.margin + 18, 677, 18, "F2", colors.ink);
     drawText("Paid at", 331, 695, 8, "F2", colors.muted);
-    drawText(formatDateTime(invoice.paidAt), 331, 678, 10, "F1", colors.ink);
+    drawText(formatDateTimeZoned(invoice.paidAt), 331, 678, 10, "F1", colors.ink);
     drawText("Network", 451, 695, 8, "F2", colors.muted);
     drawText("Arc Testnet", 451, 678, 10, "F1", colors.ink);
   }
@@ -2370,17 +2370,8 @@ function makeReceiptPdf(invoice) {
     });
   }
 
-  function drawInfoStrip() {
-    drawText("Payment reference", page.margin, 530, 8, "F2", colors.muted);
-    drawText(invoice.onchainInvoiceId ? shortHash(invoice.onchainInvoiceId) : "-", page.margin, 513, 10, "F1", colors.ink);
-    drawText("Transaction", 223, 530, 8, "F2", colors.muted);
-    drawText(shortHash(invoice.txHash || "demo"), 223, 513, 10, "F1", colors.ink);
-    drawText("Receipt generated", 398, 530, 8, "F2", colors.muted);
-    drawText(formatDateTime(new Date().toISOString()), 398, 513, 10, "F1", colors.ink);
-  }
-
   function drawTableHeader(y) {
-    drawRect(page.margin, y - 22, page.width - page.margin * 2, 28, colors.navy);
+    drawRect(page.margin, y - 22, page.width - page.margin * 2, 28, colors.band);
     drawText("Description", page.margin + 14, y - 11, 9, "F2", colors.white);
     drawText("Qty", 326, y - 11, 9, "F2", colors.white, { align: "right" });
     drawText("Unit", 424, y - 11, 9, "F2", colors.white, { align: "right" });
@@ -2415,7 +2406,7 @@ function makeReceiptPdf(invoice) {
       ["Payment reference ID", invoice.onchainInvoiceId || "-"],
       ["Transaction hash", invoice.txHash || "demo"],
       ["Verification source", invoice.verificationSource || "-"],
-      ["Verified at", invoice.verifiedAt ? formatDateTime(invoice.verifiedAt) : "-"],
+      ["Verified at", invoice.verifiedAt ? formatDateTimeZoned(invoice.verifiedAt) : "-"],
     ];
     let rowY = y - 19;
     rows.forEach(([label, value]) => {
@@ -2453,18 +2444,19 @@ function makeReceiptPdf(invoice) {
 }
 
 function makePdfDocument(contentStreams, page) {
-  const pageObjectNumbers = contentStreams.map((_, index) => 5 + index * 2);
+  const pageObjectNumbers = contentStreams.map((_, index) => 6 + index * 2);
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     `<< /Type /Pages /Kids [${pageObjectNumbers.map((number) => `${number} 0 R`).join(" ")}] /Count ${contentStreams.length} >>`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Times-BoldItalic >>",
   ];
 
   contentStreams.forEach((stream, index) => {
     const pageObjectNumber = pageObjectNumbers[index];
     const streamObjectNumber = pageObjectNumber + 1;
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${streamObjectNumber} 0 R >>`);
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${streamObjectNumber} 0 R >>`);
     objects.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
   });
 
@@ -2747,14 +2739,14 @@ function roundMoney(value) {
 }
 
 function formatUsdc(value) {
-  return roundMoney(value).toLocaleString(undefined, {
+  return roundMoney(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }
 
 function formatNumber(value) {
-  return Number(value || 0).toLocaleString(undefined, {
+  return Number(value || 0).toLocaleString("en-US", {
     maximumFractionDigits: 4,
   });
 }
@@ -2770,7 +2762,23 @@ function formatDateTime(value) {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function formatGmtOffset(date) {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const abs = Math.abs(offsetMinutes);
+  const hours = Math.floor(abs / 60);
+  const minutes = abs % 60;
+  return `GMT${sign}${hours}${minutes ? `:${String(minutes).padStart(2, "0")}` : ""}`;
+}
+
+function formatDateTimeZoned(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return `${formatDateTime(value)} (${formatGmtOffset(date)})`;
 }
 
 function todaySlug() {
