@@ -481,28 +481,13 @@ h2 {
 
 .telegram-qr {
   display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  background: #ffffff;
-  border: 1px solid var(--line-strong);
-  border-radius: 12px;
   text-decoration: none;
 }
 
 .telegram-qr img {
   display: block;
-  width: 80px;
-  height: 80px;
-  border-radius: 6px;
-}
-
-.telegram-qr span {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #0a0a08;
+  width: 96px;
+  height: 96px;
 }
 
 .filters {
