@@ -11,21 +11,19 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="shell" style="grid-template-columns: 1fr; max-width: 800px; margin: 0 auto;">
-      <main class="main" style="padding: 40px 24px;">
-        <header class="topbar" style="border: none; padding: 0 0 24px 0; justify-content: center; text-align: center;">
-          <div>
-            <div class="brand" style="justify-content: center; margin-bottom: 16px;">
-              <img src="/assets/fundline-logo.png?v=2" alt="" class="brand-img" />
-            </div>
-            <p class="eyebrow" id="sellerWallet">Loading...</p>
-            <h1>Products</h1>
+    <div class="storefront-shell">
+      <main class="storefront-main">
+        <header class="storefront-header">
+          <div class="brand storefront-brand">
+            <img src="/assets/fundline-logo.png?v=2" alt="" class="brand-img" />
           </div>
+          <p class="eyebrow storefront-seller" id="sellerWallet">Loading...</p>
+          <h1 class="storefront-title">Products</h1>
         </header>
 
         <section id="productsSection">
           <div class="invoice-list" id="productsList">
-            <p style="text-align: center;">Loading products...</p>
+            <p class="storefront-loading">Loading products...</p>
           </div>
         </section>
       </main>

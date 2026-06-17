@@ -23,7 +23,7 @@
   --radius-md:    16px;
   --radius-lg:    24px;
   --container:    min(1200px, calc(100% - 48px));
-  --section-y:    88px;
+  --section-y:    72px;
 }
 
 /* ---- Reset ---- */
@@ -56,14 +56,14 @@ li { padding: 0; }
 button { cursor: pointer; font: inherit; border: 0; background: none; padding: 0; color: inherit; }
 figure { margin: 0; }
 
-code { font-family: var(--mono); color: #c7f8ff; }
+code { font-family: var(--mono); color: #e8dfc8; }
 pre { margin: 0; }
 
 /* ---- Typography ---- */
 h1 {
   max-width: 100%;
   margin: 28px 0 22px;
-  font-size: clamp(24px, 6.5vw, 100px);
+  font-size: clamp(36px, 6vw, 80px);
   line-height: 1.1;
   font-weight: 800;
   letter-spacing: -0.04em;
@@ -71,7 +71,6 @@ h1 {
 
 .hero-line {
   display: block;
-  white-space: nowrap;
 }
 
 h2 {
@@ -117,7 +116,7 @@ h3 {
 .section-header {
   text-align: center;
   max-width: 720px;
-  margin: 0 auto 60px;
+  margin: 0 auto 52px;
 }
 
 .section-header h2 {
@@ -311,9 +310,9 @@ h3 {
   text-transform: uppercase;
   min-height: 22px;
   padding: 0 8px;
-  color: #75f6ff;
-  background: rgba(42, 205, 230, 0.12);
-  border: 1px solid rgba(53, 221, 255, 0.44);
+  color: var(--gold);
+  background: rgba(212, 175, 55, 0.1);
+  border: 1px solid rgba(212, 175, 55, 0.35);
   font-size: 10px;
 }
 
@@ -363,12 +362,12 @@ h3 {
   height: 40px;
   border-radius: 10px;
   border: 1px solid var(--line-strong);
-  background: rgba(24, 41, 66, 0.5);
+  background: rgba(22, 18, 8, 0.6);
   flex-shrink: 0;
   transition: background 0.15s;
 }
 
-.hamburger:hover { background: rgba(35, 58, 92, 0.7); }
+.hamburger:hover { background: rgba(30, 24, 10, 0.8); }
 
 .hamburger span {
   display: block;
@@ -438,7 +437,7 @@ h3 {
   font-weight: 950;
   color: #07111d;
   background: linear-gradient(135deg, var(--gold), var(--gold-bright));
-  border: 1px solid rgba(170, 218, 255, 0.72);
+  border: 1px solid rgba(212, 175, 55, 0.5);
   transition: opacity 0.15s;
   align-self: flex-start;
 }
@@ -569,15 +568,15 @@ h3 {
   display: flex;
   align-items: center;
   width: max-content;
-  min-height: 118px;
-  gap: 70px;
+  min-height: 80px;
+  gap: 56px;
   animation: marquee 28s linear infinite;
 }
 
 .marquee-track span {
   position: relative;
-  color: #dfe9f8;
-  font-size: clamp(24px, 4vw, 42px);
+  color: #c4bba2;
+  font-size: clamp(14px, 1.8vw, 20px);
   font-weight: 920;
   letter-spacing: -0.04em;
   opacity: 0.9;
@@ -585,9 +584,9 @@ h3 {
 
 .marquee-track span::after {
   position: absolute;
-  top: 50%; right: -42px;
+  top: 50%; right: -34px;
   width: 4px; height: 4px;
-  background: rgba(184, 218, 255, 0.42);
+  background: rgba(212, 175, 55, 0.35);
   border-radius: 999px;
   content: "";
 }
@@ -672,7 +671,7 @@ h3 {
    ==================================================== */
 .how-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -825,7 +824,7 @@ h3 {
 }
 
 .mock-input-accent {
-  border-color: rgba(53, 221, 255, 0.45);
+  border-color: rgba(212, 175, 55, 0.45);
   color: var(--gold);
   font-weight: 700;
 }
@@ -940,7 +939,7 @@ h3 {
 
 .mock-detail-row code {
   font-size: 11px;
-  color: #c7f8ff;
+  color: #e8dfc8;
 }
 
 .mockup-pay-body .mock-btn-primary {
@@ -1048,7 +1047,7 @@ h3 {
 }
 
 .dev-code-block pre code {
-  color: #c7f8ff;
+  color: #e8dfc8;
   font-size: inherit;
 }
 
@@ -1080,7 +1079,7 @@ h3 {
   transition: border-color 0.2s;
 }
 
-.trust-card:hover { border-color: rgba(114, 246, 166, 0.25); }
+.trust-card:hover { border-color: rgba(212, 175, 55, 0.36); }
 
 .trust-card strong {
   display: block;
@@ -1104,7 +1103,7 @@ h3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
-  max-width: 700px;
+  max-width: 760px;
   margin: 0 auto;
 }
 
@@ -1119,6 +1118,7 @@ h3 {
 .pricing-card-active {
   background: rgba(22, 17, 6, 0.88);
   border: 1px solid rgba(212, 175, 55, 0.45);
+  border-top: 2px solid var(--gold);
   box-shadow: 0 0 48px rgba(212, 175, 55, 0.1);
 }
 
@@ -1237,7 +1237,7 @@ h3 {
   transition: background 0.15s;
 }
 
-.faq-question:hover { background: rgba(24, 44, 72, 0.75); }
+.faq-question:hover { background: rgba(212, 175, 55, 0.05); }
 
 .faq-question::after {
   content: "+";
@@ -1273,7 +1273,7 @@ h3 {
    ==================================================== */
 .final-cta-section {
   text-align: center;
-  background: rgba(12, 24, 44, 0.55);
+  background: rgba(22, 17, 6, 0.55);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: 80px 40px;
@@ -1289,7 +1289,7 @@ h3 {
   pointer-events: none;
 }
 
-.final-cta-section h2 { margin-bottom: 16px; }
+.final-cta-section h2 { margin-bottom: 16px; font-size: clamp(26px, 3.5vw, 44px); }
 
 .final-cta-sub {
   color: var(--muted);
@@ -1339,7 +1339,7 @@ h3 {
 
 .footer-nav {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
   justify-self: end;
 }
@@ -1391,10 +1391,6 @@ h3 {
   .hamburger { display: flex; }
   .nav-actions .nav-button.secondary { display: none; }
 
-  .how-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .trust-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1411,7 +1407,7 @@ h3 {
    RESPONSIVE — Mobile (< 640px)
    ==================================================== */
 @media (max-width: 640px) {
-  :root { --section-y: 56px; }
+  :root { --section-y: 44px; }
 
   .home-nav { padding: 0 18px; min-height: 64px; }
 
@@ -1455,7 +1451,7 @@ h3 {
   }
 
   .footer-nav {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .footer-bottom {
@@ -1464,8 +1460,8 @@ h3 {
   }
 
   .marquee-track {
-    min-height: 86px;
-    gap: 42px;
+    min-height: 64px;
+    gap: 36px;
   }
 
   .dev-grid { grid-template-columns: 1fr; }
@@ -1474,7 +1470,7 @@ h3 {
 /* ====================================================
    Telegram mockup helper classes (replaces inline styles)
    ==================================================== */
-.mock-tg-body { background: rgba(8, 15, 30, 0.7); }
+.mock-tg-body { background: rgba(18, 15, 8, 0.7); }
 
 .mock-tg-bubble {
   background: rgba(212, 175, 55, 0.07);

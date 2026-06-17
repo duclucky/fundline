@@ -27,6 +27,22 @@ To make a rule load only for specific files instead of every session, add a `pat
 glob frontmatter block to that rule file (Claude Code rule spec). None are scoped today
 because all current rules are project-wide.
 
+## Subagents
+
+Project subagents live in `.claude/agents/`. Delegate to them to keep this session's
+context lean (they read/audit in their own window and return only the result):
+
+- `fundline-explorer` - read-only navigator; "where is X / how does Y work" across the big server.js and app.js
+- `contract-auditor` - Solidity security review (non-custodial invariant, decimals); use on contracts/ and deploy script
+- `backend-api-dev` - server.js work: agent API, webhooks, x402, CCTP, verification
+- `frontend-ui-dev` - HTML/CSS/JS UI work; enforces brand rules (no emoji, no em dash, gold theme)
+- `diff-reviewer` - read-only pre-commit check against the hard rules
+
+## Memory
+
+My personal cross-session working memory for this repo (decisions, TODOs, gotchas):
+@.claude/memory.md
+
 ## Critical rules summary (full detail in the rule files above)
 
 These must always hold, even if the rules directory is not loaded:

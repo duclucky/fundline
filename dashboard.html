@@ -94,7 +94,7 @@
             </div>
             <div class="invoice-list" id="paymentHistoryList"></div>
 
-            <div class="section-head" style="margin-top: 32px;">
+            <div class="section-head section-head-spaced">
               <div>
                 <p class="eyebrow">Customers</p>
                 <h2>Recent Customers</h2>
@@ -122,13 +122,13 @@
                   <span class="field-label">Price (USDC)</span>
                   <input type="number" step="0.01" min="0.01" name="priceUSDC" required placeholder="100.00" />
                 </label>
-                <label style="grid-column: 1 / -1">
+                <label class="form-full">
                   <span class="field-label">Description</span>
                   <input name="description" placeholder="1 hour of frontend consulting" />
                 </label>
-                <label style="grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;">
+                <label class="form-full toggle-field">
                   <input type="checkbox" name="active" checked />
-                  <span class="field-label" style="margin: 0;">Active (visible on storefront)</span>
+                  <span class="field-label">Active (visible on storefront)</span>
                 </label>
               </div>
               <div class="form-actions">
@@ -157,16 +157,16 @@
                 </label>
                 <label>
                   <span class="field-label">Event Type</span>
-                  <select name="event" class="form-select" style="padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-card); color: var(--text-base);">
+                  <select name="event">
                     <option value="*">All Events (*)</option>
                     <option value="invoice.paid">invoice.paid</option>
                     <option value="invoice.failed">invoice.failed</option>
                     <option value="invoice.overdue">invoice.overdue</option>
                   </select>
                 </label>
-                <label style="grid-column: 1 / -1; display: flex; align-items: center; gap: 8px;">
+                <label class="form-full toggle-field">
                   <input type="checkbox" name="enabled" checked />
-                  <span class="field-label" style="margin: 0;">Enabled</span>
+                  <span class="field-label">Enabled</span>
                 </label>
               </div>
               <div class="form-actions">
@@ -177,7 +177,7 @@
 
             <div class="invoice-list" id="webhooksList"></div>
 
-            <div class="section-head" style="margin-top: 32px;">
+            <div class="section-head section-head-spaced">
               <div>
                 <p class="eyebrow">Logs</p>
                 <h2>Recent Deliveries</h2>
