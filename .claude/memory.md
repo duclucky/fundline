@@ -16,6 +16,22 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Key decisions
 
+- 2026-06-18: Integrated the product master doc into the project context. Added two
+  subagents (escrow-engineer = writer for FundlineEscrow + deploy script + /api/config;
+  trust-layer-architect = read-only phase-2 designer) and an escrow audit checklist to
+  contract-auditor; 7 agents total now. New auto-load rule `escrow-spec.md`. Strategy depth
+  distilled to `../../fundline-product-master.md` kept OUTSIDE the repo (user choice, to
+  avoid committing competitive/GTM content). Added `**/.claude/**` and `**/CLAUDE.md` to the
+  deploy.yml FTP exclude so dev tooling/notes are not served on fundline.xyz. Reconciled the
+  data-file list to 8 files (invoices, sellers, products, webhooks, webhook-logs,
+  payment-attempts, api-keys, events).
+- 2026-06-18: Full UI redesign committed (`fc867a1`): styles.css, docs.css, home.css synced
+  to dark/gold theme; dashboard.html and storefront.html refactored from inline styles to
+  CSS classes; index.html footer expanded to 3 columns with Network links.
+- 2026-06-18: Bug fix committed (`7cbdb47`): `syncInvoicesFromServer()` in app.js now
+  returns early with `state.invoices = []` when no wallet is connected. Previously it
+  called `/api/invoices` without a merchantWallet filter and returned ALL invoices from
+  the server to any unauthenticated visitor.
 - 2026-06-17: Split the monolithic CLAUDE.md into 8 topic files under `.claude/rules/`
   (auto-load, no `paths:` frontmatter). CLAUDE.md is now a slim index plus a
   critical-rules safety summary. Did NOT `@import` the rules - they auto-load, and
@@ -31,8 +47,10 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Open threads / TODOs
 
-- TODO: confirm where FundlineEscrow.sol work lives (planned, no file in repo yet, not
-  deployed). When it lands, contract-auditor must enforce the no-withdraw invariant.
+- Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
+  yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
+  deploy; the no-withdraw and no-fee invariants are make-or-break.
+- TODO: verify the PaymentRouter source on arcscan (is_verified currently false).
 - Risk: USDC 6-vs-18 decimals. audit_report.md (Vietnamese) flags it High. .env.example
   carries ARC_NATIVE_USDC_DECIMALS=18 alongside ARC_USDC_DECIMALS=6.
 - Hardcoded addresses (USDC, CCTP, chainId) are scattered across server.js and app.js; a

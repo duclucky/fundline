@@ -12,7 +12,15 @@ Non-negotiable invariants to enforce on every review:
 2. DECIMALS: USDC on Arc is 6 decimals and is ALSO the gas token. Never assume 18. Flag any 1e18 / parseEther / hardcoded 18-decimal math on USDC amounts. (.env.example carries ARC_NATIVE_USDC_DECIMALS=18; treat the 6-vs-18 question as a live hazard, see ../../audit_report.md.)
 3. Standard safety: reentrancy, unchecked external calls, missing zero-address / zero-amount checks, integer issues, event correctness, access control.
 
-Context: FundlineEscrow.sol is planned, unaudited, pre-deploy. Be extra strict there and preserve the no-withdraw invariant.
+Context: FundlineEscrow.sol is in development (roadmap phase 1), unaudited, pre-deploy. Be extra strict. The full spec (state machine plus integration) is in .claude/rules/escrow-spec.md.
+
+FundlineEscrow audit checklist (in addition to the invariants above):
+- States None/Funded/Submitted/Released/Refunded/Disputed: verify every transition is guarded (correct caller, correct prior state) and that no state lets a privileged role move funds.
+- fund / submitDeliverable / confirmAndRelease / releaseAfterReviewWindow / refund / raiseDispute / resolveDispute: confirm funds only move buyer -> escrow -> (seller on release | buyer on refund). NO owner withdraw, NO seize, NO fee skim.
+- releaseAfterReviewWindow: the timeout must not be gameable (review window enforced, no early release).
+- resolveDispute(bool releaseToSeller): confirm who can call it and that it cannot drain to a third party.
+- Reentrancy on every external USDC transfer (checks-effects-interactions or a guard).
+- USDC is 6 decimals and is also the gas token: no 18-decimal assumptions, deliberate transferFrom-vs-msg.value handling.
 
 Method:
 - Read the contract(s) and any caller code in server.js / app.js that builds the transaction.

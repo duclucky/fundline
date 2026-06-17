@@ -31,7 +31,7 @@ home.js / docs.js               Homepage and docs page logic
 contracts/PaymentRouter.sol     Live settlement contract (transferFrom + InvoicePaid event)
 contracts/PaymentRouter.abi.json
 scripts/deploy-payment-router.js Compiles + deploys PaymentRouter, writes address to .env
-data/*.json                     invoices, sellers, products, webhooks, webhook-logs (gitignored)
+data/*.json                     invoices, sellers, products, webhooks, webhook-logs, payment-attempts, api-keys, events (gitignored)
 .env / .env.example             Server config and secrets
 .github/workflows/deploy.yml    CI: syntax check + FTP deploy to cPanel
 

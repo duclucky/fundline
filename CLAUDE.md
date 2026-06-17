@@ -5,9 +5,11 @@ from the code, fix the code or fix this file.
 
 Fundline is a non-custodial verification-and-settlement layer on Arc that turns a raw
 USDC transfer into a trusted business event (human invoices, AI-agent x402 pay-per-call,
-creator pay-per-item). Stack: plain Node.js `http` server plus vanilla browser JS, no
-framework, no build step. This directory (`outputs/arc-invoice-usdc/`) is the git-tracked
-app repo.
+creator pay-per-item). The longer-term vision is a trust layer and job marketplace for the
+AI-agent economy (Identity, Competence, Reputation, Matching, Settlement). Stack: plain
+Node.js `http` server plus vanilla browser JS, no framework, no build step. This directory
+(`outputs/arc-invoice-usdc/`) is the git-tracked app repo. Deep product and strategy detail
+is in `../../fundline-product-master.md` (kept outside the repo, not deployed).
 
 ## Rules
 
@@ -22,6 +24,7 @@ frontmatter load automatically at session start. Read them before working:
 - `.claude/rules/glossary.md` - domain terms (PaymentRouter, x402, CCTP, SBT, etc.)
 - `.claude/rules/gotchas.md` - fragile areas and "do not touch"
 - `.claude/rules/git-workflow.md` - git layout, commit style, CI/CD
+- `.claude/rules/escrow-spec.md` - FundlineEscrow spec (state machine, functions, invariant, integration)
 
 To make a rule load only for specific files instead of every session, add a `paths:`
 glob frontmatter block to that rule file (Claude Code rule spec). None are scoped today
@@ -37,6 +40,8 @@ context lean (they read/audit in their own window and return only the result):
 - `backend-api-dev` - server.js work: agent API, webhooks, x402, CCTP, verification
 - `frontend-ui-dev` - HTML/CSS/JS UI work; enforces brand rules (no emoji, no em dash, gold theme)
 - `diff-reviewer` - read-only pre-commit check against the hard rules
+- `escrow-engineer` - writes FundlineEscrow.sol, its deploy script, and /api/config wiring (phase 1)
+- `trust-layer-architect` - read-only designer for the phase-2 trust layer (Competence, SBT, Reputation, Matching)
 
 ## Memory
 

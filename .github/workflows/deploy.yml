@@ -39,6 +39,8 @@ jobs:
           exclude: |
             **/.git*
             **/.git*/**
+            **/.claude/**
+            **/CLAUDE.md
             **/node_modules/**
             **/.env
             **/*.env

@@ -1,7 +1,8 @@
 # Gotchas and "do not touch"
 
-- FundlineEscrow is unaudited and pre-deploy (and not yet present as a file). When it
-  arrives, preserve the no-withdraw invariant and treat changes carefully.
+- FundlineEscrow is the active build target (phase 1), unaudited and pre-deploy (no file
+  yet). Preserve the no-withdraw invariant and the no-fee rule; run the contract-auditor
+  agent before any deploy. Spec: `escrow-spec.md`.
 - Testnet addresses can be redeployed. The live PaymentRouter address lives in `.env`
   (`ARC_PAYMENT_ROUTER_ADDRESS`), but several addresses (USDC, CCTP contracts, chainId)
   are hardcoded across `server.js` and `app.js`. Prefer a single config/constants source
@@ -16,3 +17,7 @@
 - A sibling app, `../arc-allowance-dashboard` (VaultLens), lives under the same outer
   folder. It is its own server and is not the invoice product. Do not cross-wire them.
 - CCTP fast-transfer is not implemented; `CCTP_STANDARD_FINALITY_THRESHOLD` is hardcoded.
+- Payment verification: prefer the `InvoicePaid` event, fall back to parsing the ERC-20
+  `Transfer`, and always block double-confirm by `(chainId, txHash)`. See `onchain-reference.md`.
+- `.claude/` and `CLAUDE.md` are excluded from the cPanel FTP deploy (see `deploy.yml`), so
+  dev tooling and notes are not served on the public site. Keep that exclude in place.
