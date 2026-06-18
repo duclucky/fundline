@@ -70,8 +70,14 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   above). Verified on real data + a 3-lens adversarial review (verdict: ship). The test-alert
   button works regardless because it uses force + the in-browser chatId. Residual (low): the
   per-invoice telegramEnabled flag is now DEAD for paid alerts (still stored, never read, no
-  longer an opt-out) - candidate for removal/deprecation. The sellers[merchantWallet] lookup is
-  case-safe (normalizeAddress lowercases both the invoice wallet and the seller key).
+  longer an opt-out) - removed in `cafb03a`. The sellers[merchantWallet] lookup is case-safe
+  (normalizeAddress lowercases both the invoice wallet and the seller key).
+- 2026-06-18: Removed the dead per-invoice telegramEnabled flag committed `cafb03a` (pushed).
+  state.settings.telegramEnabled was never set (not in readSettingsDraft/defaults/server load),
+  so the flag was always false and dead on both sides. Dropped it from normalizeInvoice and the
+  app.js create payload; the client sendPaymentNotification now sends only on an explicit test
+  (force) since real paid alerts are sent server-side (avoids duplicate messages). Also replaced
+  5 pre-existing em dashes in app.js with hyphens to satisfy the no-em-dash rule.
 
 ## Open threads / TODOs
 
