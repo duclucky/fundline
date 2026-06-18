@@ -125,6 +125,25 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   token IS USDC, so the wallet-sent receiveMessage tx pays ~0.0036 USDC gas out of the same
   balance (plus the tiny CCTP fee). The dry-run assertion was corrected to allow a ~2% band
   for fee + Arc gas. Burn tx 0xbe061144...d66215c, mint tx 0x341be3a2...edf37ac3.
+- 2026-06-18: Arc Transaction Memos evaluated for Fundline (`test_memo_probe.js`). Arc shipped
+  a predeployed Memo contract at `0x5294E9927c3306DcBaDb03fe70b92e01cCede505` (testnet, activated
+  ~2026-06-13): `memo(address target, bytes data, bytes32 memoId, bytes memoData)` forwards a
+  call to `target` via the CallFrom precompile (preserves the original EOA as msg.sender) and
+  emits `Memo(sender, target, callDataHash, memoId, memo, memoIndex)` for offchain indexing.
+  EOA-only callers; STATICCALL/DELEGATECALL unsupported; child revert rolls back the whole tx.
+  PROBE RESULT (Arc testnet, tx 0x11068fb2...09225): memo-wrapped USDC self-transfer SUCCEEDED,
+  gas 61548, USDC Transfer from==payer (msg.sender preserved), Memo event emitted with memoId.
+  This UPDATES the Part B finding that CallFrom threw StackUnderflow: via the Memo contract,
+  CallFrom WORKS on the current testnet. Implication: the single-transaction invoice payment
+  Fundline abandoned in Part B (2-tx approve+payInvoice) is viable again as
+  `Memo.memo(USDC, transfer(merchant, amount), onchainInvoiceId, memoBytes)` -- 1 tx, no approve
+  (USDC.transfer pulls from the preserved payer), gas ~61.5k vs ~87k for the 2-tx flow. Memos
+  could also let Fundline DROP the custom PaymentRouter (memoId carries the invoice id in a
+  standard, indexable way; moots the verify-PaymentRouter-on-Arcscan TODO) and keeps the
+  non-custodial invariant (Memo contract never holds funds; payer->merchant direct). Uses 6
+  USDC decimals. Caveats: contract is new (audit/maturity unverified), mainnet address/availability
+  not yet confirmed, no documented memoData size limit. NOT yet implemented -- architecture
+  decision pending user direction; PaymentRouter still the shipped path.
 - 2026-06-18: Circle MCP server + Skills committed (`cc8af84`). .mcp.json adds project-level
   Circle MCP (HTTP transport, api.circle.com/v1/codegen/mcp) - must be approved in Claude Code
   UI before it activates. 4 skills (circle-use-arc, circle-use-gateway, circle-bridge-stablecoin,
