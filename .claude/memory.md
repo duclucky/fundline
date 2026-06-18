@@ -44,6 +44,24 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   (read-only navigator), contract-auditor (opus, Solidity security), backend-api-dev,
   frontend-ui-dev, diff-reviewer (read-only pre-commit). Added this memory.md and
   `@import`-ed it from CLAUDE.md so it loads each session.
+- 2026-06-18: Feature audit + fixes committed `01998bd` (pushed to main -> deploy). Verified
+  ALL on-chain constants against official docs: Arc chainId 5042002, USDC 0x3600..0000, CCTP
+  TokenMessengerV2 0x8FE6..2DAA, MessageTransmitterV2 0xE737..CE275, and Arc CCTP domain 26 are
+  CORRECT (domain 26 confirmed in Circle's ETH->Arc quickstart code sample; a web summary saying
+  "domain 7" was wrong - 7 is Polygon PoS). depositForBurn V2 selector 0x8e0250ee verified by
+  keccak. Fixed a real float bug: server.js amountToUnits used Number.toFixed which skewed the
+  18-decimal native compare (0.1 -> 1e17+6); rewrote as exact BigInt string math mirroring
+  app.js parseTokenUnits so client and server agree. Added finite + <=1e12 guard on
+  invoice.total (catches Infinity from oversized API input, closes an exponential-notation parse
+  hole). Added test_amount_units.js (452 assertions). Validated by a 4-lens adversarial review
+  workflow (verdict: ship).
+- 2026-06-18: Telegram 401 Unauthorized on fundline.xyz. Code is correct and the .env token is
+  valid (getMe ok, test send delivered). Root cause: a stale/revoked token held by a running
+  server process. The cPanel server has its own env (.env is FTP-excluded), so the LIVE fix is
+  to update TELEGRAM_BOT_TOKEN in the cPanel Node.js app and restart it - not a code change.
+  Hardened anyway: validateTelegramToken() runs getMe at boot and logs a loud error on 401;
+  sendTelegramMessage returns an actionable message on 401. Note loadEnvFiles is first-wins, so
+  an OS env var shadows .env.
 
 ## Open threads / TODOs
 
@@ -51,8 +69,10 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
 - TODO: verify the PaymentRouter source on arcscan (is_verified currently false).
-- Risk: USDC 6-vs-18 decimals. audit_report.md (Vietnamese) flags it High. .env.example
-  carries ARC_NATIVE_USDC_DECIMALS=18 alongside ARC_USDC_DECIMALS=6.
+- RESOLVED 2026-06-18: USDC 6-vs-18 decimals is NOT a risk (audit_report.md flagged it High).
+  Verified against docs.arc.io: native gas-token value uses 18 decimals, ERC-20 interface uses
+  6, both handled correctly (ERC-20/router path uses ARC_USDC_DECIMALS=6, native fallback uses
+  ARC_NATIVE_USDC_DECIMALS=18). The .env.example values are correct as-is.
 - Hardcoded addresses (USDC, CCTP, chainId) are scattered across server.js and app.js; a
   single constants source is wanted but not done.
 - No lint / typecheck / test runner. CI only runs `node --check` on app.js and server.js,
