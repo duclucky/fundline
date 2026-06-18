@@ -65,6 +65,11 @@ const TELEGRAM_UPDATE_INTERVAL_MS = getTelegramUpdateIntervalMs();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
 
+const CIRCLE_GATEWAY_API_KEY = String(process.env.CIRCLE_GATEWAY_API_KEY || "").trim();
+const GATEWAY_API_BASE = "https://gateway-api-testnet.circle.com/v1";
+const GATEWAY_WALLET_ADDRESS = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
+const GATEWAY_MINTER_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
+
 let telegramPollTimer = null;
 let telegramPollBusy = false;
 let telegramUpdateOffset = 0;
@@ -206,6 +211,22 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/gateway/balance") {
+    handleGatewayBalance(req, res);
+    return;
+  }
+
+  if (url.pathname === "/api/gateway/transfer") {
+    handleGatewayTransfer(req, res);
+    return;
+  }
+
+  const gatewayStatusMatch = url.pathname.match(/^\/api\/gateway\/transfer\/([^/]+)$/);
+  if (gatewayStatusMatch) {
+    handleGatewayStatus(req, res, gatewayStatusMatch[1]);
+    return;
+  }
+
   const requested = resolveRequestPath(url.pathname);
   const filePath = path.normalize(path.join(ROOT, requested));
 
@@ -283,6 +304,9 @@ function handlePublicConfig(req, res) {
     usdcDecimals: ARC_USDC_DECIMALS,
     paymentRouterAddress: ARC_PAYMENT_ROUTER_ADDRESS,
     onchainPaymentsEnabled: Boolean(ARC_PAYMENT_ROUTER_ADDRESS && ARC_USDC_TOKEN_ADDRESS),
+    gatewayWalletAddress: GATEWAY_WALLET_ADDRESS,
+    gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
+    gatewayEnabled: Boolean(CIRCLE_GATEWAY_API_KEY),
   });
 }
 
@@ -2222,6 +2246,91 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+async function handleGatewayBalance(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    const data = await requestGatewayJson("POST", "/balances", body);
+    sendJson(res, 200, data);
+  } catch (error) {
+    console.error("[Gateway] balance error:", error.message);
+    sendJson(res, 502, { error: { code: "GATEWAY_ERROR", message: error.message } });
+  }
+}
+
+async function handleGatewayTransfer(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    const data = await requestGatewayJson("POST", "/transfer", body);
+    sendJson(res, 200, data);
+  } catch (error) {
+    console.error("[Gateway] transfer error:", error.message);
+    sendJson(res, 502, { error: { code: "GATEWAY_ERROR", message: error.message } });
+  }
+}
+
+async function handleGatewayStatus(req, res, transferId) {
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  try {
+    const data = await requestGatewayJson("GET", `/transfer/${encodeURIComponent(transferId)}`, null);
+    sendJson(res, 200, data);
+  } catch (error) {
+    console.error("[Gateway] status error:", error.message);
+    sendJson(res, 502, { error: { code: "GATEWAY_ERROR", message: error.message } });
+  }
+}
+
+function requestGatewayJson(method, pathname, body) {
+  return new Promise((resolve, reject) => {
+    const payload = body ? JSON.stringify(body) : null;
+    const headers = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    };
+    if (CIRCLE_GATEWAY_API_KEY) headers["Authorization"] = `Bearer ${CIRCLE_GATEWAY_API_KEY}`;
+    if (payload) headers["Content-Length"] = Buffer.byteLength(payload);
+    const request = https.request(
+      {
+        hostname: "gateway-api-testnet.circle.com",
+        path: `/v1${pathname}`,
+        method,
+        headers,
+      },
+      (response) => {
+        let responseBody = "";
+        response.on("data", (chunk) => { responseBody += chunk; });
+        response.on("end", () => {
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            reject(new Error(`Gateway API ${response.statusCode}: ${responseBody || "request failed"}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(responseBody || "{}"));
+          } catch {
+            reject(new Error("Gateway API returned invalid JSON"));
+          }
+        });
+      }
+    );
+    request.setTimeout(30000, () => {
+      request.destroy(new Error("Gateway API request timed out"));
+    });
+    request.on("error", reject);
+    if (payload) request.write(payload);
+    request.end();
+  });
 }
 
 function requestJson(url) {
