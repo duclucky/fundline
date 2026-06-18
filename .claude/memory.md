@@ -114,6 +114,17 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   public RPC head (read "expected at least N" from the 400 and re-sign at N+buffer), and the
   balance reservation is value + maxFee (so 1.5 USDC deposit only covers value <= 0.5 at the
   1 USDC fee floor). No public-facing page ever referenced Gateway; only app.js did.
+- 2026-06-18: CCTP Fast Transfer verified end-to-end on testnet (`test_cctp_fast_dryrun.js`).
+  ETH Sepolia (domain 0) -> Arc (domain 26), 0.5 USDC. Fast tier confirmed live for both
+  routes via the IRIS fee API: Base Sepolia->Arc = 1.3 bps, ETH Sepolia->Arc = 1.0 bps
+  (Standard tier 2000 is free). Round trip: burn (gas 109103) -> attestation ready in 11s
+  (Fast soft finality, finalityThreshold 1000) -> receiveMessage mint on Arc (gas 175768)
+  -> Arc balance +0.496345 USDC. Total wall-clock ~58s. KEY PROOF for the product concern:
+  a one-off cross-chain payer is served in ~1 minute, not the ~19 min a Gateway deposit would
+  need. Gotcha recorded: the Arc balance delta is below the 0.5 transfer because Arc's gas
+  token IS USDC, so the wallet-sent receiveMessage tx pays ~0.0036 USDC gas out of the same
+  balance (plus the tiny CCTP fee). The dry-run assertion was corrected to allow a ~2% band
+  for fee + Arc gas. Burn tx 0xbe061144...d66215c, mint tx 0x341be3a2...edf37ac3.
 - 2026-06-18: Circle MCP server + Skills committed (`cc8af84`). .mcp.json adds project-level
   Circle MCP (HTTP transport, api.circle.com/v1/codegen/mcp) - must be approved in Claude Code
   UI before it activates. 4 skills (circle-use-arc, circle-use-gateway, circle-bridge-stablecoin,
