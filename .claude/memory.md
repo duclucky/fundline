@@ -92,6 +92,28 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   not array start). 25-assertion unit test in test_multicall_pay.js validates the correct ABI encoding.
   Arcscan approve: 0x4eaa2f4137aeb5242e265b5797bb10981c5b948d8899ae549f38c4ce2d3b12a3
   Arcscan pay:     0x3f8888cccbbf2ef86943ef57f3be4326419588999594ad7109e043196dc526ed
+- 2026-06-18: Circle Gateway PARKED, removed from client UI. Built Part A end-to-end (server
+  proxy 30bb820, client flow 5fa5aca, fee fix 8057733) and dry-ran ETH Sepolia (domain 0) ->
+  Arc on testnet. Decision: Gateway is the WRONG default for invoice payers. A one-off payer
+  must wait for deposit finality (~19 min on ETH Sepolia/Ethereum) before the unified balance
+  is spendable, so first payment is no faster than CCTP Standard -- they abandon. Gateway only
+  wins for REPEAT payers who pre-fund a balance (then each transfer is <500ms, gasless on Arc).
+  Product direction (user choice): CCTP Fast Transfer is the sole cross-chain path for one-off
+  payers (~8-20s); direct Arc pay when funds already on Arc. CCTP Fast was ALREADY implemented
+  in app.js (resolveCctpFee fast=true -> IRIS fee tier, finalityThreshold 1000, maxFee capped
+  at 1%, fallback to Standard) and wired as the default bridge-pay path -- no new work needed.
+  Removed from app.js (1 commit, -323 lines): GATEWAY_* constants, gateway-* payment options,
+  the gateway branch in refreshPaymentSourceStatus, gateway- prefix in getPaymentSourceChain,
+  the gateway-pay action, and all 6 gateway helpers (readGatewayBalance, buildGatewayBurnIntent,
+  pollGatewayTransferStatus, pollForGatewayBalance, gatewayPayInvoice, _retryGatewayPay). Also
+  deleted duplicate addressToBytes32/randomBytes32 (Gateway had re-declared them; originals at
+  the bottom of app.js survive and CCTP uses those). KEPT for later revival: server.js proxy
+  routes + public-config gateway fields, test_gateway_dryrun.js, test_gateway_finish.js.
+  Testnet constraints found for the ETH Sepolia -> Arc route (recorded for revival): min maxFee
+  is 1 USDC (not 0.5), the API enforces a maxBlockHeight floor ~50k blocks above a lagging
+  public RPC head (read "expected at least N" from the 400 and re-sign at N+buffer), and the
+  balance reservation is value + maxFee (so 1.5 USDC deposit only covers value <= 0.5 at the
+  1 USDC fee floor). No public-facing page ever referenced Gateway; only app.js did.
 - 2026-06-18: Circle MCP server + Skills committed (`cc8af84`). .mcp.json adds project-level
   Circle MCP (HTTP transport, api.circle.com/v1/codegen/mcp) - must be approved in Claude Code
   UI before it activates. 4 skills (circle-use-arc, circle-use-gateway, circle-bridge-stablecoin,
