@@ -750,7 +750,6 @@ async function createInvoice(event) {
     merchantName: state.settings.merchantName || "Fundline merchant",
     merchantWallet: getConnectedWallet(),
     telegramChatId: state.settings.telegramChatId || "",
-    telegramEnabled: Boolean(state.settings.telegramEnabled),
     clientName: String(form.get("clientName") || "").trim(),
     clientEmail: String(form.get("clientEmail") || "").trim(),
     dueDate: String(form.get("dueDate") || ""),
@@ -1362,7 +1361,7 @@ async function payInvoiceWithWallet(id) {
   const button = document.querySelector("#payWithWallet");
   button?.classList.remove("error-ring");
 
-  // Direct Arc pay — uses the same 5-step stepper, bridge step shown as skipped
+  // Direct Arc pay - uses the same 5-step stepper, bridge step shown as skipped
   const progress = createBridgePayProgress(false);
   renderBridgePayProgress(progress);
   _activeBridgeContext = {
@@ -1453,7 +1452,7 @@ async function _retryDirectPay(id, fromStep) {
   }
 }
 
-// Legacy wrapper — kept for backward compat; bridge path calls this directly.
+// Legacy wrapper - kept for backward compat; bridge path calls this directly.
 // Direct pay path now calls submitArcPaymentWithProgress instead.
 async function submitArcPayment(invoice, payerWallet, button) {
   const provider = window.ethereum;
@@ -1568,7 +1567,7 @@ async function autoVerifyWithProgress(id, payerWallet, txHash, progress) {
       await delay(10000);
     }
   }
-  setProgressStep(progress, "verify", "error", "Not yet indexed — press Retry");
+  setProgressStep(progress, "verify", "error", "Not yet indexed - press Retry");
   showToast("Payment submitted, but Arcscan has not indexed it yet. Press Retry on the Verify step.");
   return false;
 }
@@ -1601,7 +1600,7 @@ async function bridgeAndPayInvoice(id, sourceKey) {
   const progress = createBridgePayProgress(true); // 5-step bridge flow
   renderBridgePayProgress(progress);
 
-  // Bridge context — used by Retry buttons
+  // Bridge context - used by Retry buttons
   _activeBridgeContext = {
     retry: (fromStep) => _retryBridgePay(id, sourceKey, fromStep),
     payerWallet,
@@ -1765,7 +1764,7 @@ async function _retryBridgePay(id, sourceKey, fromStep) {
       const txHash = ctx.arcTxHash || "";
       const verified = await autoVerifyWithProgress(id, payerWallet, txHash, progress);
       if (!verified) {
-        setProgressStep(progress, "verify", "error", "Not yet indexed — press Retry");
+        setProgressStep(progress, "verify", "error", "Not yet indexed - press Retry");
       }
     }
   } catch (error) {
@@ -2234,7 +2233,9 @@ async function sendTelegramTestAlert(event) {
 
 async function sendPaymentNotification(invoice, options = {}) {
   const chatId = String(options.chatId || state.settings.telegramChatId || invoice.telegramChatId || "").trim();
-  const enabled = options.force || Boolean(state.settings.telegramEnabled || invoice.telegramEnabled);
+  // Only the explicit test alert sends from the client; real paid alerts are sent
+  // server-side by dispatchInvoiceTelegramAlert, so this avoids duplicate messages.
+  const enabled = Boolean(options.force);
   if (!enabled || !chatId) return { skipped: true };
 
   try {

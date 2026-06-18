@@ -832,7 +832,6 @@ function normalizeInvoice(input, options = {}) {
     merchantName: String(input.merchantName || "Fundline merchant").trim().slice(0, 120),
     merchantWallet,
     telegramChatId: String(input.telegramChatId || "").trim().slice(0, 64),
-    telegramEnabled: Boolean(input.telegramEnabled),
     clientName: String(input.clientName || "").trim().slice(0, 160),
     clientEmail: String(input.clientEmail || "").trim().slice(0, 180),
     dueDate,
@@ -1858,11 +1857,9 @@ async function dispatchInvoiceTelegramAlert(invoice, event, reason = "") {
 
   if (event === "invoice.paid") {
     // Gate on the account-level alerts.paid switch only, consistent with the
-    // failed/overdue branches below. The chatId is already required above and is
-    // resolved from the invoice or the seller settings. Do NOT gate on the
-    // per-invoice telegramEnabled flag: it defaults to false and is not inherited
-    // from seller settings, so it silently suppressed paid alerts for sellers who
-    // configured Telegram at the account level (chatId + alerts.paid).
+    // failed and overdue branches below. The chatId is already required above and
+    // is resolved from the invoice or the seller settings, so a seller who
+    // configured Telegram at the account level (chatId + alerts.paid) gets alerts.
     if (alerts.paid === false) return;
     if (invoice.telegramPaidNotifiedAt || db.invoices[index].telegramPaidNotifiedAt) return;
 
