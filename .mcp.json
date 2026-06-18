@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "circle": {
+      "url": "https://api.circle.com/v1/codegen/mcp",
+      "transport": "http"
+    }
+  }
+}

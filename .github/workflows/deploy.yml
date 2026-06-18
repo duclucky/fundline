@@ -50,3 +50,4 @@ jobs:
             **/.npm-cache/**
             **/server.out.log
             **/server.err.log
+            **/.mcp.json
