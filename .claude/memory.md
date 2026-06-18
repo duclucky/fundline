@@ -150,6 +150,27 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   eth_getLogs on the Memo contract (memoId is an indexed topic; the matched log resolved to the
   exact payment tx). Both candidate directions are de-risked: (a) client 1-tx memo payment, and
   (b) backend indexer reading Memo events by invoiceId.
+- 2026-06-18: Arc Memo exact event ABI captured (for the indexer direction):
+  `event Memo(address indexed sender, address indexed target, bytes32 callDataHash,
+  bytes32 indexed memoId, bytes memo, uint256 memoIndex)`. Topic0 sig =
+  0xeb15ee720798341c37739df41be53acfbbf70ae6802dade35457beec6e47a5e4; topics are
+  [sig, sender, target, memoId]. Reconcile a single invoice with eth_getLogs
+  topics=[MEMO_TOPIC, null, null, <invoiceId>]. Also `event BeforeMemo(uint256 indexed
+  memoIndex)`. On child revert the outer tx reverts with `MemoFailed(bytes)` (no partial
+  settlement). No documented gas/size limits.
+- 2026-06-18: Arc App Kit evaluated (docs.arc.io/app-kit). App Kit (`@circle-fin/app-kit`)
+  is a TypeScript/npm SDK suite with 4 modules: Bridge (wraps CCTP), Unified Balance
+  (`@circle-fin/unified-balance-kit`), Swap, Send; adapters for Viem/Ethers/Solana/Circle
+  Wallets. KEY FINDING: Unified Balance is explicitly "built on top of Circle Gateway" and
+  "handles the Gateway workflow for deposits and spends" -- so it does NOT remove the
+  deposit-finality wait; "instantly spendable" means after the deposit finalizes (the same
+  Gateway model). It is cleaner CODE, not faster UX, so it does NOT change the decision to
+  drop Gateway for one-off payers. BLOCKER to adopting App Kit now: it is an npm/TS SDK
+  needing a bundler, but Fundline's frontend is deliberately buildless (vanilla app.js, manual
+  ABI encoding, FTP to cPanel, CI only `node --check`). Recommendation: keep the hand-rolled
+  CCTP Fast (works, zero deps); consider App Kit only if Fundline adds a build step or revives
+  the repeat-payer Gateway path, where `@circle-fin/unified-balance-kit` + App Kit Bridge would
+  be the clean implementations.
 - 2026-06-18: Circle MCP server + Skills committed (`cc8af84`). .mcp.json adds project-level
   Circle MCP (HTTP transport, api.circle.com/v1/codegen/mcp) - must be approved in Claude Code
   UI before it activates. 4 skills (circle-use-arc, circle-use-gateway, circle-bridge-stablecoin,
