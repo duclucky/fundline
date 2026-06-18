@@ -79,13 +79,19 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   (force) since real paid alerts are sent server-side (avoids duplicate messages). Also replaced
   5 pre-existing em dashes in app.js with hyphens to satisfy the no-em-dash rule.
 
-- 2026-06-18: Part B (Multicall3From) committed (`2ec65c9`). Client-side batching of
-  [USDC.approve, PaymentRouter.payInvoice] in one aggregate3 tx via Multicall3From at
-  0x522fAf9A91c41c443c66765030741e4AaCe147D0. Payer signs once. Optimization: if
-  allowance >= amount, skip Multicall3From and call sendRouterPayment directly (still 1 sig).
-  New helpers: encodeMulticall3Batch, sendMulticall3FromPayment. 25-assertion unit test
-  (test_multicall_pay.js) covers ABI encoding, 6-decimal amounts, selector, offsets, targets.
-  CCTP path (sendUsdcApprove at Sepolia/Base side) unchanged. Testnet dry-run still required.
+- 2026-06-18: Part B (Arc payment flow) completed. Testnet dry-run verified (`test_multicall_dryrun.js`):
+  Tx1 approve (35k gas) + Tx2 payInvoice (52k gas), InvoicePaid payer==signer confirmed on Arc testnet.
+  Root finding: Multicall3From's CallFrom precompile (0x1800...0003) throws StackUnderflow for ANY
+  subcall target (both USDC precompile 0x3600... and regular contracts like PaymentRouter). The 1-tx
+  [approve+pay] batch is not viable on current Arc testnet.
+  Final implementation: 2-tx flow -- if allowance < amount, send direct USDC.approve (via sendUsdcApprove)
+  + waitForArcTx (60x3s polling), then send direct PaymentRouter.payInvoice (via sendRouterPayment).
+  If allowance >= amount: 1-tx direct payInvoice (unchanged). Dead code removed from app.js:
+  encodeMulticall3Batch, sendMulticall3FromPayment, MULTICALL3FROM_ADDRESS, MULTICALL3_AGGREGATE3_SELECTOR.
+  ABI encoding bug ALSO fixed (baseOffset = N*32 not (1+N)*32 -- offsets relative to head section start,
+  not array start). 25-assertion unit test in test_multicall_pay.js validates the correct ABI encoding.
+  Arcscan approve: 0x4eaa2f4137aeb5242e265b5797bb10981c5b948d8899ae549f38c4ce2d3b12a3
+  Arcscan pay:     0x3f8888cccbbf2ef86943ef57f3be4326419588999594ad7109e043196dc526ed
 - 2026-06-18: Circle MCP server + Skills committed (`cc8af84`). .mcp.json adds project-level
   Circle MCP (HTTP transport, api.circle.com/v1/codegen/mcp) - must be approved in Claude Code
   UI before it activates. 4 skills (circle-use-arc, circle-use-gateway, circle-bridge-stablecoin,

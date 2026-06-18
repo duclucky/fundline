@@ -19,8 +19,6 @@ const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
 const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
 const ERC20_DECIMALS_SELECTOR = "0x313ce567";
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
-const MULTICALL3FROM_ADDRESS = "0x522fAf9A91c41c443c66765030741e4AaCe147D0";
-const MULTICALL3_AGGREGATE3_SELECTOR = "0x82ad56cb";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
 const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
 const CCTP_STANDARD_FINALITY_THRESHOLD = 2000;
@@ -1471,35 +1469,30 @@ async function submitArcPayment(invoice, payerWallet, button) {
       `Insufficient Arc USDC. This invoice requires ${formatUsdc(invoice.total)} USDC, but this wallet has ${formatUnits(balance, config.usdcDecimals)} USDC.`,
     );
   }
-  setButtonBusy(button, "Paying invoice...");
   const allowance = await readUsdcAllowance(provider, config.usdcTokenAddress, payerWallet, config.paymentRouterAddress);
-  let txHash;
   if (allowance < amountUnits) {
-    // Batch approve + payInvoice in one Multicall3From tx - payer signs once.
-    const invoiceBytes = normalizeBytes32(invoice.onchainInvoiceId);
-    if (!invoiceBytes) throw new Error("Invoice is missing a valid onchain invoice ID.");
-    txHash = await sendMulticall3FromPayment(provider, {
+    // Arc's CallFrom precompile cannot call Arc native precompiles (USDC at 0x3600...).
+    // Use a 2-tx flow: approve first, then pay.
+    setButtonBusy(button, "Step 1/2: Approve USDC...");
+    const approveTxHash = await sendUsdcApprove(provider, {
       from: payerWallet,
-      calls: [
-        {
-          target: config.usdcTokenAddress,
-          callData: ERC20_APPROVE_SELECTOR + encodeAddress(config.paymentRouterAddress) + encodeUint256(amountUnits),
-        },
-        {
-          target: config.paymentRouterAddress,
-          callData: PAYMENT_ROUTER_PAY_SELECTOR + encodeBytes32(invoiceBytes) + encodeAddress(invoice.merchantWallet) + encodeUint256(amountUnits),
-        },
-      ],
-    });
-  } else {
-    txHash = await sendRouterPayment(provider, {
-      from: payerWallet,
-      router: config.paymentRouterAddress,
-      invoiceId: invoice.onchainInvoiceId,
-      merchantWallet: invoice.merchantWallet,
+      token: config.usdcTokenAddress,
+      spender: config.paymentRouterAddress,
       amount: amountUnits,
     });
+    setButtonBusy(button, "Confirming approval...");
+    await waitForArcTx(provider, approveTxHash);
+    setButtonBusy(button, "Step 2/2: Paying invoice...");
+  } else {
+    setButtonBusy(button, "Paying invoice...");
   }
+  const txHash = await sendRouterPayment(provider, {
+    from: payerWallet,
+    router: config.paymentRouterAddress,
+    invoiceId: invoice.onchainInvoiceId,
+    merchantWallet: invoice.merchantWallet,
+    amount: amountUnits,
+  });
   const form = document.querySelector("#paymentVerifyForm");
   if (form?.elements.payerWallet) form.elements.payerWallet.value = payerWallet;
   if (form?.elements.txHash) form.elements.txHash.value = txHash;
@@ -1519,36 +1512,34 @@ async function submitArcPaymentWithProgress(invoice, payerWallet, button, progre
     throw new Error(`Critical Error: Expected Arc USDC to have 6 decimals but found ${onchainDecimals}.`);
   }
   const amountUnits = parseTokenUnits(invoice.total, config.usdcDecimals);
-  setProgressStep(progress, "pay", "active", "Paying invoice...");
-  setButtonBusy(button, "Paying invoice...");
   const allowance = await readUsdcAllowance(provider, config.usdcTokenAddress, payerWallet, config.paymentRouterAddress);
-  let txHash;
   if (allowance < amountUnits) {
-    // Batch approve + payInvoice in one Multicall3From tx - payer signs once.
-    const invoiceBytes = normalizeBytes32(invoice.onchainInvoiceId);
-    if (!invoiceBytes) throw new Error("Invoice is missing a valid onchain invoice ID.");
-    txHash = await sendMulticall3FromPayment(provider, {
+    // Arc's CallFrom precompile cannot call Arc native precompiles (USDC at 0x3600...).
+    // Use a 2-tx flow: approve first, then pay.
+    setProgressStep(progress, "pay", "active", "Step 1/2: Approving USDC (sign tx)...");
+    setButtonBusy(button, "Approve USDC (1 of 2)...");
+    const approveTxHash = await sendUsdcApprove(provider, {
       from: payerWallet,
-      calls: [
-        {
-          target: config.usdcTokenAddress,
-          callData: ERC20_APPROVE_SELECTOR + encodeAddress(config.paymentRouterAddress) + encodeUint256(amountUnits),
-        },
-        {
-          target: config.paymentRouterAddress,
-          callData: PAYMENT_ROUTER_PAY_SELECTOR + encodeBytes32(invoiceBytes) + encodeAddress(invoice.merchantWallet) + encodeUint256(amountUnits),
-        },
-      ],
-    });
-  } else {
-    txHash = await sendRouterPayment(provider, {
-      from: payerWallet,
-      router: config.paymentRouterAddress,
-      invoiceId: invoice.onchainInvoiceId,
-      merchantWallet: invoice.merchantWallet,
+      token: config.usdcTokenAddress,
+      spender: config.paymentRouterAddress,
       amount: amountUnits,
     });
+    setProgressStep(progress, "pay", "active", "Confirming USDC approval...");
+    setButtonBusy(button, "Confirming approval...");
+    await waitForArcTx(provider, approveTxHash);
+    setProgressStep(progress, "pay", "active", "Step 2/2: Paying invoice (sign tx)...");
+    setButtonBusy(button, "Pay invoice (2 of 2)...");
+  } else {
+    setProgressStep(progress, "pay", "active", "Paying invoice...");
+    setButtonBusy(button, "Paying invoice...");
   }
+  const txHash = await sendRouterPayment(provider, {
+    from: payerWallet,
+    router: config.paymentRouterAddress,
+    invoiceId: invoice.onchainInvoiceId,
+    merchantWallet: invoice.merchantWallet,
+    amount: amountUnits,
+  });
   setProgressStep(progress, "pay", "done", "Payment submitted");
   if (_activeBridgeContext) _activeBridgeContext.arcTxHash = txHash;
   const form = document.querySelector("#paymentVerifyForm");
@@ -1924,6 +1915,21 @@ function sendUsdcApprove(provider, { from, token, spender, amount }) {
   });
 }
 
+async function waitForArcTx(provider, txHash) {
+  for (let i = 0; i < 60; i++) {
+    await delay(3000);
+    const receipt = await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash],
+    });
+    if (receipt) {
+      if (receipt.status === "0x0") throw new Error("Transaction reverted on-chain.");
+      return receipt;
+    }
+  }
+  throw new Error("Transaction not confirmed after 3 minutes.");
+}
+
 function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, amount }) {
   const invoiceBytes = normalizeBytes32(invoiceId);
   if (!invoiceBytes) throw new Error("Invoice is missing a valid onchain invoice ID.");
@@ -1931,53 +1937,6 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, 
   return provider.request({
     method: "eth_sendTransaction",
     params: [{ from, to: router, data, value: "0x0" }],
-  });
-}
-
-// Encode aggregate3((address,bool,bytes)[]) calldata for Multicall3From.
-// calls: [{target, callData}, ...] - allowFailure is always false (batch reverts atomically).
-// callData strings may include a leading "0x" prefix; it is stripped before encoding.
-function encodeMulticall3Batch(calls) {
-  const N = calls.length;
-  if (N === 0) throw new Error("Multicall3 batch cannot be empty.");
-  const callDatas = calls.map((c) => {
-    const hex = String(c.callData || "").replace(/^0x/, "").toLowerCase();
-    if (hex.length % 2 !== 0) throw new Error("callData hex length must be even.");
-    const byteLen = hex.length / 2;
-    const padLen = byteLen === 0 ? 0 : Math.ceil(byteLen / 32) * 32;
-    return { hex, byteLen, padLen };
-  });
-  // Each (address, bool, bytes) tuple: 96-byte head + 32-byte length word + padLen bytes.
-  const callSizes = callDatas.map((cd) => 128 + cd.padLen);
-  // Offsets are relative to the start of the array encoding (length word at position 0).
-  const baseOffset = (1 + N) * 32;
-  const callOffsets = [];
-  let cumSize = 0;
-  for (let i = 0; i < N; i++) {
-    callOffsets.push(baseOffset + cumSize);
-    cumSize += callSizes[i];
-  }
-  let arrayHex = encodeUint256(BigInt(N));
-  for (let i = 0; i < N; i++) {
-    arrayHex += encodeUint256(BigInt(callOffsets[i]));
-  }
-  for (let i = 0; i < N; i++) {
-    const cd = callDatas[i];
-    arrayHex += encodeAddress(calls[i].target);
-    arrayHex += encodeUint256(0n);     // allowFailure = false
-    arrayHex += encodeUint256(96n);    // offset to bytes from start of this tuple head
-    arrayHex += encodeUint256(BigInt(cd.byteLen));
-    arrayHex += cd.hex.padEnd(cd.padLen * 2, "0");
-  }
-  // Outer argument: dynamic array at offset 0x20 (32 bytes from start of calldata).
-  return MULTICALL3_AGGREGATE3_SELECTOR + encodeUint256(32n) + arrayHex;
-}
-
-function sendMulticall3FromPayment(provider, { from, calls }) {
-  const data = encodeMulticall3Batch(calls);
-  return provider.request({
-    method: "eth_sendTransaction",
-    params: [{ from, to: MULTICALL3FROM_ADDRESS, data, value: "0x0" }],
   });
 }
 

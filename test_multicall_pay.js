@@ -69,7 +69,7 @@ function encodeMulticall3Batch(calls) {
     return { hex, byteLen, padLen };
   });
   const callSizes = callDatas.map((cd) => 128 + cd.padLen);
-  const baseOffset = (1 + N) * 32;
+  const baseOffset = N * 32;
   const callOffsets = [];
   let cumSize = 0;
   for (let i = 0; i < N; i++) {
@@ -181,13 +181,13 @@ assertEqual(approveHex.length / 2, 68, "approveCallData is 68 bytes");
 const payHex = payCallData.replace(/^0x/, "");
 assertEqual(payHex.length / 2, 100, "payCallData is 100 bytes");
 
-// 9. Offsets from start of array encoding:
-// N=2, base = (1+2)*32 = 96. callSize[0] = 128 + ceil(68/32)*32 = 128 + 96 = 224
-// offset[0] = 96, offset[1] = 96 + 224 = 320 = 0x140
+// 9. Offsets from start of head section (after length word, per ABI spec):
+// N=2, base = N*32 = 64. callSize[0] = 128 + ceil(68/32)*32 = 128 + 96 = 224
+// offset[0] = 64, offset[1] = 64 + 224 = 288 = 0x120
 const off0 = word(64 + 64);  // first element offset (after length word, at char 128 from array start)
 const off1 = word(64 + 128); // second element offset
-assertEqual(off0, "0000000000000000000000000000000000000000000000000000000000000060", "call[0] offset = 96 (0x60)");
-assertEqual(off1, "0000000000000000000000000000000000000000000000000000000000000140", "call[1] offset = 320 (0x140)");
+assertEqual(off0, "0000000000000000000000000000000000000000000000000000000000000040", "call[0] offset = 64 (0x40)");
+assertEqual(off1, "0000000000000000000000000000000000000000000000000000000000000120", "call[1] offset = 288 (0x120)");
 
 // 10. call[0] allowFailure = false (slot 1 of tuple, at 96+32=128 bytes into array data)
 // Array data starts at char 128 (array offset=32, array starts at 32 bytes into calldata-after-selector = char 64,
