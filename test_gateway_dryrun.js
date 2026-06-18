@@ -36,10 +36,11 @@ const ARC_USDC = "0x3600000000000000000000000000000000000000";
 const ARC_DOMAIN = 26;
 const ARC_USDC_DECIMALS = 6;
 
-const BASE_SEPOLIA_RPC = "https://sepolia.base.org";
-const BASE_SEPOLIA_CHAIN_ID = 84532n;
-const BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
-const BASE_SEPOLIA_DOMAIN = 6;
+// Using ETH Sepolia (domain 0) -- wallet has 40 USDC + 2 ETH there
+const BASE_SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
+const BASE_SEPOLIA_CHAIN_ID = 11155111n;
+const BASE_SEPOLIA_USDC = "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238";
+const BASE_SEPOLIA_DOMAIN = 0;
 
 // Gateway addresses (testnet)
 const GATEWAY_WALLET = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
@@ -47,9 +48,9 @@ const GATEWAY_MINTER = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
 const GATEWAY_API_BASE = "https://gateway-api-testnet.circle.com/v1";
 
 // Transfer params
-const TRANSFER_AMOUNT = 2_000_000n; // 2 USDC
-const MAX_FEE = 500_000n;           // 0.5 USDC max forwarding fee
-const TOTAL_TRANSFER = TRANSFER_AMOUNT + MAX_FEE;
+const TRANSFER_AMOUNT = 1_000_000n; // 1 USDC (value sent to Arc)
+const MAX_FEE = 500_000n;           // 0.5 USDC max forwarding fee (charged on top)
+const TOTAL_TRANSFER = TRANSFER_AMOUNT + MAX_FEE; // worst-case deposit amount
 
 // Selectors
 const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
