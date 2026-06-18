@@ -79,6 +79,20 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   (force) since real paid alerts are sent server-side (avoids duplicate messages). Also replaced
   5 pre-existing em dashes in app.js with hyphens to satisfy the no-em-dash rule.
 
+- 2026-06-18: Part B (Multicall3From) committed (`2ec65c9`). Client-side batching of
+  [USDC.approve, PaymentRouter.payInvoice] in one aggregate3 tx via Multicall3From at
+  0x522fAf9A91c41c443c66765030741e4AaCe147D0. Payer signs once. Optimization: if
+  allowance >= amount, skip Multicall3From and call sendRouterPayment directly (still 1 sig).
+  New helpers: encodeMulticall3Batch, sendMulticall3FromPayment. 25-assertion unit test
+  (test_multicall_pay.js) covers ABI encoding, 6-decimal amounts, selector, offsets, targets.
+  CCTP path (sendUsdcApprove at Sepolia/Base side) unchanged. Testnet dry-run still required.
+- 2026-06-18: Circle MCP server + Skills committed (`cc8af84`). .mcp.json adds project-level
+  Circle MCP (HTTP transport, api.circle.com/v1/codegen/mcp) - must be approved in Claude Code
+  UI before it activates. 4 skills (circle-use-arc, circle-use-gateway, circle-bridge-stablecoin,
+  circle-use-usdc) saved to .claude/skills/ - invokable as /circle-use-arc etc. Note: user-scope
+  MCP (claude mcp add --scope user) not possible without the claude CLI in PATH; project-level
+  .mcp.json is the fallback.
+
 ## Open threads / TODOs
 
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
