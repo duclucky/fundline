@@ -2145,17 +2145,20 @@ async function gatewayPayInvoice(id, sourceKey) {
 
   try {
     const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
-    const transferAmount = amountUnits + GATEWAY_MAX_FEE;
+    // Gateway fee is charged ON TOP of value (not deducted from it), so recipient receives
+    // full amountUnits on Arc. Total needed from Gateway balance = amountUnits + actualFee
+    // (actualFee <= GATEWAY_MAX_FEE). We deposit amountUnits + GATEWAY_MAX_FEE as worst case.
+    const depositAmount = amountUnits + GATEWAY_MAX_FEE;
 
     setProgressStep(progress, "check", "active", `Checking Gateway balance on ${source.shortName}...`);
     setButtonBusy(button, "Checking balance...");
     const gwBalance = await readGatewayBalance(payerWallet, source.domain);
 
-    if (gwBalance < transferAmount) {
+    if (gwBalance < depositAmount) {
       setProgressStep(progress, "check", "active", `Checking on-chain USDC on ${source.shortName}...`);
       const onChainBalance = await readUsdcBalanceFromRpc(source.rpcUrls[0], source.usdc, payerWallet);
-      if (onChainBalance < transferAmount) {
-        throw new Error(`Insufficient USDC. Need ${formatUnits(transferAmount, ARC_USDC_DECIMALS)} USDC on ${source.shortName} (invoice + 0.5 USDC gateway fee).`);
+      if (onChainBalance < depositAmount) {
+        throw new Error(`Insufficient USDC. Need ${formatUnits(depositAmount, ARC_USDC_DECIMALS)} USDC on ${source.shortName} (invoice + up to 0.5 USDC gateway fee).`);
       }
       setProgressStep(progress, "check", "done", `${formatUnits(onChainBalance, ARC_USDC_DECIMALS)} USDC available`);
 
@@ -2163,17 +2166,17 @@ async function gatewayPayInvoice(id, sourceKey) {
       setButtonBusy(button, "Approving deposit...");
       await ensureWalletNetwork(provider, source);
       const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, GATEWAY_WALLET_ADDRESS);
-      if (allowance < transferAmount) {
+      if (allowance < depositAmount) {
         const approveTx = await sendUsdcApprove(provider, {
-          from: payerWallet, token: source.usdc, spender: GATEWAY_WALLET_ADDRESS, amount: transferAmount,
+          from: payerWallet, token: source.usdc, spender: GATEWAY_WALLET_ADDRESS, amount: depositAmount,
         });
         setProgressStep(progress, "bridge", "active", "Confirming approval...");
         await waitForTransaction(provider, approveTx);
       }
 
-      setProgressStep(progress, "bridge", "active", `Depositing ${formatUnits(transferAmount, ARC_USDC_DECIMALS)} USDC to Gateway...`);
+      setProgressStep(progress, "bridge", "active", `Depositing ${formatUnits(depositAmount, ARC_USDC_DECIMALS)} USDC to Gateway...`);
       setButtonBusy(button, "Depositing to Gateway...");
-      const depositData = GATEWAY_DEPOSIT_SELECTOR + encodeAddress(source.usdc) + encodeUint256(transferAmount);
+      const depositData = GATEWAY_DEPOSIT_SELECTOR + encodeAddress(source.usdc) + encodeUint256(depositAmount);
       const depositTx = await provider.request({
         method: "eth_sendTransaction",
         params: [{ from: payerWallet, to: GATEWAY_WALLET_ADDRESS, data: depositData, value: "0x0" }],
@@ -2183,7 +2186,7 @@ async function gatewayPayInvoice(id, sourceKey) {
 
       setProgressStep(progress, "bridge", "active", "Waiting for Gateway to recognize deposit (may take a few minutes)...");
       setButtonBusy(button, "Waiting for Gateway...");
-      await pollForGatewayBalance(payerWallet, source.domain, transferAmount, progress);
+      await pollForGatewayBalance(payerWallet, source.domain, depositAmount, progress);
     } else {
       setProgressStep(progress, "check", "done", `Gateway balance: ${formatUnits(gwBalance, ARC_USDC_DECIMALS)} USDC`);
     }
@@ -2205,7 +2208,7 @@ async function gatewayPayInvoice(id, sourceKey) {
       sourceDepositor: payerWallet,
       destinationRecipient: payerWallet,
       sourceSigner: payerWallet,
-      value: transferAmount,
+      value: amountUnits,          // fee is charged on top, not deducted
       maxBlockHeight: currentBlock + 500,
       maxFee: GATEWAY_MAX_FEE,
     });
