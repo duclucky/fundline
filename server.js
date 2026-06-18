@@ -812,7 +812,11 @@ function normalizeInvoice(input, options = {}) {
   if (!items.length) throw new Error("Invoice needs at least one item");
 
   const total = roundMoney(input.total || items.reduce((sum, item) => sum + item.total, 0));
-  if (total <= 0) throw new Error("Invoice total must be greater than 0");
+  // Reject non-finite or absurd totals. The upper bound is far above any real
+  // invoice and well below the magnitude (>= 1e21) where Number.toString emits
+  // exponential form, which the base-unit parser cannot read.
+  if (!Number.isFinite(total) || total <= 0) throw new Error("Invoice total must be greater than 0");
+  if (total > 1e12) throw new Error("Invoice total is too large");
 
   const status = ["open", "verifying", "paid"].includes(input.status) ? input.status : "open";
   const createdAt = options.allowExistingTimestamps && input.createdAt ? String(input.createdAt) : new Date().toISOString();
@@ -1900,11 +1904,34 @@ function startTelegramPolling() {
     return;
   }
   console.log("Telegram bot: starting polling...");
+  validateTelegramToken().catch((error) => console.log(`Telegram token check failed: ${error.message || "Unknown error"}`));
   setTelegramCommands().catch((error) => console.log(`Telegram command setup failed: ${error.message || "Unknown error"}`));
   pollTelegramUpdates().catch((error) => console.log(`Telegram polling failed: ${error.message || "Unknown error"}`));
   telegramPollTimer = setInterval(() => {
     pollTelegramUpdates().catch((error) => console.log(`Telegram polling failed: ${error.message || "Unknown error"}`));
   }, getTelegramUpdateIntervalMs());
+}
+
+// Validate the configured bot token at startup so a revoked or mistyped token
+// is surfaced loudly in the boot log instead of only failing on the first alert.
+async function validateTelegramToken() {
+  const token = getTelegramToken();
+  if (!token) return;
+  try {
+    const me = await requestTelegramWithToken(token, "getMe", {});
+    if (me && me.ok && me.result) {
+      console.log(`Telegram bot: token OK, authenticated as @${me.result.username} (id ${me.result.id})`);
+    } else {
+      console.error("Telegram bot: getMe returned an unexpected response, alerts may not work");
+    }
+  } catch (error) {
+    const parsed = parseTelegramError(error);
+    if (parsed.code === 401) {
+      console.error(`Telegram bot: ${TELEGRAM_BAD_TOKEN_HINT}`);
+    } else {
+      console.error(`Telegram bot: token validation failed: ${parsed.text}`);
+    }
+  }
 }
 
 let overdueJobTimer = null;
@@ -2011,6 +2038,29 @@ async function setTelegramCommands() {
   telegramCommandsReady = true;
 }
 
+// Parse a thrown Telegram API error ("Telegram API <status>: <json>") into a
+// structured shape so callers can react to specific codes (e.g. 401).
+function parseTelegramError(err) {
+  const raw = err && err.message ? String(err.message) : "Unknown error";
+  const m = raw.match(/Telegram API (\d+): (.+)/);
+  if (m) {
+    try {
+      const parsed = JSON.parse(m[2]);
+      return {
+        code: Number(parsed.error_code) || Number(m[1]) || 0,
+        description: parsed.description || "",
+        text: `error_code=${parsed.error_code} description=${parsed.description}`,
+      };
+    } catch (_) {
+      return { code: Number(m[1]) || 0, description: m[2], text: `error_code=${m[1]} ${m[2]}` };
+    }
+  }
+  return { code: 0, description: raw, text: raw };
+}
+
+const TELEGRAM_BAD_TOKEN_HINT =
+  "Telegram rejected the bot token (401 Unauthorized). The token is invalid or was regenerated in BotFather. Update TELEGRAM_BOT_TOKEN on the server and restart.";
+
 async function sendTelegramMessage(token, chatId, text, options = {}) {
   if (!token) return { ok: false, error: "TELEGRAM_BOT_TOKEN is not configured" };
   if (!chatId) return { ok: false, error: "Telegram chat ID is empty" };
@@ -2024,18 +2074,11 @@ async function sendTelegramMessage(token, chatId, text, options = {}) {
     console.log("[Telegram] sendMessage ok, chat_id:", chatId);
     return { ok: true, result };
   } catch (err) {
-    // Parse Telegram error JSON for clear logging
-    let telegramDesc = err.message;
-    try {
-      const m = err.message.match(/Telegram API \d+: (.+)/);
-      if (m) {
-        const parsed = JSON.parse(m[1]);
-        telegramDesc = `error_code=${parsed.error_code} description=${parsed.description}`;
-      }
-    } catch (_) {}
+    const parsed = parseTelegramError(err);
+    const userError = parsed.code === 401 ? TELEGRAM_BAD_TOKEN_HINT : parsed.text;
     const maskedToken = token ? token.substring(0, 8) + "..." + token.slice(-4) : "(empty)";
-    console.error(`[Telegram] sendMessage FAILED token=${maskedToken} chat_id=${chatId}: ${telegramDesc}`);
-    return { ok: false, error: telegramDesc };
+    console.error(`[Telegram] sendMessage FAILED token=${maskedToken} chat_id=${chatId}: ${parsed.text}`);
+    return { ok: false, error: userError };
   }
 }
 
@@ -2252,10 +2295,16 @@ function parseUnitsValue(value) {
 
 function amountToUnits(amount, decimals) {
   const normalizedDecimals = Number.isFinite(decimals) ? Math.min(Math.max(decimals, 0), 18) : 6;
-  const normalized = Number(amount || 0).toFixed(normalizedDecimals);
-  const [whole, fraction = ""] = normalized.split(".");
-  const paddedFraction = fraction.padEnd(normalizedDecimals, "0").slice(0, normalizedDecimals);
-  return BigInt(`${whole}${paddedFraction}`.replace(/^0+(?=\d)/, "") || "0");
+  // Use exact integer arithmetic on the decimal string. Number.toFixed adds
+  // float rounding noise at high precision (e.g. (0.1).toFixed(18) yields
+  // "0.100000000000000006"), which skews the 18-decimal native-transfer compare.
+  // This mirrors parseTokenUnits in app.js so the client (amount paid) and the
+  // server (expected amount) always agree exactly at any decimal count.
+  const text = String(amount || "0").replace(/,/g, "").trim();
+  const [wholeRaw, fractionRaw = ""] = text.split(".");
+  const whole = wholeRaw.replace(/\D/g, "") || "0";
+  const fraction = fractionRaw.replace(/\D/g, "").padEnd(normalizedDecimals, "0").slice(0, normalizedDecimals);
+  return BigInt(whole) * 10n ** BigInt(normalizedDecimals) + BigInt(fraction || "0");
 }
 
 function toRpcQuantity(value) {
