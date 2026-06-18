@@ -216,6 +216,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/gateway/estimate") {
+    handleGatewayEstimate(req, res);
+    return;
+  }
+
   if (url.pathname === "/api/gateway/transfer") {
     handleGatewayTransfer(req, res);
     return;
@@ -2259,6 +2264,21 @@ async function handleGatewayBalance(req, res) {
     sendJson(res, 200, data);
   } catch (error) {
     console.error("[Gateway] balance error:", error.message);
+    sendJson(res, 502, { error: { code: "GATEWAY_ERROR", message: error.message } });
+  }
+}
+
+async function handleGatewayEstimate(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    const data = await requestGatewayJson("POST", "/transfer/estimate", body);
+    sendJson(res, 200, data);
+  } catch (error) {
+    console.error("[Gateway] estimate error:", error.message);
     sendJson(res, 502, { error: { code: "GATEWAY_ERROR", message: error.message } });
   }
 }

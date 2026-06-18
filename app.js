@@ -28,6 +28,11 @@ const CCTP_IRIS_SANDBOX_BASE = "https://iris-api-sandbox.circle.com";
 
 const CCTP_TOKEN_MESSENGER_V2 = "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA";
 const CCTP_MESSAGE_TRANSMITTER_V2 = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
+
+const GATEWAY_WALLET_ADDRESS = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
+const GATEWAY_MINTER_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
+const GATEWAY_DEPOSIT_SELECTOR = "0x47e7ef24"; // deposit(address,uint256)
+const GATEWAY_MAX_FEE = 500_000n;              // 0.5 USDC max forwarding fee
 const CCTP_TESTNET_CHAINS = {
   arcTestnet: {
     key: "arcTestnet",
@@ -1138,11 +1143,19 @@ function renderVerifiedPayment(invoice) {
 }
 
 function getPaymentSourceOptions() {
-  return [
-    { key: "arcTestnet", label: "USDC on Arc", chain: CCTP_TESTNET_CHAINS.arcTestnet },
-    { key: "baseSepolia", label: "USDC on Base Sepolia", chain: CCTP_TESTNET_CHAINS.baseSepolia },
-    { key: "ethereumSepolia", label: "USDC on Ethereum Sepolia", chain: CCTP_TESTNET_CHAINS.ethereumSepolia },
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  const options = [
+    { key: "arcTestnet",      label: "USDC on Arc",                       chain: CCTP_TESTNET_CHAINS.arcTestnet },
+    { key: "baseSepolia",     label: "USDC on Base Sepolia (CCTP bridge)", chain: CCTP_TESTNET_CHAINS.baseSepolia },
+    { key: "ethereumSepolia", label: "USDC on ETH Sepolia (CCTP bridge)",  chain: CCTP_TESTNET_CHAINS.ethereumSepolia },
   ];
+  if (config.gatewayEnabled) {
+    options.push(
+      { key: "gateway-baseSepolia",     label: "Base Sepolia via Gateway",  chain: CCTP_TESTNET_CHAINS.baseSepolia },
+      { key: "gateway-ethereumSepolia", label: "ETH Sepolia via Gateway",   chain: CCTP_TESTNET_CHAINS.ethereumSepolia },
+    );
+  }
+  return options;
 }
 
 function getSelectedPaymentSource() {
@@ -1190,6 +1203,32 @@ async function refreshPaymentSourceStatus(id, options = {}) {
   try {
     const chain = getPaymentSourceChain(source.key);
     const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+
+    if (source.key.startsWith("gateway-")) {
+      const totalNeeded = amountUnits + GATEWAY_MAX_FEE;
+      const gwBalance = await readGatewayBalance(wallet, chain.domain);
+      const onChainBalance = await readUsdcBalanceFromRpc(chain.rpcUrls[0], chain.usdc, wallet);
+      if (gwBalance >= totalNeeded || onChainBalance >= totalNeeded) {
+        const hasGwFunds = gwBalance >= totalNeeded;
+        button.disabled = false;
+        button.dataset.action = "gateway-pay";
+        button.innerHTML = paymentButtonHtml(
+          hasGwFunds
+            ? `Pay ${formatUsdc(invoice.total)} USDC via Gateway`
+            : `Deposit + pay ${formatUsdc(invoice.total)} USDC via Gateway`,
+        );
+        status.textContent = hasGwFunds
+          ? `Gateway balance: ${formatUnits(gwBalance, ARC_USDC_DECIMALS)} USDC on ${chain.shortName}. Ready.`
+          : `On-chain: ${formatUnits(onChainBalance, ARC_USDC_DECIMALS)} USDC on ${chain.shortName}. Will deposit then pay (up to 0.5 USDC gateway fee).`;
+      } else {
+        button.disabled = true;
+        button.dataset.action = "blocked";
+        button.innerHTML = paymentButtonHtml("Insufficient USDC");
+        status.textContent = `Need ${formatUnits(totalNeeded, ARC_USDC_DECIMALS)} USDC on ${chain.shortName} for invoice + gateway fee.`;
+      }
+      return;
+    }
+
     const balance = await readUsdcBalanceFromRpc(chain.rpcUrls[0], chain.usdc, wallet);
     const enough = balance >= amountUnits;
     const balanceText = `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC`;
@@ -1233,7 +1272,8 @@ function getPaymentSourceChain(key) {
       explorer: config.explorerBase || CCTP_TESTNET_CHAINS.arcTestnet.explorer,
     };
   }
-  return CCTP_TESTNET_CHAINS[key] || CCTP_TESTNET_CHAINS.arcTestnet;
+  const chainKey = key.startsWith("gateway-") ? key.replace("gateway-", "") : key;
+  return CCTP_TESTNET_CHAINS[chainKey] || CCTP_TESTNET_CHAINS.arcTestnet;
 }
 
 function renderPayItems(invoice) {
@@ -1318,6 +1358,10 @@ async function handleInvoicePaymentAction(id) {
   }
   if (action === "bridge-pay") {
     await bridgeAndPayInvoice(id, button.dataset.source || getSelectedPaymentSource().key);
+    return;
+  }
+  if (action === "gateway-pay") {
+    await gatewayPayInvoice(id, button.dataset.source || getSelectedPaymentSource().key);
     return;
   }
   if (action === "pay") {
@@ -1938,6 +1982,284 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, 
     method: "eth_sendTransaction",
     params: [{ from, to: router, data, value: "0x0" }],
   });
+}
+
+function addressToBytes32(addr) {
+  const a = String(addr || "").toLowerCase().replace(/^0x/, "");
+  if (a.length !== 40) throw new Error("Invalid address for bytes32 encoding: " + addr);
+  return "0x" + "0".repeat(24) + a;
+}
+
+function randomBytes32() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return "0x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function readGatewayBalance(depositorAddress, sourceDomain) {
+  try {
+    const response = await fetch("/api/gateway/balance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        token: "USDC",
+        sources: [{ domain: sourceDomain, depositor: depositorAddress }],
+      }),
+    });
+    if (!response.ok) return 0n;
+    const data = await response.json();
+    const entry = Array.isArray(data.balances) ? data.balances[0] : null;
+    if (!entry) return 0n;
+    return parseTokenUnits(String(entry.balance || "0"), ARC_USDC_DECIMALS);
+  } catch {
+    return 0n;
+  }
+}
+
+function buildGatewayBurnIntent(params) {
+  const {
+    sourceDomain, destinationDomain,
+    sourceContract, destinationContract,
+    sourceToken, destinationToken,
+    sourceDepositor, destinationRecipient, sourceSigner,
+    value, maxBlockHeight, maxFee,
+  } = params;
+
+  const spec = {
+    version: 1,
+    sourceDomain,
+    destinationDomain,
+    sourceContract: addressToBytes32(sourceContract),
+    destinationContract: addressToBytes32(destinationContract),
+    sourceToken: addressToBytes32(sourceToken),
+    destinationToken: addressToBytes32(destinationToken),
+    sourceDepositor: addressToBytes32(sourceDepositor),
+    destinationRecipient: addressToBytes32(destinationRecipient),
+    sourceSigner: addressToBytes32(sourceSigner),
+    destinationCaller: ZERO_BYTES32,
+    value: value.toString(),
+    salt: randomBytes32(),
+    hookData: "0x",
+  };
+
+  const message = {
+    maxBlockHeight: maxBlockHeight.toString(),
+    maxFee: maxFee.toString(),
+    spec,
+  };
+
+  const typedData = {
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+      ],
+      TransferSpec: [
+        { name: "version", type: "uint32" },
+        { name: "sourceDomain", type: "uint32" },
+        { name: "destinationDomain", type: "uint32" },
+        { name: "sourceContract", type: "bytes32" },
+        { name: "destinationContract", type: "bytes32" },
+        { name: "sourceToken", type: "bytes32" },
+        { name: "destinationToken", type: "bytes32" },
+        { name: "sourceDepositor", type: "bytes32" },
+        { name: "destinationRecipient", type: "bytes32" },
+        { name: "sourceSigner", type: "bytes32" },
+        { name: "destinationCaller", type: "bytes32" },
+        { name: "value", type: "uint256" },
+        { name: "salt", type: "bytes32" },
+        { name: "hookData", type: "bytes" },
+      ],
+      BurnIntent: [
+        { name: "maxBlockHeight", type: "uint256" },
+        { name: "maxFee", type: "uint256" },
+        { name: "spec", type: "TransferSpec" },
+      ],
+    },
+    domain: { name: "GatewayWallet", version: "1" },
+    primaryType: "BurnIntent",
+    message,
+  };
+
+  return { typedData, message };
+}
+
+async function pollGatewayTransferStatus(transferId, onProgress, timeoutMs) {
+  const limit = timeoutMs || 600000;
+  const start = Date.now();
+  while (Date.now() - start < limit) {
+    const response = await fetch(`/api/gateway/transfer/${encodeURIComponent(transferId)}`);
+    if (response.ok) {
+      const data = await response.json();
+      const status = String(data.status || data.transferStatus || "").toLowerCase();
+      onProgress(`Waiting for Gateway mint... (${Math.round((Date.now() - start) / 1000)}s, status: ${status})`);
+      if (status === "complete" || status === "completed" || status === "minted") return data;
+      if (status === "failed" || status === "error") {
+        throw new Error(`Gateway transfer failed: ${data.message || status}`);
+      }
+    }
+    await delay(5000);
+  }
+  throw new Error("Gateway transfer timed out after 10 minutes.");
+}
+
+async function pollForGatewayBalance(depositorAddress, sourceDomain, requiredAmount, progress) {
+  const maxWait = 20 * 60 * 1000;
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    const balance = await readGatewayBalance(depositorAddress, sourceDomain);
+    if (balance >= requiredAmount) return;
+    const elapsed = Math.round((Date.now() - start) / 1000);
+    setProgressStep(progress, "bridge", "active", `Waiting for Gateway deposit to finalize... (${elapsed}s, this can take a few minutes)`);
+    await delay(15000);
+  }
+  throw new Error("Gateway deposit not recognized after 20 minutes. Check back later - the deposit may still complete.");
+}
+
+async function gatewayPayInvoice(id, sourceKey) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice) return;
+  const chainKey = sourceKey.replace("gateway-", "");
+  const source = CCTP_TESTNET_CHAINS[chainKey];
+  if (!source) { showToast("Unknown Gateway source chain."); return; }
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  const provider = window.ethereum;
+  if (!provider?.request) { showToast("No wallet extension found. Install or open an EVM wallet."); return; }
+
+  let payerWallet = getConnectedWallet();
+  if (!payerWallet) { await connectWallet(); payerWallet = getConnectedWallet(); }
+  if (!payerWallet) return;
+  if (sameAddress(payerWallet, invoice.merchantWallet)) {
+    showToast("Use a different payer wallet. Paying from the receiving wallet does not settle the invoice.");
+    return;
+  }
+
+  const button = document.querySelector("#payWithWallet");
+  const progress = createBridgePayProgress(true);
+  renderBridgePayProgress(progress);
+  _activeBridgeContext = {
+    retry: (fromStep) => _retryGatewayPay(id, sourceKey, fromStep),
+    payerWallet,
+    steps: progress,
+  };
+
+  try {
+    const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+    const transferAmount = amountUnits + GATEWAY_MAX_FEE;
+
+    setProgressStep(progress, "check", "active", `Checking Gateway balance on ${source.shortName}...`);
+    setButtonBusy(button, "Checking balance...");
+    const gwBalance = await readGatewayBalance(payerWallet, source.domain);
+
+    if (gwBalance < transferAmount) {
+      setProgressStep(progress, "check", "active", `Checking on-chain USDC on ${source.shortName}...`);
+      const onChainBalance = await readUsdcBalanceFromRpc(source.rpcUrls[0], source.usdc, payerWallet);
+      if (onChainBalance < transferAmount) {
+        throw new Error(`Insufficient USDC. Need ${formatUnits(transferAmount, ARC_USDC_DECIMALS)} USDC on ${source.shortName} (invoice + 0.5 USDC gateway fee).`);
+      }
+      setProgressStep(progress, "check", "done", `${formatUnits(onChainBalance, ARC_USDC_DECIMALS)} USDC available`);
+
+      setProgressStep(progress, "bridge", "active", `Approving USDC for Gateway deposit on ${source.shortName}...`);
+      setButtonBusy(button, "Approving deposit...");
+      await ensureWalletNetwork(provider, source);
+      const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, GATEWAY_WALLET_ADDRESS);
+      if (allowance < transferAmount) {
+        const approveTx = await sendUsdcApprove(provider, {
+          from: payerWallet, token: source.usdc, spender: GATEWAY_WALLET_ADDRESS, amount: transferAmount,
+        });
+        setProgressStep(progress, "bridge", "active", "Confirming approval...");
+        await waitForTransaction(provider, approveTx);
+      }
+
+      setProgressStep(progress, "bridge", "active", `Depositing ${formatUnits(transferAmount, ARC_USDC_DECIMALS)} USDC to Gateway...`);
+      setButtonBusy(button, "Depositing to Gateway...");
+      const depositData = GATEWAY_DEPOSIT_SELECTOR + encodeAddress(source.usdc) + encodeUint256(transferAmount);
+      const depositTx = await provider.request({
+        method: "eth_sendTransaction",
+        params: [{ from: payerWallet, to: GATEWAY_WALLET_ADDRESS, data: depositData, value: "0x0" }],
+      });
+      setProgressStep(progress, "bridge", "active", "Waiting for deposit confirmation...");
+      await waitForTransaction(provider, depositTx);
+
+      setProgressStep(progress, "bridge", "active", "Waiting for Gateway to recognize deposit (may take a few minutes)...");
+      setButtonBusy(button, "Waiting for Gateway...");
+      await pollForGatewayBalance(payerWallet, source.domain, transferAmount, progress);
+    } else {
+      setProgressStep(progress, "check", "done", `Gateway balance: ${formatUnits(gwBalance, ARC_USDC_DECIMALS)} USDC`);
+    }
+
+    setProgressStep(progress, "bridge", "active", "Sign Gateway transfer intent (check wallet)...");
+    setButtonBusy(button, "Sign transfer intent...");
+    await ensureWalletNetwork(provider, source);
+
+    const blockHex = await rpcCall(source.rpcUrls[0], "eth_blockNumber", []);
+    const currentBlock = Number(hexToBigInt(blockHex || "0x0"));
+
+    const burnIntent = buildGatewayBurnIntent({
+      sourceDomain: source.domain,
+      destinationDomain: 26,
+      sourceContract: GATEWAY_WALLET_ADDRESS,
+      destinationContract: GATEWAY_MINTER_ADDRESS,
+      sourceToken: source.usdc,
+      destinationToken: config.usdcTokenAddress,
+      sourceDepositor: payerWallet,
+      destinationRecipient: payerWallet,
+      sourceSigner: payerWallet,
+      value: transferAmount,
+      maxBlockHeight: currentBlock + 500,
+      maxFee: GATEWAY_MAX_FEE,
+    });
+
+    const signature = await provider.request({
+      method: "eth_signTypedData_v4",
+      params: [payerWallet, JSON.stringify(burnIntent.typedData)],
+    });
+
+    setProgressStep(progress, "bridge", "active", "Submitting to Circle Gateway...");
+    setButtonBusy(button, "Submitting transfer...");
+
+    const transferResp = await fetch("/api/gateway/transfer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify([{ burnIntent: burnIntent.message, signature }]),
+    });
+
+    if (!transferResp.ok) {
+      const errData = await transferResp.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || `Gateway API error (${transferResp.status})`);
+    }
+
+    const transferData = await transferResp.json();
+    const transferId = transferData?.id || (Array.isArray(transferData) ? transferData[0]?.id : null);
+    if (!transferId) throw new Error("Gateway API did not return a transfer ID.");
+
+    setProgressStep(progress, "bridge", "active", "Waiting for USDC to arrive on Arc via Forwarding Service...");
+    setButtonBusy(button, "Waiting for Arc mint...");
+    await pollGatewayTransferStatus(transferId, (msg) => setProgressStep(progress, "bridge", "active", msg));
+    setProgressStep(progress, "bridge", "done", "USDC arrived on Arc via Gateway");
+
+    setProgressStep(progress, "pay", "active", "Paying invoice on Arc...");
+    setButtonBusy(button, "Paying invoice...");
+    await submitArcPaymentWithProgress(invoice, payerWallet, button, progress);
+
+  } catch (error) {
+    const isRejected = error?.code === 4001 || String(error?.message).toLowerCase().includes("rejected") || String(error?.message).toLowerCase().includes("denied");
+    const msg = isRejected ? "Rejected by user" : error?.message || "Gateway payment failed";
+    const activeStep = progress.find((s) => s.status === "active");
+    if (activeStep) setProgressStep(progress, activeStep.key, "error", msg);
+    showToast(isRejected ? "Transaction rejected by user." : error?.message || "Gateway payment failed.");
+    if (isRejected) {
+      button?.classList.add("error-ring");
+      setTimeout(() => button?.classList.remove("error-ring"), 3000);
+    }
+  } finally {
+    resetPayWithWalletButton(button, invoice);
+    await refreshPaymentSourceStatus(id, { silent: true });
+  }
+}
+
+async function _retryGatewayPay(id, sourceKey, _fromStep) {
+  await gatewayPayInvoice(id, sourceKey);
 }
 
 async function resolveCctpFee({ sourceDomain, destinationDomain, amountUnits, fast }) {
