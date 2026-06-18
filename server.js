@@ -1857,7 +1857,13 @@ async function dispatchInvoiceTelegramAlert(invoice, event, reason = "") {
   if (index < 0) return;
 
   if (event === "invoice.paid") {
-    if (invoice.telegramEnabled === false || alerts.paid === false) return;
+    // Gate on the account-level alerts.paid switch only, consistent with the
+    // failed/overdue branches below. The chatId is already required above and is
+    // resolved from the invoice or the seller settings. Do NOT gate on the
+    // per-invoice telegramEnabled flag: it defaults to false and is not inherited
+    // from seller settings, so it silently suppressed paid alerts for sellers who
+    // configured Telegram at the account level (chatId + alerts.paid).
+    if (alerts.paid === false) return;
     if (invoice.telegramPaidNotifiedAt || db.invoices[index].telegramPaidNotifiedAt) return;
 
     const text = buildPaymentMessage(invoice);
