@@ -144,6 +144,12 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   USDC decimals. Caveats: contract is new (audit/maturity unverified), mainnet address/availability
   not yet confirmed, no documented memoData size limit. NOT yet implemented -- architecture
   decision pending user direction; PaymentRouter still the shipped path.
+  Follow-up validation (`test_memo_payment_dryrun.js`, tx 0x531dae2a...cecce0dd): the realistic
+  Fundline shape PASSED end-to-end on testnet -- payer -> a DISTINCT merchant in 1 tx (gas 68158),
+  merchant credited exactly 0.01 USDC, and the payment is reconcilable by invoiceId via
+  eth_getLogs on the Memo contract (memoId is an indexed topic; the matched log resolved to the
+  exact payment tx). Both candidate directions are de-risked: (a) client 1-tx memo payment, and
+  (b) backend indexer reading Memo events by invoiceId.
 - 2026-06-18: Circle MCP server + Skills committed (`cc8af84`). .mcp.json adds project-level
   Circle MCP (HTTP transport, api.circle.com/v1/codegen/mcp) - must be approved in Claude Code
   UI before it activates. 4 skills (circle-use-arc, circle-use-gateway, circle-bridge-stablecoin,
