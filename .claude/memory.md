@@ -62,6 +62,16 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   Hardened anyway: validateTelegramToken() runs getMe at boot and logs a loud error on 401;
   sendTelegramMessage returns an actionable message on 401. Note loadEnvFiles is first-wins, so
   an OS env var shadows .env.
+- 2026-06-18: Telegram paid-alert fix committed `027e683` (pushed). The invoice.paid branch in
+  dispatchInvoiceTelegramAlert was gated by invoice.telegramEnabled (Boolean(input.telegramEnabled),
+  defaults false, NOT inherited from seller settings), so paid alerts were suppressed for sellers
+  who only configured account-level Telegram (chatId + alerts.paid:true). The failed/overdue
+  branches never had this gate. Fixed by gating paid on alerts.paid only (chatId already required
+  above). Verified on real data + a 3-lens adversarial review (verdict: ship). The test-alert
+  button works regardless because it uses force + the in-browser chatId. Residual (low): the
+  per-invoice telegramEnabled flag is now DEAD for paid alerts (still stored, never read, no
+  longer an opt-out) - candidate for removal/deprecation. The sellers[merchantWallet] lookup is
+  case-safe (normalizeAddress lowercases both the invoice wallet and the seller key).
 
 ## Open threads / TODOs
 
