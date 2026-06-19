@@ -62,6 +62,7 @@ const ARC_RPC_URL = process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network"
 const ARC_NETWORK_NAME = process.env.ARC_NETWORK_NAME || "Arc Testnet";
 const ARC_PAYMENT_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_PAYMENT_ROUTER_ADDRESS || "");
 const TELEGRAM_UPDATE_INTERVAL_MS = getTelegramUpdateIntervalMs();
+const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
 // Arc Transaction Memos (read-only reconciliation). Memo contract is predeployed on Arc.
@@ -75,6 +76,7 @@ const GATEWAY_MINTER_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
 
 let telegramPollTimer = null;
 let telegramPollBusy = false;
+let telegramPollStarted = false;
 let telegramUpdateOffset = 0;
 let telegramCommandsReady = false;
 
@@ -2011,17 +2013,30 @@ async function dispatchInvoiceTelegramAlert(invoice, event, reason = "") {
 }
 
 function startTelegramPolling() {
-  if (telegramPollTimer || !getTelegramToken()) {
+  if (telegramPollStarted || !getTelegramToken()) {
     if (!getTelegramToken()) console.log("Telegram bot: no token loaded");
     return;
   }
+  telegramPollStarted = true;
   console.log("Telegram bot: starting polling...");
   validateTelegramToken().catch((error) => console.log(`Telegram token check failed: ${error.message || "Unknown error"}`));
   setTelegramCommands().catch((error) => console.log(`Telegram command setup failed: ${error.message || "Unknown error"}`));
-  pollTelegramUpdates().catch((error) => console.log(`Telegram polling failed: ${error.message || "Unknown error"}`));
-  telegramPollTimer = setInterval(() => {
-    pollTelegramUpdates().catch((error) => console.log(`Telegram polling failed: ${error.message || "Unknown error"}`));
-  }, getTelegramUpdateIntervalMs());
+  scheduleTelegramPoll();
+}
+
+// Self-rescheduling poll loop. The long-poll itself holds the connection for up
+// to TELEGRAM_LONG_POLL_SECONDS and returns the moment an update arrives, so we
+// reschedule immediately after each cycle resolves (sub-second button latency)
+// and back off briefly on error to avoid a hot retry loop.
+function scheduleTelegramPoll() {
+  pollTelegramUpdates()
+    .then(() => {
+      if (getTelegramToken()) telegramPollTimer = setTimeout(scheduleTelegramPoll, 0);
+    })
+    .catch((error) => {
+      console.log(`Telegram polling failed: ${error.message || "Unknown error"}`);
+      if (getTelegramToken()) telegramPollTimer = setTimeout(scheduleTelegramPoll, 3000);
+    });
 }
 
 // Validate the configured bot token at startup so a revoked or mistyped token
@@ -2082,29 +2097,103 @@ async function pollTelegramUpdates() {
   telegramPollBusy = true;
 
   try {
-    const url = new URL(`https://api.telegram.org/bot${token}/getUpdates`);
-    url.searchParams.set("timeout", "0");
-    if (telegramUpdateOffset) url.searchParams.set("offset", String(telegramUpdateOffset));
-    const payload = await requestJson(url);
+    const payload = await requestTelegramLongPoll(token, {
+      timeout: TELEGRAM_LONG_POLL_SECONDS,
+      allowed_updates: ["message", "callback_query"],
+      ...(telegramUpdateOffset ? { offset: telegramUpdateOffset } : {}),
+    });
     if (payload.ok === false) throw new Error(payload.description || "Telegram getUpdates failed");
 
     const updates = Array.isArray(payload.result) ? payload.result : [];
     let handled = 0;
     for (const update of updates) {
+      // Ack the offset first so a single bad update cannot make the loop replay it forever.
       telegramUpdateOffset = Math.max(Number(telegramUpdateOffset || 0), Number(update.update_id || 0) + 1);
-      const message = update.message || update.edited_message;
-      const chat = message?.chat;
-      if (!chat?.id) continue;
-
-      const text = String(message.text || "").trim().toLowerCase();
-      if (text === "/start" || text.startsWith("/start ") || text === "/id" || text === "/chatid") {
-        await sendTelegramChatId(chat.id);
-        handled += 1;
+      try {
+        if (await handleTelegramUpdate(update)) handled += 1;
+      } catch (error) {
+        console.log(`Telegram update handling failed: ${error.message || "Unknown error"}`);
       }
     }
     return { updates: updates.length, handled };
   } finally {
     telegramPollBusy = false;
+  }
+}
+
+// Route one Telegram update. Returns true if it was handled. Inline-button
+// (callback_query) routing into the invoice flow is added in a later phase;
+// for now we just acknowledge taps so the Telegram client spinner clears.
+async function handleTelegramUpdate(update) {
+  if (update.callback_query) {
+    await answerCallbackQuery(update.callback_query.id);
+    return true;
+  }
+
+  const message = update.message || update.edited_message;
+  const chat = message?.chat;
+  if (!chat?.id) return false;
+
+  const text = String(message.text || "").trim().toLowerCase();
+  if (text === "/start" || text.startsWith("/start ") || text === "/id" || text === "/chatid") {
+    await sendTelegramChatId(chat.id);
+    return true;
+  }
+  return false;
+}
+
+// Long-poll variant of the Telegram request: a held getUpdates connection must
+// not be aborted before the server-side long-poll window elapses, so the socket
+// timeout sits above TELEGRAM_LONG_POLL_SECONDS (the shared requestJson uses a
+// 15s timeout that would kill a 25s long-poll).
+function requestTelegramLongPoll(token, payload) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(payload);
+    const request = https.request(
+      {
+        hostname: "api.telegram.org",
+        path: `/bot${token}/getUpdates`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      (response) => {
+        let responseBody = "";
+        response.on("data", (chunk) => {
+          responseBody += chunk;
+        });
+        response.on("end", () => {
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            try {
+              resolve(JSON.parse(responseBody || "{}"));
+            } catch {
+              resolve({});
+            }
+            return;
+          }
+          reject(new Error(`Telegram API ${response.statusCode}: ${responseBody || "request failed"}`));
+        });
+      },
+    );
+    request.setTimeout((TELEGRAM_LONG_POLL_SECONDS + 10) * 1000, () => {
+      request.destroy(new Error("Telegram getUpdates timed out"));
+    });
+    request.on("error", reject);
+    request.write(body);
+    request.end();
+  });
+}
+
+async function answerCallbackQuery(callbackQueryId, text) {
+  if (!callbackQueryId) return;
+  const payload = { callback_query_id: callbackQueryId };
+  if (text) payload.text = text;
+  try {
+    await requestTelegram("answerCallbackQuery", payload);
+  } catch (error) {
+    console.log(`Telegram answerCallbackQuery failed: ${error.message || "Unknown error"}`);
   }
 }
 
@@ -2242,6 +2331,13 @@ function getTelegramToken() {
 function getTelegramUpdateIntervalMs() {
   const configured = Number(process.env.TELEGRAM_UPDATE_INTERVAL_MS || 0);
   return Number.isFinite(configured) && configured >= 3000 ? configured : 8000;
+}
+
+// Seconds the Telegram getUpdates long-poll holds the connection. Telegram caps
+// this server-side; keep a safe upper bound. Default 25s for snappy taps.
+function getTelegramLongPollSeconds() {
+  const configured = Number(process.env.TELEGRAM_LONG_POLL_SECONDS || 0);
+  return Number.isFinite(configured) && configured >= 1 && configured <= 50 ? configured : 25;
 }
 
 function rpcRequest(method, params = []) {
