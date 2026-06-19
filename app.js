@@ -27,9 +27,9 @@ const CCTP_FAST_FINALITY_THRESHOLD = 1000;
 const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 const CCTP_IRIS_SANDBOX_BASE = "https://iris-api-sandbox.circle.com";
 
-const CCTP_TOKEN_MESSENGER_V2 = "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA";
-const CCTP_MESSAGE_TRANSMITTER_V2 = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
-
+// One table per chain: all CCTP constants in one place.
+// To cut over to mainnet, add a CCTP_MAINNET_CHAINS table and swap the reference.
+// preference: lower = more preferred for auto-suggest (Arc first, no bridge).
 const CCTP_TESTNET_CHAINS = {
   arcTestnet: {
     key: "arcTestnet",
@@ -39,21 +39,12 @@ const CCTP_TESTNET_CHAINS = {
     chainIdHex: "0x4cef52",
     domain: 26,
     usdc: "0x3600000000000000000000000000000000000000",
+    tokenMessenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
+    messageTransmitter: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
     explorer: ARC_EXPLORER_URL,
     rpcUrls: ["https://rpc.testnet.arc.network"],
     nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-  },
-  ethereumSepolia: {
-    key: "ethereumSepolia",
-    name: "Ethereum Sepolia",
-    shortName: "Ethereum Sepolia",
-    chainId: 11155111,
-    chainIdHex: "0xaa36a7",
-    domain: 0,
-    usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-    explorer: "https://sepolia.etherscan.io",
-    rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"],
-    nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+    preference: 0,
   },
   baseSepolia: {
     key: "baseSepolia",
@@ -63,9 +54,27 @@ const CCTP_TESTNET_CHAINS = {
     chainIdHex: "0x14a34",
     domain: 6,
     usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    tokenMessenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
+    messageTransmitter: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
     explorer: "https://sepolia.basescan.org",
     rpcUrls: ["https://sepolia.base.org"],
     nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+    preference: 1,
+  },
+  ethereumSepolia: {
+    key: "ethereumSepolia",
+    name: "Ethereum Sepolia",
+    shortName: "Ethereum Sepolia",
+    chainId: 11155111,
+    chainIdHex: "0xaa36a7",
+    domain: 0,
+    usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
+    tokenMessenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
+    messageTransmitter: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
+    explorer: "https://sepolia.etherscan.io",
+    rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"],
+    nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+    preference: 2,
   },
 };
 
@@ -1557,9 +1566,6 @@ function paymentButtonHtml(label) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>${escapeHtml(label)}`;
 }
 
-// Preference order for auto-picking a single source: Arc first (no bridge,
-// sub-second, zero fee), then Fast CCTP sources.
-const PAYMENT_SOURCE_PREFERENCE = ["arcTestnet", "baseSepolia", "ethereumSepolia"];
 let _paymentSourceAutoPicked = false;
 
 // Race a promise against a timeout so one slow or dead RPC cannot hang the scan.
@@ -1590,14 +1596,15 @@ async function scanUsdcAcrossChains(wallet) {
   }));
 }
 
-// Pick the cheapest/fastest single chain that already covers the amount, by the
-// fixed preference order. Returns "" when no single chain has enough.
+// Pick the cheapest/fastest single chain that already covers the amount,
+// ordered by CCTP_TESTNET_CHAINS[key].preference (lowest first).
 function suggestBestChainKey(scanned, amountUnits) {
-  for (const key of PAYMENT_SOURCE_PREFERENCE) {
-    const row = scanned.find((item) => item.key === key);
-    if (row && row.ok && row.balance >= amountUnits) return key;
-  }
-  return "";
+  const sorted = [...scanned].sort((a, b) => {
+    const pa = (CCTP_TESTNET_CHAINS[a.key] || {}).preference ?? 999;
+    const pb = (CCTP_TESTNET_CHAINS[b.key] || {}).preference ?? 999;
+    return pa - pb;
+  });
+  return sorted.find((row) => row.ok && row.balance >= amountUnits)?.key || "";
 }
 
 function renderScanSummary(scanned) {
@@ -1648,6 +1655,8 @@ function getPaymentSourceChain(key) {
       usdc: config.usdcTokenAddress || CCTP_TESTNET_CHAINS.arcTestnet.usdc,
       rpcUrls: [config.rpcUrl || CCTP_TESTNET_CHAINS.arcTestnet.rpcUrls[0]],
       explorer: config.explorerBase || CCTP_TESTNET_CHAINS.arcTestnet.explorer,
+      tokenMessenger: CCTP_TESTNET_CHAINS.arcTestnet.tokenMessenger,
+      messageTransmitter: CCTP_TESTNET_CHAINS.arcTestnet.messageTransmitter,
     };
   }
   return CCTP_TESTNET_CHAINS[key] || CCTP_TESTNET_CHAINS.arcTestnet;
@@ -2047,12 +2056,12 @@ async function bridgeAndPayInvoice(id, sourceKey) {
 
     setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
     setButtonBusy(button, "Approving bridge...");
-    const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, CCTP_TOKEN_MESSENGER_V2);
+    const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, source.tokenMessenger);
     if (allowance < amountUnits) {
       const approveTx = await sendUsdcApprove(provider, {
         from: payerWallet,
         token: source.usdc,
-        spender: CCTP_TOKEN_MESSENGER_V2,
+        spender: source.tokenMessenger,
         amount: amountUnits,
       });
       await waitForTransaction(provider, approveTx);
@@ -2138,9 +2147,9 @@ async function _retryBridgePay(id, sourceKey, fromStep) {
     if (["check", "bridge"].includes(fromStep) && !ctx.cctpMessage) {
       setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
       setButtonBusy(button, "Approving bridge...");
-      const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, CCTP_TOKEN_MESSENGER_V2);
+      const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, source.tokenMessenger);
       if (allowance < amountUnits) {
-        const approveTx = await sendUsdcApprove(provider, { from: payerWallet, token: source.usdc, spender: CCTP_TOKEN_MESSENGER_V2, amount: amountUnits });
+        const approveTx = await sendUsdcApprove(provider, { from: payerWallet, token: source.usdc, spender: source.tokenMessenger, amount: amountUnits });
         await waitForTransaction(provider, approveTx);
       }
       setProgressStep(progress, "bridge", "active", `Moving USDC from ${source.shortName} to Arc...`);
@@ -2439,7 +2448,7 @@ async function sendCctpBurn(provider, { from, source, destination, amount, recip
     
   return provider.request({
     method: "eth_sendTransaction",
-    params: [{ from, to: CCTP_TOKEN_MESSENGER_V2, data, value: "0x0" }],
+    params: [{ from, to: source.tokenMessenger, data, value: "0x0" }],
   });
 }
 
@@ -2466,7 +2475,7 @@ function sendCctpMint(provider, { from, message, attestation }) {
   const data = CCTP_RECEIVE_MESSAGE_SELECTOR + encodeDynamicBytesPair(message, attestation);
   return provider.request({
     method: "eth_sendTransaction",
-    params: [{ from, to: CCTP_MESSAGE_TRANSMITTER_V2, data, value: "0x0" }],
+    params: [{ from, to: CCTP_TESTNET_CHAINS.arcTestnet.messageTransmitter, data, value: "0x0" }],
   });
 }
 
