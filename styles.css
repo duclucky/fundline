@@ -1201,6 +1201,12 @@ select {
   line-height: 1.45;
 }
 
+.payment-source-scan {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .bridge-pay-progress {
   display: grid;
   gap: 8px;

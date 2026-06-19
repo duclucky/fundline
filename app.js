@@ -1376,13 +1376,18 @@ function renderPayPage(invoiceId) {
     </section>
   `;
 
+  _paymentSourceAutoPicked = false;
   document.querySelector("#payWithWallet")?.addEventListener("click", () => handleInvoicePaymentAction(invoice.id));
-  document.querySelector("#paymentSourceChain")?.addEventListener("change", () => refreshPaymentSourceStatus(invoice.id));
-  document.querySelector("#refreshPaymentSource")?.addEventListener("click", () => refreshPaymentSourceStatus(invoice.id));
+  // A manual source change wins over auto-pick for the rest of this page.
+  document.querySelector("#paymentSourceChain")?.addEventListener("change", () => {
+    _paymentSourceAutoPicked = true;
+    refreshPaymentSourceStatus(invoice.id);
+  });
+  document.querySelector("#refreshPaymentSource")?.addEventListener("click", () => autoPickBestSource(invoice.id));
   document.querySelector("#paymentVerifyForm")?.addEventListener("submit", (event) => verifyPaymentAndMarkPaid(invoice.id, event));
   document.querySelector("#downloadReceipt")?.addEventListener("click", () => downloadReceiptPdf(invoice));
   if (hasConnectedWallet() && invoice.status !== "paid") {
-    window.setTimeout(() => refreshPaymentSourceStatus(invoice.id, { silent: true }), 0);
+    window.setTimeout(() => autoPickBestSource(invoice.id), 0);
   }
 }
 
@@ -1419,6 +1424,7 @@ function renderPaymentVerification(invoice) {
         <button class="ghost-action" id="refreshPaymentSource" type="button" ${payDisabled ? "disabled" : ""}>Check balance</button>
       </div>
       <div class="payment-source-status" id="paymentSourceStatus">${payerWallet ? "Checking selected USDC balance..." : "Connect wallet to check USDC balance."}</div>
+      <p class="muted payment-source-scan" id="paymentSourceScan"></p>
       <button class="primary-action" id="payWithWallet" type="button" data-action="connect" ${payDisabled ? "disabled" : ""}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
         ${payerWallet ? "Checking balance..." : "Connect wallet"}
@@ -1551,6 +1557,89 @@ function paymentButtonHtml(label) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>${escapeHtml(label)}`;
 }
 
+// Preference order for auto-picking a single source: Arc first (no bridge,
+// sub-second, zero fee), then Fast CCTP sources.
+const PAYMENT_SOURCE_PREFERENCE = ["arcTestnet", "baseSepolia", "ethereumSepolia"];
+let _paymentSourceAutoPicked = false;
+
+// Race a promise against a timeout so one slow or dead RPC cannot hang the scan.
+function withRpcTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("RPC timed out")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// Read the payer's USDC balance on every supported source chain in parallel.
+// Pure eth_call reads (no signature, no gas); a failed RPC counts as 0 so one
+// dead endpoint does not block the rest.
+async function scanUsdcAcrossChains(wallet) {
+  const sources = getPaymentSourceOptions();
+  const results = await Promise.allSettled(
+    sources.map((source) => {
+      const chain = getPaymentSourceChain(source.key);
+      return withRpcTimeout(readUsdcBalanceFromRpc(chain.rpcUrls[0], chain.usdc, wallet), 6000);
+    }),
+  );
+  return sources.map((source, index) => ({
+    key: source.key,
+    shortName: getPaymentSourceChain(source.key).shortName,
+    balance: results[index].status === "fulfilled" ? results[index].value : 0n,
+    ok: results[index].status === "fulfilled",
+  }));
+}
+
+// Pick the cheapest/fastest single chain that already covers the amount, by the
+// fixed preference order. Returns "" when no single chain has enough.
+function suggestBestChainKey(scanned, amountUnits) {
+  for (const key of PAYMENT_SOURCE_PREFERENCE) {
+    const row = scanned.find((item) => item.key === key);
+    if (row && row.ok && row.balance >= amountUnits) return key;
+  }
+  return "";
+}
+
+function renderScanSummary(scanned) {
+  const parts = scanned.map(
+    (item) => `${item.shortName} ${item.ok ? formatUnits(item.balance, ARC_USDC_DECIMALS) : "n/a"}`,
+  );
+  return `Your USDC by chain: ${parts.join(", ")}.`;
+}
+
+// Scan all chains, auto-select the cheapest single chain that covers the invoice
+// (only once, so a manual change sticks), show a per-chain summary, then run the
+// normal per-source status. Keeps the common case one chain, one click, with no
+// signature or gas (reads only). Aggregation across chains is out of scope here.
+async function autoPickBestSource(id) {
+  const invoice = state.invoices.find((item) => item.id === id);
+  if (!invoice || invoice.status === "paid") return;
+  const wallet = getConnectedWallet();
+  const select = document.querySelector("#paymentSourceChain");
+  const scanEl = document.querySelector("#paymentSourceScan");
+  if (!wallet || !select) {
+    await refreshPaymentSourceStatus(id);
+    return;
+  }
+  if (scanEl) scanEl.textContent = "Scanning your USDC across chains...";
+  let scanned;
+  try {
+    scanned = await scanUsdcAcrossChains(wallet);
+  } catch {
+    if (scanEl) scanEl.textContent = "";
+    await refreshPaymentSourceStatus(id);
+    return;
+  }
+  if (!_paymentSourceAutoPicked) {
+    const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+    const best = suggestBestChainKey(scanned, amountUnits);
+    if (best) select.value = best;
+    _paymentSourceAutoPicked = true;
+  }
+  if (scanEl) scanEl.textContent = renderScanSummary(scanned);
+  await refreshPaymentSourceStatus(id);
+}
+
 function getPaymentSourceChain(key) {
   if (key === "arcTestnet") {
     const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
@@ -1641,7 +1730,7 @@ async function handleInvoicePaymentAction(id) {
   const action = button?.dataset.action || "connect";
   if (action === "connect") {
     await connectWallet();
-    await refreshPaymentSourceStatus(id);
+    await autoPickBestSource(id);
     return;
   }
   if (action === "bridge-pay") {
