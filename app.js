@@ -72,7 +72,7 @@ const WALLET_SESSION_KEY = "arc-invoice-usdc-wallet-session";
 
 function loadWalletState() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(WALLET_SESSION_KEY) || "null");
+    const parsed = JSON.parse(sessionStorage.getItem(WALLET_SESSION_KEY) || "null");
     if (parsed && parsed.address) {
       return {
         connected: true,
@@ -92,9 +92,9 @@ function loadWalletState() {
 
 function saveWalletState() {
   if (state.wallet.connected) {
-    localStorage.setItem(WALLET_SESSION_KEY, JSON.stringify(state.wallet));
+    sessionStorage.setItem(WALLET_SESSION_KEY, JSON.stringify(state.wallet));
   } else {
-    localStorage.removeItem(WALLET_SESSION_KEY);
+    sessionStorage.removeItem(WALLET_SESSION_KEY);
   }
 }
 
@@ -156,7 +156,25 @@ let _activeBridgeContext = null; // holds state for retry across both pay paths
 
 init();
 
+// Older builds kept the login session and cached invoices in localStorage, which
+// survived a browser restart. Auth and cached state now live in sessionStorage so they
+// clear when the browser profile closes. Drop any stale localStorage copies once so a
+// previous session can never resurface.
+function purgeLegacyAuthStorage() {
+  [
+    "arc-invoice-usdc-wallet-session",
+    "arc-invoice-usdc-invoices-v1",
+    "arc-invoice-usdc-settings-v1",
+    "fundline_dashboard_session",
+  ].forEach((key) => {
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+  });
+}
+
 async function init() {
+  purgeLegacyAuthStorage();
   bindEvents();
   await loadPublicConfig();
   if (isPayRoute()) {
@@ -824,7 +842,7 @@ async function getSellerSession(connected, forceNew = false) {
   if (!forceNew) {
     let stored = null;
     try {
-      stored = JSON.parse(localStorage.getItem(SELLER_SESSION_KEY) || "null");
+      stored = JSON.parse(sessionStorage.getItem(SELLER_SESSION_KEY) || "null");
     } catch {
       stored = null;
     }
@@ -859,7 +877,7 @@ async function getSellerSession(connected, forceNew = false) {
   }
 
   const session = { wallet: connected, signature, issuedAt };
-  localStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session));
+  sessionStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session));
   return session;
 }
 
@@ -897,7 +915,7 @@ async function saveSettingsFromForm(event) {
     let res = await sendSettings(await getSellerSession(connected));
     if (res.status === 401) {
       // Stored signature is stale or rejected; drop it, re-sign once, and retry.
-      localStorage.removeItem(SELLER_SESSION_KEY);
+      sessionStorage.removeItem(SELLER_SESSION_KEY);
       res = await sendSettings(await getSellerSession(connected, true));
     }
     if (!res.ok) {
@@ -2624,7 +2642,7 @@ function nextInvoiceNumber() {
 
 function loadInvoices() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    const parsed = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "[]");
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -2632,12 +2650,12 @@ function loadInvoices() {
 }
 
 function saveInvoices() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.invoices));
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state.invoices));
 }
 
 function loadSettings() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    const parsed = JSON.parse(sessionStorage.getItem(SETTINGS_KEY) || "{}");
     return {
       merchantName: parsed.merchantName || "",
       merchantWallet: normalizeAddress(parsed.merchantWallet || ""),
@@ -2650,7 +2668,7 @@ function loadSettings() {
 }
 
 function saveSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+  sessionStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
 }
 
 function copyText(value) {
@@ -2891,7 +2909,7 @@ function escapePdfText(value) {
 
 
 async function fetchServerSettings() {
-  const sessionStr = localStorage.getItem("fundline_dashboard_session");
+  const sessionStr = sessionStorage.getItem("fundline_dashboard_session");
   const connected = getConnectedWallet();
   if (!sessionStr || !connected) return;
   const session = JSON.parse(sessionStr);

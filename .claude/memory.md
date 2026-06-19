@@ -177,6 +177,30 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   circle-use-usdc) saved to .claude/skills/ - invokable as /circle-use-arc etc. Note: user-scope
   MCP (claude mcp add --scope user) not possible without the claude CLI in PATH; project-level
   .mcp.json is the fallback.
+- 2026-06-19: Auth/session persistence reworked to a true session model (working tree, NOT yet
+  committed). Per user requirement: stay logged in across reload; log out ONLY on manual logout
+  or when the browser profile closes; no prior-session invoices shown after logout. Root cause:
+  login + cache lived in localStorage, which survives a browser restart (so #2 failed). Fix:
+  moved ALL login/cache state from localStorage to sessionStorage. app.js - WALLET_SESSION_KEY,
+  STORAGE_KEY (invoice cache), SETTINGS_KEY, and the shared SELLER_SESSION_KEY
+  ("fundline_dashboard_session") now use sessionStorage; added purgeLegacyAuthStorage() (runs
+  first in init()) to drop stale localStorage copies once. dashboard.js - the shared
+  fundline_dashboard_session now in sessionStorage (+ one-time legacy localStorage cleanup at
+  init). app.js and dashboard.js MUST stay in sync on that key (both read it). #3 already held:
+  disconnectWallet() zeroes state.invoices and syncInvoicesFromServer() returns [] with no wallet.
+  Trade-offs to remember: sessionStorage is per-tab (no cross-tab shared login); a browser
+  "restore tabs / continue where you left off" setting can revive sessionStorage; existing users
+  are logged out once after this deploys.
+- 2026-06-19: Pre-existing CRITICAL syntax bug fixed in dashboard.js and storefront.js. Template
+  literals had escaped backticks (escaped backtick and escaped dollar-brace instead of the bare
+  forms), so BOTH files threw SyntaxError at load - dashboard.html and the public /s/:slug
+  storefront ran NO JS at all (login, logout, products, webhooks, api-keys, buy-button all dead).
+  Confirmed the committed HEAD was already broken (not introduced by me); likely an old automated
+  edit script. Fixed by unescaping. node --check now passes for app.js, dashboard.js,
+  storefront.js, home.js, server.js. patch_app.js (scratch one-off, NOT deployed) still fails
+  node --check - left as-is. Residual, out of scope, NOT fixed: dashboard.js loadWebhooks() treats
+  fetchApi() as a raw Response (checks .ok / await .json()) but fetchApi already returns parsed
+  JSON, so webhooks/logs likely never render even now.
 
 ## Open threads / TODOs
 

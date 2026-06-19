@@ -13,7 +13,7 @@ els.sellerWallet.textContent = "Seller: " + shortenAddress(sellerId);
 
 async function loadProducts() {
   try {
-    const res = await fetch(\`/api/products?sellerId=\${sellerId}\`);
+    const res = await fetch(`/api/products?sellerId=${sellerId}`);
     const data = await res.json();
     
     if (data.products.length === 0) {
@@ -21,17 +21,17 @@ async function loadProducts() {
       return;
     }
 
-    els.productsList.innerHTML = data.products.map(p => \`
+    els.productsList.innerHTML = data.products.map(p => `
       <div class="invoice-row" style="padding: 24px;">
         <div class="invoice-info">
-          <strong class="invoice-title" style="font-size: 1.25rem; margin-bottom: 8px;">\${p.title}</strong>
-          <span class="invoice-meta" style="font-size: 1rem;">\${p.priceUSDC} USDC &bull; \${p.description || ''}</span>
+          <strong class="invoice-title" style="font-size: 1.25rem; margin-bottom: 8px;">${p.title}</strong>
+          <span class="invoice-meta" style="font-size: 1rem;">${p.priceUSDC} USDC &bull; ${p.description || ''}</span>
         </div>
         <div class="invoice-status">
-          <button class="primary-action" onclick="buyProduct('\${p.id}')">Buy</button>
+          <button class="primary-action" onclick="buyProduct('${p.id}')">Buy</button>
         </div>
       </div>
-    \`).join('');
+    `).join('');
     
     window.products = data.products;
   } catch (err) {
@@ -64,7 +64,7 @@ window.buyProduct = async function(productId) {
     if (!res.ok) throw new Error(data.error || 'Failed to create invoice');
     
     // Redirect to the 5-step smart pay flow
-    window.location.href = \`/pay/\${data.invoice.id}\`;
+    window.location.href = `/pay/${data.invoice.id}`;
   } catch (err) {
     alert(err.message);
   }

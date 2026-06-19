@@ -74,7 +74,7 @@ async function connectAndSign() {
     }
 
     session = { wallet: address, signature, issuedAt };
-    localStorage.setItem("fundline_dashboard_session", JSON.stringify(session));
+    sessionStorage.setItem("fundline_dashboard_session", JSON.stringify(session));
     
     showDashboard();
   } catch (err) {
@@ -84,7 +84,7 @@ async function connectAndSign() {
 
 function logout() {
   session = { wallet: "", signature: "", issuedAt: "" };
-  localStorage.removeItem("fundline_dashboard_session");
+  sessionStorage.removeItem("fundline_dashboard_session");
   els.dashboardSection.hidden = true;
   els.gateSection.hidden = false;
   els.walletButton.textContent = "Connect Wallet";
@@ -132,28 +132,28 @@ async function loadSummary() {
     els.paidCount.textContent = data.counts.paid;
     els.expiredCount.textContent = data.counts.expired;
 
-    els.paymentHistoryList.innerHTML = data.paymentHistory.map(inv => \`
+    els.paymentHistoryList.innerHTML = data.paymentHistory.map(inv => `
       <div class="invoice-row">
         <div class="invoice-info">
-          <strong class="invoice-title">Invoice \${inv.number} \${inv.payerWallet ? 'from ' + shortenAddress(inv.payerWallet) : ''}</strong>
-          <span class="invoice-meta">\${formatUsdc(inv.total)} &bull; \${new Date(inv.createdAt).toLocaleDateString()}</span>
+          <strong class="invoice-title">Invoice ${inv.number} ${inv.payerWallet ? 'from ' + shortenAddress(inv.payerWallet) : ''}</strong>
+          <span class="invoice-meta">${formatUsdc(inv.total)} &bull; ${new Date(inv.createdAt).toLocaleDateString()}</span>
         </div>
-        <div class="invoice-status" data-status="\${inv.status}">
-          \${inv.txHash ? \`<a href="https://testnet.arcscan.app/tx/\${inv.txHash}" target="_blank" style="text-decoration:none; margin-right:8px">View Tx</a>\` : ''}
+        <div class="invoice-status" data-status="${inv.status}">
+          ${inv.txHash ? `<a href="https://testnet.arcscan.app/tx/${inv.txHash}" target="_blank" style="text-decoration:none; margin-right:8px">View Tx</a>` : ''}
           <div class="status-indicator"></div>
-          <span>\${inv.status}</span>
+          <span>${inv.status}</span>
         </div>
       </div>
-    \`).join('') || '<p>No history</p>';
+    `).join('') || '<p>No history</p>';
 
-    els.customersList.innerHTML = data.customers.map(c => \`
+    els.customersList.innerHTML = data.customers.map(c => `
       <div class="invoice-row">
         <div class="invoice-info">
-          <strong class="invoice-title">\${c.wallet}</strong>
-          <span class="invoice-meta">\${c.count} payment(s) &bull; Last seen \${new Date(c.lastSeen).toLocaleDateString()}</span>
+          <strong class="invoice-title">${c.wallet}</strong>
+          <span class="invoice-meta">${c.count} payment(s) &bull; Last seen ${new Date(c.lastSeen).toLocaleDateString()}</span>
         </div>
       </div>
-    \`).join('') || '<p>No customers yet</p>';
+    `).join('') || '<p>No customers yet</p>';
 
   } catch (e) {
     console.error(e);
@@ -205,7 +205,7 @@ els.productForm.addEventListener('submit', async (e) => {
 
   try {
     if (editingProductId) {
-      await fetchApi(\`/api/products/\${editingProductId}\`, {
+      await fetchApi(`/api/products/${editingProductId}`, {
         method: "PATCH",
         body: JSON.stringify(payload)
       });
@@ -239,7 +239,7 @@ function showDashboard() {
   els.dashboardSection.hidden = false;
   els.walletButton.textContent = shortenAddress(session.wallet);
   els.walletMenuAddress.textContent = session.wallet;
-  els.storefrontLink.href = \`/s/\${session.wallet}\`;
+  els.storefrontLink.href = `/s/${session.wallet}`;
   
   loadSummary();
   loadProducts();
@@ -267,7 +267,10 @@ els.navButtons.forEach(btn => {
 });
 
 // Init
-const stored = localStorage.getItem("fundline_dashboard_session");
+// Older builds stored the session in localStorage, which survived a browser restart.
+// The session now lives in sessionStorage; clear any legacy copy once.
+try { localStorage.removeItem("fundline_dashboard_session"); } catch {}
+const stored = sessionStorage.getItem("fundline_dashboard_session");
 if (stored) {
   session = JSON.parse(stored);
   // Check if expired locally
