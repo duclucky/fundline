@@ -183,7 +183,15 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
-- TODO: verify the PaymentRouter source on arcscan (is_verified currently false).
+- RESOLVED 2026-06-19: PaymentRouter source verified on Arcscan (is_fully_verified=true).
+  Address 0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24. Arcscan is Blockscout; verified via
+  POST /api/v2/smart-contracts/{addr}/verification/via/flattened-code with: compiler
+  v0.8.35+commit.47b9dedd (read from the on-chain bytecode CBOR metadata, matched the local
+  solc), optimizer on / runs 200, evm_version "default", single flattened PaymentRouter.sol,
+  autodetect_constructor_args=true (decoded usdc_=0x3600..0000). No API key or captcha needed.
+  Note: Blockscout recorded license_type "none" despite the SPDX MIT header; cosmetic only,
+  source/bytecode match is exact. The /api/v2 endpoints occasionally return an empty body
+  (transient) -- retry on undefined fields.
 - RESOLVED 2026-06-18: USDC 6-vs-18 decimals is NOT a risk (audit_report.md flagged it High).
   Verified against docs.arc.io: native gas-token value uses 18 decimals, ERC-20 interface uses
   6, both handled correctly (ERC-20/router path uses ARC_USDC_DECIMALS=6, native fallback uses
