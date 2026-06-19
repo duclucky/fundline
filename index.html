@@ -138,6 +138,7 @@
            4. LIVE PROOF BLOCK
            ============================================= -->
       <section class="proof-section" id="product" aria-labelledby="proof-title">
+        <div class="proof-section-inner">
         <div class="section-header">
           <p class="eyebrow">Live on testnet</p>
           <h2 id="proof-title">Every payment, confirmed on-chain.</h2>
@@ -175,6 +176,7 @@
             <a class="nav-button secondary" href="https://testnet.arcscan.app/tx/0x6def2db0dae28e9a62ad77b4380bfe464711935c8405996de69831d257630826" target="_blank" rel="noopener">View transaction on Arcscan</a>
             <a class="nav-button secondary" href="https://testnet.arcscan.app/address/0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24" target="_blank" rel="noopener">View contract source</a>
           </div>
+        </div>
         </div>
       </section>
 
@@ -219,7 +221,7 @@
            6. BUILD ON FUNDLINE
            ============================================= -->
       <section class="dev-section" id="developers" aria-labelledby="dev-title">
-        <div class="section-header">
+        <div class="section-header section-header-left">
           <p class="eyebrow">Build on Fundline</p>
           <h2 id="dev-title" class="single-line-title">The API does what the dashboard does.</h2>
           <p class="section-sub">Create invoices, receive a payment event the moment a transaction confirms, and let agents pay per request, all from the REST API.</p>
@@ -248,6 +250,20 @@ Content-Type: application/json
               <a class="nav-button secondary" href="/docs#webhooks" id="dev-cta-webhooks">Webhook reference</a>
             </div>
           </div>
+        </div>
+        <div class="dev-terminal reveal">
+          <p class="code-label">Agent pays automatically — HTTP 402 protocol</p>
+          <pre class="dev-terminal-pre"><code>GET /api/x402/invoices/abc123
+
+  &lt;- 402 Payment Required
+     { "accepts": [{ "scheme": "exact", "network": "arc-testnet",
+                     "token": "USDC", "amount": "0.50" }] }
+
+GET /api/x402/invoices/abc123
+X-PAYMENT: [signed on-chain payment proof]
+
+  &lt;- 200 OK
+     { "id": "abc123", "status": "paid", "verifiedAt": "2026-06-19T..." }</code></pre>
         </div>
       </section>
 
@@ -376,10 +392,10 @@ Content-Type: application/json
 
           <article class="faq-item reveal" role="listitem">
             <button class="faq-question" aria-expanded="false" type="button">
-              What is USDC?
+              What is USDC and why use it for invoices?
             </button>
             <div class="faq-answer" hidden>
-              <p>USDC (USD Coin) is a regulated stablecoin issued by Circle, pegged 1:1 to the US dollar. It is backed by fully reserved assets and is one of the most widely used digital dollars. Fundline uses native USDC on Arc Testnet for all settlements.</p>
+              <p>USDC is a regulated stablecoin issued by Circle, pegged 1:1 to the US dollar and backed by fully reserved assets. Unlike a bank transfer, a USDC payment is settled on a public blockchain — Fundline checks the transaction on Arcscan before marking an invoice paid, so you have verifiable proof it actually happened, not just a number that changed in a ledger.</p>
             </div>
           </article>
 
@@ -388,7 +404,7 @@ Content-Type: application/json
               What wallet do I need?
             </button>
             <div class="faq-answer" hidden>
-              <p>Any EVM-compatible wallet works: MetaMask, Rabby, Coinbase Wallet, or any wallet that supports custom RPC networks. You will need to add the Arc Testnet network and hold some testnet USDC. The documentation has step-by-step wallet setup instructions.</p>
+              <p>Any EVM-compatible wallet with custom RPC support: MetaMask, Rabby, or Coinbase Wallet all work. Add Arc Testnet as a custom network (RPC: rpc.testnet.arc.network, Chain ID: 5042002), get some testnet USDC from the faucet, and you can create and pay invoices immediately. The docs have step-by-step setup instructions.</p>
             </div>
           </article>
 
@@ -397,7 +413,7 @@ Content-Type: application/json
               When is mainnet?
             </button>
             <div class="faq-answer" hidden>
-              <p>Fundline is currently live on Arc Testnet. A mainnet launch date has not been announced. Follow the project on social channels for updates. All testnet features will carry over to mainnet.</p>
+              <p>No date has been set. Fundline is live on Arc Testnet and every feature works today. Mainnet requires a completed security audit of the payment contracts and coordination with the Arc team. We will announce a date when it is confirmed, and all testnet features carry over.</p>
             </div>
           </article>
 
@@ -406,7 +422,7 @@ Content-Type: application/json
               What are the fees?
             </button>
             <div class="faq-answer" hidden>
-              <p>Fundline itself charges no fees on testnet. You only pay the network gas cost for each on-chain transaction, which is minimal on Arc Testnet. Mainnet fees have not been announced and will be disclosed before launch.</p>
+              <p>Zero on testnet. You pay only the on-chain gas fee for each transaction, which is negligible on Arc Testnet. Mainnet fees have not been set and will be disclosed in full before any live USDC settlement goes live.</p>
             </div>
           </article>
 

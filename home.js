@@ -9,6 +9,7 @@ initFaqAccordion();
 initRevealObserver();
 initNavHighlight();
 initCtaAnalytics();
+initScrollDepth();
 
 /* ====================================================
    Existing: redirect /pay/:id to app
@@ -183,16 +184,30 @@ function initNavHighlight() {
 }
 
 /* ====================================================
-   5. CTA click analytics (placeholder)
+   5. CTA click analytics
    ==================================================== */
+
+/*
+ * Hero A/B variants (switch H1 to run a test):
+ *   A (current):  "A transfer is not a confirmation."
+ *   B (outcome):  "Get paid in USDC, with proof it actually arrived."
+ *   C (chain):    "Your client is on another chain. Get paid anyway."
+ * Rollback: git show 7f574cf:index.html restores P0 hero.
+ */
+
+function trackEvent(name, props) {
+  /* Wire to your analytics tool:
+     plausible(name, { props: props });
+     gtag("event", name, props);        */
+  console.log("[Fundline]", name, props || {});
+}
+
 function initCtaAnalytics() {
   var ctaIds = [
     "nav-cta",
     "hero-cta-primary",
     "hero-cta-secondary",
     "mobile-cta",
-    "audience-cta-freelancer",
-    "audience-cta-dev",
     "dev-cta-docs",
     "dev-cta-webhooks",
     "pricing-cta",
@@ -204,10 +219,30 @@ function initCtaAnalytics() {
     var el = document.getElementById(id);
     if (!el) return;
     el.addEventListener("click", function () {
-      /* Replace this placeholder with your analytics call, e.g.:
-         plausible("CTA Click", { props: { id: id } });
-         gtag("event", "cta_click", { cta_id: id });        */
-      console.log("[Fundline] CTA click:", id);
+      trackEvent("cta_click", { id: id });
     });
   });
+}
+
+/* ====================================================
+   6. Scroll depth tracking (25 / 50 / 75 / 100 %)
+   ==================================================== */
+function initScrollDepth() {
+  var milestones = [25, 50, 75, 100];
+  var reached = {};
+
+  function checkDepth() {
+    var scrolled = window.scrollY + window.innerHeight;
+    var total = document.documentElement.scrollHeight;
+    if (!total) return;
+    var pct = Math.round((scrolled / total) * 100);
+    milestones.forEach(function (m) {
+      if (!reached[m] && pct >= m) {
+        reached[m] = true;
+        trackEvent("scroll_depth", { depth: m });
+      }
+    });
+  }
+
+  window.addEventListener("scroll", checkDepth, { passive: true });
 }
