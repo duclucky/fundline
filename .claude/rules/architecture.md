@@ -7,8 +7,11 @@ No framework. The product is plain Node.js plus vanilla browser JS.
 - Backend: a single hand-rolled `http` server in `server.js` (~2900 lines). No Express.
   Routing is a chain of `url.pathname` checks and regex matches near the top of the file.
 - Frontend: static HTML + vanilla JS (`app.js`, `dashboard.js`, `storefront.js`,
-  `home.js`, `docs.js`). No bundler, no build step. Wallet/chain calls use ethers v6
-  in the browser (`BrowserProvider`).
+  `home.js`, `docs.js`). No bundler, no build step. Wallet/chain calls use the raw
+  EIP-1193 provider (`provider.request(...)`) directly, with manual ABI encoding -
+  there is NO ethers in the browser. The provider is chosen via EIP-6963 multi-wallet
+  discovery (a `getProvider()`/`setActiveProvider()` shim in app.js), falling back to
+  the injected `window.ethereum`. (ethers v6 is used only by the Node deploy script.)
 - Smart contracts: Solidity compiled in-process with `solc` (no Hardhat/Foundry).
   Deploy via a plain ethers v6 script.
 - Storage: JSON files under `data/` (gitignored). No database yet. Production path is

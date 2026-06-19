@@ -155,6 +155,9 @@ const els = {
 
 let toastTimer = null;
 let _activeBridgeContext = null; // holds state for retry across both pay paths
+// EIP-6963 wallets announce during init(), which runs below, so this must be
+// initialized before init() to avoid a temporal-dead-zone reference.
+const discoveredWallets = [];
 
 init();
 
@@ -227,6 +230,7 @@ function bindEvents() {
   // Default to the injected wallet so a restored session keeps reacting to
   // account changes; the picker swaps this when the user chooses another wallet.
   if (window.ethereum) setActiveProvider(window.ethereum, "injected");
+  initWalletDiscovery();
 }
 
 function isPayRoute() {
@@ -396,12 +400,47 @@ function setActiveProvider(provider, kind) {
   provider.on?.("accountsChanged", handleAccountsChanged);
 }
 
+// Wallets discovered via EIP-6963 (the multi-injected-provider standard). Each
+// installed wallet announces itself, so the user can pick instead of being
+// locked to whichever extension won the window.ethereum race. The
+// discoveredWallets array is declared near the top (before init()).
+function initWalletDiscovery() {
+  window.addEventListener("eip6963:announceProvider", (event) => {
+    const detail = event.detail;
+    if (!detail || !detail.info || !detail.provider) return;
+    const key = detail.info.rdns || detail.info.uuid || detail.info.name;
+    if (discoveredWallets.some((w) => (w.info.rdns || w.info.uuid || w.info.name) === key)) return;
+    discoveredWallets.push({ info: detail.info, provider: detail.provider });
+  });
+  window.dispatchEvent(new Event("eip6963:requestProvider"));
+}
+
 async function connectWallet() {
-  const provider = getProvider();
-  if (!provider?.request) {
-    showToast("No wallet extension found. Install or open OKX Wallet, MetaMask, or another EVM wallet.");
+  if (state.walletConnecting) return;
+  // Multiple installed wallets: let the user pick (needs the dialog element).
+  if (discoveredWallets.length > 1 && els.dialog && els.dialogBody) {
+    openWalletPicker(discoveredWallets.slice());
     return;
   }
+  // One discovered wallet (or no dialog to show a picker): connect it directly.
+  if (discoveredWallets.length >= 1) {
+    await connectWithProvider(discoveredWallets[0].provider, discoveredWallets[0].info.name);
+    return;
+  }
+  // No EIP-6963 wallet announced: fall back to the legacy injected provider.
+  if (!window.ethereum?.request) {
+    showToast("No wallet found. Install or open OKX Wallet, MetaMask, or another EVM wallet.");
+    return;
+  }
+  await connectWithProvider(window.ethereum, "");
+}
+
+async function connectWithProvider(provider, name) {
+  if (!provider?.request) {
+    showToast("That wallet is unavailable.");
+    return;
+  }
+  setActiveProvider(provider, "injected");
   state.walletConnecting = true;
   renderWalletState();
   try {
@@ -416,13 +455,44 @@ async function connectWallet() {
     await refreshWalletBalance();
     if (!isPayRoute()) await syncInvoicesFromServer();
     refreshCurrentView();
-    showToast("Wallet connected.");
+    showToast(name ? `Connected with ${name}.` : "Wallet connected.");
   } catch (error) {
     showToast(error?.message || "Wallet connection rejected.");
   } finally {
     state.walletConnecting = false;
     renderWalletState();
   }
+}
+
+function openWalletPicker(wallets) {
+  const options = wallets
+    .map((w, index) => {
+      const icon = /^(data:|https:)/.test(w.info.icon || "") ? w.info.icon : "";
+      const iconHtml = icon ? `<img class="wallet-option-icon" src="${escapeHtml(icon)}" alt="" />` : "";
+      return `<button class="wallet-option" type="button" data-wallet-index="${index}">${iconHtml}<span>${escapeHtml(w.info.name || "Wallet")}</span></button>`;
+    })
+    .join("");
+  els.dialogBody.innerHTML = `
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow">Connect</p>
+        <h2>Choose a wallet</h2>
+      </div>
+      <button class="icon-button" data-dialog-close type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+      </button>
+    </div>
+    <div class="wallet-options">${options}</div>
+  `;
+  els.dialogBody.querySelector("[data-dialog-close]")?.addEventListener("click", closeDialog);
+  els.dialogBody.querySelectorAll("[data-wallet-index]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const chosen = wallets[Number(button.dataset.walletIndex)];
+      closeDialog();
+      if (chosen) await connectWithProvider(chosen.provider, chosen.info.name);
+    });
+  });
+  els.dialog.showModal();
 }
 
 async function requireWalletSignature(provider, address) {
