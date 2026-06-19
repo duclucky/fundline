@@ -674,6 +674,7 @@ function getFilteredInvoices() {
     .filter((invoice) => {
       if (state.filter === "paid") return invoice.status === "paid";
       if (state.filter === "open") return getInvoiceStatus(invoice) === "open";
+      if (state.filter === "overdue") return getInvoiceStatus(invoice) === "expired";
       return true;
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
