@@ -328,7 +328,12 @@ function renderWalletState() {
 
   if (els.settingsForm) {
     els.settingsForm.elements.merchantWallet.value = connected ? address : "";
-    if (els.connectWalletSettings) els.connectWalletSettings.textContent = connected ? "Wallet details" : "Connect wallet";
+    if (els.connectWalletSettings) {
+      /* Once connected, the navbar wallet menu owns wallet management.
+         Hide this button so it is not a dead control here. */
+      els.connectWalletSettings.hidden = connected;
+      els.connectWalletSettings.textContent = "Connect wallet";
+    }
   }
 
   if (els.walletSettingsNote) {
