@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fundline - USDC Invoicing and Direct Settlement</title>
+    <title>Fundline - The proof-of-payment layer for USDC invoices</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk. API-first for developers and AI agents." />
+    <meta name="description" content="Send a USDC invoice as one link. Your client pays from Arc, Base, or Ethereum, and Fundline confirms payment on-chain before it shows as paid. Funds go straight to your wallet, never with us." />
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Fundline - USDC Invoicing and Direct Settlement" />
-    <meta property="og:description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk." />
+    <meta property="og:title" content="Fundline - The proof-of-payment layer for USDC invoices" />
+    <meta property="og:description" content="Send a USDC invoice as one link. Fundline confirms payment on-chain before it shows as paid. Funds go straight to your wallet, never with us." />
     <meta property="og:image" content="/og-image.png" />
     <meta property="og:url" content="https://fundline.xyz" />
     <meta property="og:type" content="website" />
@@ -17,8 +17,8 @@
 
     <!-- Twitter / X Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Fundline - USDC Invoicing and Direct Settlement" />
-    <meta name="twitter:description" content="Create professional USDC invoices and receive direct wallet payments in minutes. No escrow, no custody risk." />
+    <meta name="twitter:title" content="Fundline - The proof-of-payment layer for USDC invoices" />
+    <meta name="twitter:description" content="Send a USDC invoice as one link. Fundline confirms payment on-chain before it shows as paid. Funds go straight to your wallet, never with us." />
     <meta name="twitter:image" content="/og-image.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -82,99 +82,29 @@
       <section class="hero-section" aria-labelledby="hero-title">
         <div class="live-pill" id="live-pill">
           <span class="live-dot" aria-hidden="true" style="background: var(--gold)"></span>
-          USDC invoicing on Arc
+          USDC invoicing on Arc, Testnet
         </div>
 
         <h1 id="hero-title" class="reveal">
-          <span class="hero-line">Get paid in USDC,</span>
-          <span class="hero-line hero-gradient">settled in seconds.</span>
+          A transfer is <span class="hero-gradient">not a confirmation.</span>
         </h1>
 
         <p class="hero-copy reveal">
-          Send professional invoices and accept stablecoin payments from any chain. Funds move wallet to wallet on Arc, with no custody and no middlemen.
+          Send a USDC invoice as one link. Your client pays from Arc, Base, or Ethereum, and Fundline confirms the exact payment on-chain before it shows as paid. The money lands straight in your wallet, never with us.
         </p>
 
         <div class="hero-actions reveal">
-          <a class="launch-cta" href="/app" id="hero-cta-primary">Create an invoice</a>
-          <a class="docs-cta" href="/docs" id="hero-cta-secondary">Read the docs</a>
+          <a class="launch-cta" href="/app" id="hero-cta-primary">Send your first invoice</a>
+          <a class="docs-cta" href="/pay/b07ca63e265599be1e03" id="hero-cta-secondary">See a real paid invoice</a>
         </div>
 
         <p class="hero-micro">
           No signup needed &nbsp;&middot;&nbsp; No credit card &nbsp;&middot;&nbsp; Free on testnet
         </p>
-
-        <div class="trust-strip" aria-label="Trust signals">
-          <span>Built on Circle USDC</span>
-          <span>Native CCTP bridge</span>
-          <span>0% custody risk</span>
-          <span>API-ready</span>
-        </div>
-      </section>
-
-      <!-- Marquee band -->
-      <section class="marquee-band" aria-hidden="true">
-        <div class="marquee-track">
-          <span>Arc Testnet</span>
-          <span>Circle USDC</span>
-          <span>CCTP Pilot</span>
-          <span>Base Sepolia</span>
-          <span>PaymentRouter</span>
-          <span>PDF Receipts</span>
-          <span>Telegram Alerts</span>
-          <span>Agent API</span>
-          <span>invoice.paid Webhooks</span>
-          <span>Arc Testnet</span>
-          <span>Circle USDC</span>
-          <span>CCTP Pilot</span>
-          <span>Ethereum Sepolia</span>
-          <span>PaymentRouter</span>
-          <span>PDF Receipts</span>
-          <span>Telegram Alerts</span>
-          <span>Agent API</span>
-          <span>invoice.paid Webhooks</span>
-        </div>
       </section>
 
       <!-- =============================================
-           3. AUDIENCE SPLIT
-           ============================================= -->
-      <section class="audience-section" id="product" aria-labelledby="audience-title">
-        <div class="section-header">
-          <p class="eyebrow">Who is Fundline for</p>
-          <h2 id="audience-title">Choose your workflow</h2>
-          <p class="section-sub">Fundline serves two distinct groups with dedicated features and documentation.</p>
-        </div>
-        <div class="audience-grid">
-
-          <article class="audience-card reveal">
-            <p class="card-eyebrow">For freelancers and agencies</p>
-            <h3>Professional invoices, paid in USDC, straight to your wallet.</h3>
-            <ul class="card-list">
-              <li>Create and share invoice links in seconds</li>
-              <li>Clients pay USDC directly from their wallet</li>
-              <li>PDF receipts and CSV export included</li>
-              <li>Telegram alerts when payment arrives</li>
-            </ul>
-            <a class="audience-cta audience-cta-primary" href="/app" id="audience-cta-freelancer">Create invoice</a>
-          </article>
-
-          <article class="audience-card reveal">
-            <p class="card-eyebrow">For developers and AI agents</p>
-            <h3>Create invoices via a secure API and receive invoice.paid webhooks.</h3>
-            <ul class="card-list">
-              <li>REST API with Bearer token authentication</li>
-              <li>Receive real-time webhook events on payment</li>
-              <li>Automate billing inside any backend or agent</li>
-              <li>On-chain payment verification built in</li>
-            </ul>
-            <a class="audience-cta audience-cta-secondary" href="/docs" id="audience-cta-dev">Read docs</a>
-          </article>
-
-        </div>
-      </section>
-
-      <!-- =============================================
-           4. HOW IT WORKS
+           3. HOW IT WORKS
            ============================================= -->
       <section class="how-section" aria-labelledby="how-title">
         <div class="section-header">
@@ -211,146 +141,46 @@
       </section>
 
       <!-- =============================================
-           5. PRODUCT SHOWCASE
+           4. LIVE PROOF BLOCK
            ============================================= -->
-      <section class="showcase-section" aria-labelledby="showcase-title">
+      <section class="proof-section" id="product" aria-labelledby="proof-title">
         <div class="section-header">
-          <p class="eyebrow">Product</p>
-          <h2 id="showcase-title">See Fundline in action</h2>
-          <p class="section-sub">From invoice creation to on-chain receipt in one clean workflow.</p>
+          <p class="eyebrow">Live on testnet</p>
+          <h2 id="proof-title">Every payment, confirmed on-chain.</h2>
+          <p class="section-sub">This is a real USDC payment that went through Fundline. The transaction is on Arc Testnet and anyone can verify it.</p>
         </div>
-        <div class="showcase-grid">
-
-          <!-- Invoice editor mockup -->
-          <figure class="mockup-frame reveal" aria-label="Invoice editor interface">
-            <figcaption class="mockup-caption">Invoice editor</figcaption>
-            <div class="mockup-window">
-              <div class="mockup-titlebar" aria-hidden="true">
-                <span class="mock-dot mock-dot-red"></span>
-                <span class="mock-dot mock-dot-amber"></span>
-                <span class="mock-dot mock-dot-green"></span>
-                <span class="mock-win-title">New invoice</span>
-              </div>
-              <div class="mockup-body">
-                <div class="mock-field">
-                  <span class="mock-label">Client name</span>
-                  <div class="mock-input"></div>
-                </div>
-                <div class="mock-field-row">
-                  <div class="mock-field">
-                    <span class="mock-label">Amount (USDC)</span>
-                    <div class="mock-input mock-input-accent">500</div>
-                  </div>
-                  <div class="mock-field">
-                    <span class="mock-label">Due date</span>
-                    <div class="mock-input"></div>
-                  </div>
-                </div>
-                <div class="mock-field">
-                  <span class="mock-label">Description</span>
-                  <div class="mock-textarea"></div>
-                </div>
-                <div class="mock-actions">
-                  <div class="mock-btn-primary">Create invoice</div>
-                </div>
-              </div>
+        <div class="proof-panel reveal">
+          <div class="proof-header">
+            <span class="proof-badge">Payment verified</span>
+            <span class="proof-chain">Arc Testnet</span>
+          </div>
+          <div class="proof-rows">
+            <div class="proof-row">
+              <span class="proof-label">Amount</span>
+              <span class="proof-value proof-amount">10 USDC</span>
             </div>
-          </figure>
-
-          <!-- Pay page mockup -->
-          <figure class="mockup-frame reveal" aria-label="Payment page interface">
-            <figcaption class="mockup-caption">Payment page - /pay/:id</figcaption>
-            <div class="mockup-window">
-              <div class="mockup-titlebar" aria-hidden="true">
-                <span class="mock-dot mock-dot-red"></span>
-                <span class="mock-dot mock-dot-amber"></span>
-                <span class="mock-dot mock-dot-green"></span>
-                <span class="mock-win-title">Pay Invoice #INV-001</span>
-              </div>
-              <div class="mockup-body mockup-pay-body">
-                <div class="mock-amount-display">
-                  <span class="mock-amt-label">Amount due</span>
-                  <strong class="mock-amt-value">500 USDC</strong>
-                </div>
-                <div class="mock-qr-zone" aria-label="QR code placeholder">
-                  <div class="mock-qr-frame">
-                    <span class="mock-qr-label">QR code</span>
-                  </div>
-                </div>
-                <div class="mock-detail-row">
-                  <span>Merchant</span>
-                  <code>0x1a2b...cd3e</code>
-                </div>
-                <div class="mock-actions">
-                  <div class="mock-btn-primary">Pay with wallet</div>
-                </div>
-              </div>
+            <div class="proof-row">
+              <span class="proof-label">Invoice</span>
+              <a class="proof-value proof-link" href="/pay/b07ca63e265599be1e03">b07ca63e265599be1e03</a>
             </div>
-          </figure>
-
-          <!-- Receipt mockup -->
-          <figure class="mockup-frame reveal" aria-label="Payment receipt interface">
-            <figcaption class="mockup-caption">Receipt &mdash; payment confirmed</figcaption>
-            <div class="mockup-window">
-              <div class="mockup-titlebar" aria-hidden="true">
-                <span class="mock-dot mock-dot-red"></span>
-                <span class="mock-dot mock-dot-amber"></span>
-                <span class="mock-dot mock-dot-green"></span>
-                <span class="mock-win-title">Receipt</span>
-              </div>
-              <div class="mockup-body">
-                <div class="mock-paid-badge">Payment verified on-chain</div>
-                <div class="mock-detail-row">
-                  <span>Amount</span>
-                  <strong>500 USDC</strong>
-                </div>
-                <div class="mock-detail-row">
-                  <span>Tx hash</span>
-                  <code>0xab12...ef34</code>
-                </div>
-                <div class="mock-detail-row">
-                  <span>Date</span>
-                  <span>Jun 14, 2026</span>
-                </div>
-                <div class="mock-detail-row">
-                  <span>Status</span>
-                  <span class="mock-status-paid">Paid</span>
-                </div>
-                <div class="mock-actions">
-                  <div class="mock-btn-secondary">Download PDF</div>
-                  <div class="mock-btn-secondary">Export CSV</div>
-                </div>
-              </div>
+            <div class="proof-row">
+              <span class="proof-label">Transaction</span>
+              <a class="proof-value proof-link proof-hash" href="https://testnet.arcscan.app/tx/0x6def2db0dae28e9a62ad77b4380bfe464711935c8405996de69831d257630826" target="_blank" rel="noopener">0x6def2db0dae28e9a62ad77b4380bfe464711935c8...30826</a>
             </div>
-          </figure>
-
-          <!-- Telegram Bot mockup -->
-          <figure class="mockup-frame reveal" aria-label="Telegram notification interface">
-            <figcaption class="mockup-caption">Telegram Alert</figcaption>
-            <div class="mockup-window">
-              <div class="mockup-titlebar" aria-hidden="true">
-                <span class="mock-dot mock-dot-red"></span>
-                <span class="mock-dot mock-dot-amber"></span>
-                <span class="mock-dot mock-dot-green"></span>
-                <span class="mock-win-title">Fundline Bot</span>
-              </div>
-              <div class="mockup-body mock-tg-body">
-                <div class="mock-tg-bubble">
-                  <strong class="mock-tg-sender">Fundline Notifier</strong>
-                  <div class="mock-tg-message">
-                    <span class="mock-tg-highlight">Payment Received!</span><br><br>
-                    <strong>Invoice:</strong> #INV-001<br>
-                    <strong>Amount:</strong> 500 USDC<br>
-                    <strong>Status:</strong> Confirmed on-chain
-                  </div>
-                </div>
-                <div class="mock-actions">
-                  <div class="mock-btn-secondary">View Transaction</div>
-                </div>
-              </div>
+            <div class="proof-row">
+              <span class="proof-label">PaymentRouter</span>
+              <a class="proof-value proof-link proof-hash" href="https://testnet.arcscan.app/address/0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24" target="_blank" rel="noopener">0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</a>
             </div>
-          </figure>
-
+            <div class="proof-row">
+              <span class="proof-label">Status</span>
+              <span class="proof-value proof-status-paid">Paid, verified once</span>
+            </div>
+          </div>
+          <div class="proof-actions">
+            <a class="nav-button secondary" href="/pay/b07ca63e265599be1e03">See the payment page</a>
+            <a class="nav-button secondary" href="https://testnet.arcscan.app/tx/0x6def2db0dae28e9a62ad77b4380bfe464711935c8405996de69831d257630826" target="_blank" rel="noopener">View transaction on Arcscan</a>
+            <a class="nav-button secondary" href="https://testnet.arcscan.app/address/0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24" target="_blank" rel="noopener">View contract source</a>
+          </div>
         </div>
       </section>
 
@@ -451,8 +281,8 @@ Content-Type: application/json
         <div class="trust-grid">
 
           <article class="trust-card reveal">
-            <strong class="trust-title">No custody risk</strong>
-            <p>The PaymentRouter contract transfers USDC directly from payer to merchant. No intermediate holding address exists.</p>
+            <strong class="trust-title">Funds never touch Fundline</strong>
+            <p>The payment goes wallet to wallet. Fundline routes USDC from payer to merchant; nothing passes through an address we control.</p>
           </article>
 
           <article class="trust-card reveal">
@@ -467,7 +297,7 @@ Content-Type: application/json
 
           <article class="trust-card reveal">
             <strong class="trust-title">Open and auditable</strong>
-            <p>Contract source is available on Arcscan. Settlement happens on a public testnet ledger that anyone can inspect.</p>
+            <p>PaymentRouter is deployed at <a href="https://testnet.arcscan.app/address/0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:underline;text-underline-offset:3px">0x7f3b...24</a>. Settlement happens on a public testnet ledger anyone can inspect.</p>
           </article>
 
         </div>
@@ -577,11 +407,11 @@ Content-Type: application/json
            11. FINAL CTA
            ============================================= -->
       <section class="final-cta-section" aria-labelledby="final-cta-title">
-        <h2 id="final-cta-title">Ready to get paid in USDC?</h2>
-        <p class="final-cta-sub">Start creating invoices on Arc Testnet today. No signup needed.</p>
+        <h2 id="final-cta-title">Your clients can pay from any chain.</h2>
+        <p class="final-cta-sub">Send a USDC invoice as one link. They pay from Arc, Base, or Ethereum. You get proof it arrived, straight in your wallet.</p>
         <div class="hero-actions">
-          <a class="launch-cta" href="/app" id="final-cta-primary">Create invoice</a>
-          <a class="docs-cta" href="/docs" id="final-cta-secondary">Read docs</a>
+          <a class="launch-cta" href="/app" id="final-cta-primary">Send your first invoice</a>
+          <a class="docs-cta" href="/pay/b07ca63e265599be1e03" id="final-cta-secondary">See a real paid invoice</a>
         </div>
       </section>
 
@@ -598,7 +428,7 @@ Content-Type: application/json
             <span class="brand-symbol" aria-hidden="true"></span>
             <span class="brand-word">Fundline</span>
           </a>
-          <p class="footer-tagline">Non-custodial USDC invoicing on Arc Testnet.</p>
+          <p class="footer-tagline">The proof-of-payment layer for USDC invoices.</p>
         </div>
 
         <nav class="footer-nav" aria-label="Footer navigation">
@@ -617,8 +447,8 @@ Content-Type: application/json
           <div class="footer-col">
             <p class="footer-col-title">Network</p>
             <a href="https://testnet.arcscan.app" target="_blank" rel="noopener">Arcscan Explorer</a>
-            <a href="https://developers.circle.com/stablecoins/cctp-getting-started" target="_blank" rel="noopener">Circle CCTP</a>
-            <a href="https://docs.arc.network" target="_blank" rel="noopener">Arc Testnet Docs</a>
+            <a href="https://testnet.arcscan.app/address/0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24" target="_blank" rel="noopener">PaymentRouter contract</a>
+            <a href="https://github.com/duclucky/fundline" target="_blank" rel="noopener">GitHub (open source)</a>
           </div>
 
         </nav>
@@ -626,7 +456,7 @@ Content-Type: application/json
       </div>
       <div class="footer-bottom">
         <p>Fundline is a testnet project. Not financial advice.</p>
-        <p>Built on Arc Testnet with Circle USDC.</p>
+        <p>Built on Circle USDC. Settled on Arc. Every payment verifiable on Arcscan.</p>
       </div>
     </footer>
 
