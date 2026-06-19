@@ -88,6 +88,10 @@ function run() {
   link = server.loadTelegramLinkDb().links[CHAT_X];
   assert(link && server.normalizeAddress(link.wallet) === WALLET_A && link.status === "pending", "A steals CHAT_X, now pending under A");
   assert(sdb2.sellers[WALLET_B].telegramChatId === "", "stealing blanks the previous wallet's stored chatId");
+  // The settings PUT loads the whole seller db, lets claim mutate it, then saves the
+  // whole map - so the blanked prior wallet must persist (regression lock for the 1:1 invariant).
+  server.saveSellerDb(sdb2);
+  assert(server.loadSellerDb().sellers[WALLET_B].telegramChatId === "", "steal-blank persists across saveSellerDb");
   assert(server.resolveWalletByChatId(CHAT_X) === "", "stolen link stays pending until A confirms");
 
   // Case 4: unknown chat.

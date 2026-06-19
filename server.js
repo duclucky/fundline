@@ -63,7 +63,6 @@ const ARC_CHAIN_ID = Number(process.env.ARC_CHAIN_ID || 5042002);
 const ARC_RPC_URL = process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network";
 const ARC_NETWORK_NAME = process.env.ARC_NETWORK_NAME || "Arc Testnet";
 const ARC_PAYMENT_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_PAYMENT_ROUTER_ADDRESS || "");
-const TELEGRAM_UPDATE_INTERVAL_MS = getTelegramUpdateIntervalMs();
 const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
@@ -2679,7 +2678,7 @@ async function handleTelegramText(chatId, rawText) {
 
 // Inline-button taps.
 async function handleTelegramCallback(cq) {
-  const chatId = cq && cq.message && cq.message.chat ? cq.message.chat.id : null;
+  const chatId = cq && cq.message && cq.message.chat ? String(cq.message.chat.id) : null;
   if (!chatId) {
     await answerCallbackQuery(cq && cq.id);
     return;
@@ -2878,11 +2877,6 @@ function requestTelegramWithToken(token, method, payload) {
 
 function getTelegramToken() {
   return String(process.env.TELEGRAM_BOT_TOKEN || process.env.FUNDLINE_TELEGRAM_BOT_TOKEN || process.env.ARC_INVOICE_TELEGRAM_BOT_TOKEN || "").trim();
-}
-
-function getTelegramUpdateIntervalMs() {
-  const configured = Number(process.env.TELEGRAM_UPDATE_INTERVAL_MS || 0);
-  return Number.isFinite(configured) && configured >= 3000 ? configured : 8000;
 }
 
 // Seconds the Telegram getUpdates long-poll holds the connection. Telegram caps
