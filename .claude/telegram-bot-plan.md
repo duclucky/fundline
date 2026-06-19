@@ -23,7 +23,9 @@ link. Future external sales bots integrate via the existing API-key
   DECIDED: no "No due date" option; every bot invoice has a due date (default
   path is the 3/7/14/30-day buttons), so normalizeInvoice is untouched.
 - `[My invoices]`: 5 most recent for that merchant.
-- `/id` or `/chatid`: re-show the chat ID (device changes).
+- Re-show the chat ID (device changes) via a "Show chat ID" button in the main
+  menu. DECIDED: `/start` is the ONLY registered slash command; `/id` and
+  `/chatid` are removed.
 
 ## Key architecture decisions
 
@@ -113,6 +115,8 @@ link. Future external sales bots integrate via the existing API-key
 - claimTelegramChatId(wallet, chatId) atomic 1:1; call it from the settings PUT
   (server.js:2865-2885) instead of the raw telegramChatId write.
 - /start: pending->active confirm; linked -> S1; unlinked -> S0 setup screen.
+- setMyCommands registers ONLY /start (drop /id, /chatid). Update the handler so
+  /id and /chatid are no longer special-cased.
 - One-time reconciliation seeding from sellers.json duplicates.
 - Acceptance: pasted-but-unconfirmed chatId is inert; one wallet per chatId;
   GET /api/sellers/:wallet still exposes only displayName (no chatId leak).
@@ -131,9 +135,11 @@ link. Future external sales bots integrate via the existing API-key
 - Files: server.js
 - [My invoices]: db.invoices.filter(sameAddress merchantWallet) sorted desc,
   slice(0,5), rendered as text + pay links.
-- /cancel; setMyCommands adds start/cancel, keeps id/chatid.
+- [Show chat ID] main-menu button (replaces the dropped /id, /chatid commands).
+- [Cancel] button cancels the flow back to the menu (no /cancel command).
 - [New invoice] loop back to S2.
-- Acceptance: menu navigation complete; My invoices shows only the caller's.
+- Acceptance: menu navigation complete; My invoices shows only the caller's;
+  Show chat ID returns the same chat ID block as the setup screen.
 
 ## Security invariants (must hold)
 - Bot creates invoices ONLY for resolveWalletByChatId(chatId); never a
@@ -169,6 +175,9 @@ link. Future external sales bots integrate via the existing API-key
    [3][7][14][30 days] buttons, so normalizeInvoice is untouched.
 3. Confirmation step (pending->active on /start): KEEP. Closes the
    paste-someone-elses-chatId spoof at the cost of one extra /start.
+4. Commands: `/start` is the ONLY registered command. Drop `/id` and `/chatid`.
+   "Show chat ID" becomes a main-menu button (Phase 3). `/cancel` is not a
+   registered command; the flow uses a [Cancel] button instead.
 
 ## Build process
 - Phase by phase: implement one phase, node --check + a test_*.js, commit, then

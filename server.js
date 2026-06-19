@@ -19,6 +19,7 @@ const SELLER_DB_PATH = path.join(DATA_DIR, "sellers.json");
 const DISPATCHED_WEBHOOKS_PATH = path.join(DATA_DIR, "dispatched_webhooks.json");
 const API_KEY_DB_PATH = path.join(DATA_DIR, "api-keys.json");
 const EVENT_DB_PATH = path.join(DATA_DIR, "events.json");
+const TELEGRAM_LINK_DB_PATH = path.join(DATA_DIR, "telegram-links.json");
 
 const AGENT_RATE_LIMIT_PER_MIN = Number(process.env.AGENT_RATE_LIMIT_PER_MIN || 60);
 const rateLimits = new Map();
@@ -288,11 +289,30 @@ function resolveRequestPath(pathname) {
 }
 
 const HOST = process.env.HOST || "0.0.0.0";
-server.listen(PORT, HOST, () => {
-  console.log(`Fundline running at http://${HOST}:${PORT}`);
-  startTelegramPolling();
-  startOverdueJob();
-});
+
+// Only listen when run directly (node server.js). When required by a test, the
+// functions below are exported without starting the server or the bot.
+if (require.main === module) {
+  server.listen(PORT, HOST, () => {
+    console.log(`Fundline running at http://${HOST}:${PORT}`);
+    startTelegramPolling();
+    startOverdueJob();
+  });
+}
+
+module.exports = {
+  normalizeAddress,
+  loadSellerDb,
+  saveSellerDb,
+  loadTelegramLinkDb,
+  saveTelegramLinkDb,
+  resolveWalletByChatId,
+  claimTelegramChatId,
+  activateTelegramLink,
+  seedTelegramLinksFromSellers,
+  TELEGRAM_LINK_DB_PATH,
+  SELLER_DB_PATH,
+};
 
 function loadEnvFiles() {
   [
@@ -727,6 +747,95 @@ function loadSellerDb() {
 function saveSellerDb(db) {
   ensureDataDir();
   fs.writeFileSync(SELLER_DB_PATH, `${JSON.stringify({ sellers: db.sellers || {} }, null, 2)}\n`);
+}
+
+// Reverse index from a Telegram chatId to a merchant wallet. A link is created
+// "pending" by the authenticated settings write and only becomes "active" when
+// that chat sends /start, so a chatId pasted into settings cannot resolve to a
+// wallet until the real chat owner confirms it.
+function loadTelegramLinkDb() {
+  ensureDataDir();
+  if (!fs.existsSync(TELEGRAM_LINK_DB_PATH)) return { links: {} };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(TELEGRAM_LINK_DB_PATH, "utf8"));
+    return { links: typeof parsed.links === "object" && parsed.links !== null ? parsed.links : {} };
+  } catch {
+    return { links: {} };
+  }
+}
+
+function saveTelegramLinkDb(db) {
+  ensureDataDir();
+  fs.writeFileSync(TELEGRAM_LINK_DB_PATH, `${JSON.stringify({ links: db.links || {} }, null, 2)}\n`);
+}
+
+// Resolve a chatId to its merchant wallet, ONLY when the link is active. Returns
+// "" when the chat is unlinked or still pending confirmation.
+function resolveWalletByChatId(chatId) {
+  const key = String(chatId || "").trim();
+  if (!key) return "";
+  const link = loadTelegramLinkDb().links[key];
+  if (!link || link.status !== "active") return "";
+  return normalizeAddress(link.wallet) || "";
+}
+
+// Claim a 1:1 chatId<->wallet link from inside the signature-verified settings
+// write. Enforces one chatId per wallet (drops any chatId this wallet held) and
+// one wallet per chatId (steals the chatId from any other wallet and blanks that
+// wallet's stored telegramChatId). The link starts "pending"; /start activates
+// it. Mutates sellerDb.sellers (caller saves it) and persists the link store.
+function claimTelegramChatId(sellerDb, wallet, rawChatId) {
+  const walletKey = normalizeAddress(wallet);
+  const chatId = String(rawChatId || "").trim().slice(0, 64);
+  const linkDb = loadTelegramLinkDb();
+
+  for (const key of Object.keys(linkDb.links)) {
+    if (normalizeAddress(linkDb.links[key].wallet) === walletKey) delete linkDb.links[key];
+  }
+
+  if (!chatId) {
+    saveTelegramLinkDb(linkDb);
+    return "";
+  }
+
+  const prior = linkDb.links[chatId];
+  if (prior && normalizeAddress(prior.wallet) !== walletKey) {
+    const priorWallet = normalizeAddress(prior.wallet);
+    if (priorWallet && sellerDb.sellers[priorWallet]) sellerDb.sellers[priorWallet].telegramChatId = "";
+  }
+
+  const now = new Date().toISOString();
+  linkDb.links[chatId] = { wallet: walletKey, status: "pending", linkedAt: now, confirmedAt: "", lastSeenAt: "" };
+  saveTelegramLinkDb(linkDb);
+  return chatId;
+}
+
+// One-time, idempotent migration. Merchants who set telegramChatId before the
+// link store existed have no link entry, so /start would bounce them to setup.
+// Seed those chatIds as "pending" so a single /start activates them (no need to
+// re-paste). Skips chatIds already in the store and resolves duplicate chatIds
+// across wallets by first-seen-wins (the loser keeps its stored chatId for
+// alerts but gets no bot link).
+function seedTelegramLinksFromSellers() {
+  const sellerDb = loadSellerDb();
+  const linkDb = loadTelegramLinkDb();
+  let added = 0;
+  let dropped = 0;
+  for (const [wallet, seller] of Object.entries(sellerDb.sellers)) {
+    const chatId = String((seller && seller.telegramChatId) || "").trim().slice(0, 64);
+    if (!chatId) continue;
+    if (linkDb.links[chatId]) {
+      if (normalizeAddress(linkDb.links[chatId].wallet) !== normalizeAddress(wallet)) dropped += 1;
+      continue;
+    }
+    linkDb.links[chatId] = { wallet: normalizeAddress(wallet), status: "pending", linkedAt: new Date().toISOString(), confirmedAt: "", lastSeenAt: "" };
+    added += 1;
+  }
+  if (added || dropped) {
+    saveTelegramLinkDb(linkDb);
+    console.log(`Telegram links: seeded ${added} pending from sellers, ${dropped} duplicate chatId(s) skipped`);
+  }
+  return { added, dropped };
 }
 
 function loadWebhookDb() {
@@ -2021,6 +2130,11 @@ function startTelegramPolling() {
   console.log("Telegram bot: starting polling...");
   validateTelegramToken().catch((error) => console.log(`Telegram token check failed: ${error.message || "Unknown error"}`));
   setTelegramCommands().catch((error) => console.log(`Telegram command setup failed: ${error.message || "Unknown error"}`));
+  try {
+    seedTelegramLinksFromSellers();
+  } catch (error) {
+    console.log(`Telegram link seeding failed: ${error.message || "Unknown error"}`);
+  }
   scheduleTelegramPoll();
 }
 
@@ -2135,8 +2249,8 @@ async function handleTelegramUpdate(update) {
   if (!chat?.id) return false;
 
   const text = String(message.text || "").trim().toLowerCase();
-  if (text === "/start" || text.startsWith("/start ") || text === "/id" || text === "/chatid") {
-    await sendTelegramChatId(chat.id);
+  if (text === "/start" || text.startsWith("/start ")) {
+    await handleTelegramStart(chat.id);
     return true;
   }
   return false;
@@ -2197,33 +2311,73 @@ async function answerCallbackQuery(callbackQueryId, text) {
   }
 }
 
-async function sendTelegramChatId(chatId) {
+// Activate a chat's link (idempotent). Returns "activated" on a pending->active
+// transition, "active" if it was already active, or "none" if the chat has no
+// link. Pure state transition (no network) so it is unit-testable.
+function activateTelegramLink(chatId) {
+  const key = String(chatId).trim();
+  const linkDb = loadTelegramLinkDb();
+  const link = linkDb.links[key];
+  if (!link) return "none";
+  const now = new Date().toISOString();
+  if (link.status === "pending") {
+    link.status = "active";
+    link.confirmedAt = now;
+    link.lastSeenAt = now;
+    saveTelegramLinkDb(linkDb);
+    return "activated";
+  }
+  link.lastSeenAt = now;
+  saveTelegramLinkDb(linkDb);
+  return "active";
+}
+
+// Smart /start entry point. Confirms a pending link, greets an already-linked
+// chat, or shows the one-time setup screen when unlinked.
+async function handleTelegramStart(chatId) {
+  const key = String(chatId).trim();
+  const status = activateTelegramLink(key);
+  if (status === "none") {
+    await sendTelegramSetup(key);
+    return;
+  }
+  await sendTelegramLinkedConfirmation(key, status === "activated");
+}
+
+// One-time setup screen for a chat not yet linked to a merchant.
+async function sendTelegramSetup(chatId) {
   const chatIdText = String(chatId);
   await sendTelegramMessage(
     getTelegramToken(),
     chatIdText,
     [
-      "Fundline bot is ready.",
+      "Welcome to Fundline.",
       "",
       "Your Telegram chat ID:",
       `<code>${escapeHtml(chatIdText)}</code>`,
       "",
-      "Copy this ID into Fundline Settings to receive paid invoice alerts.",
+      "Paste this ID into Fundline Settings (Telegram chat ID), then come back and send /start. After that you can receive paid invoice alerts and create invoices here.",
     ].join("\n"),
     {
       parse_mode: "HTML",
       reply_markup: {
         inline_keyboard: [
-          [
-            {
-              text: "Copy chat ID",
-              copy_text: { text: chatIdText },
-            },
-          ],
+          [{ text: "Open Fundline Settings", url: `${getPublicBaseUrl()}/app` }],
+          [{ text: "Copy chat ID", copy_text: { text: chatIdText } }],
         ],
       },
     },
   );
+}
+
+// Confirmation once a chat is linked to a merchant wallet. The action menu is
+// added in a later phase; this only acknowledges the connection.
+async function sendTelegramLinkedConfirmation(chatId, justActivated) {
+  const wallet = resolveWalletByChatId(chatId);
+  const lines = [justActivated ? "Linked to your Fundline account." : "Your Fundline account is connected."];
+  if (wallet) lines.push("", `Wallet: <code>${escapeHtml(`${wallet.slice(0, 6)}...${wallet.slice(-4)}`)}</code>`);
+  lines.push("", "You will receive paid invoice alerts here.");
+  await sendTelegramMessage(getTelegramToken(), String(chatId), lines.join("\n"), { parse_mode: "HTML" });
 }
 
 async function setTelegramCommands() {
@@ -2231,9 +2385,7 @@ async function setTelegramCommands() {
   if (!token || telegramCommandsReady) return;
   await requestTelegram("setMyCommands", {
     commands: [
-      { command: "start", description: "Get your Fundline chat ID" },
-      { command: "id", description: "Show chat ID again" },
-      { command: "chatid", description: "Show chat ID again" },
+      { command: "start", description: "Open Fundline" },
     ],
   });
   telegramCommandsReady = true;
@@ -2971,12 +3123,19 @@ async function handleDashboardSettings(req, res) {
         if (typeof patch.alerts.overdue === "boolean") alerts.overdue = patch.alerts.overdue;
       }
 
+      const nextChatId = patch.telegramChatId !== undefined ? String(patch.telegramChatId).trim() : existing.telegramChatId;
       db.sellers[sellerId] = {
         wallet: sellerId,
         displayName: patch.displayName !== undefined ? String(patch.displayName).trim().slice(0, 120) : (existing.displayName || ""),
-        telegramChatId: patch.telegramChatId !== undefined ? String(patch.telegramChatId).trim() : existing.telegramChatId,
+        telegramChatId: nextChatId,
         alerts
       };
+      // Maintain the confirmed 1:1 chatId<->wallet link store, but only when the
+      // chatId actually changed so a confirmed link is not reset to pending on an
+      // unrelated settings save (e.g. just toggling an alert).
+      if (patch.telegramChatId !== undefined && String(nextChatId).trim() !== String(existing.telegramChatId || "").trim()) {
+        claimTelegramChatId(db, sellerId, nextChatId);
+      }
       saveSellerDb(db);
       sendJson(res, 200, { settings: db.sellers[sellerId] });
     } catch (err) {
