@@ -195,4 +195,10 @@ link. Future external sales bots integrate via the existing API-key
   offline tests). /start now opens the main menu when linked. The single
   sequential poll loop makes a per-chat lock unnecessary (documented). Tests:
   test_telegram_session.js 35/35; no regression in link/seller/longpoll tests.
-- Phase 3 NEXT: My invoices list, Show chat ID menu button, menu polish.
+- Phase 3 DONE: menu polish. Main menu now has [Create invoice] [My invoices]
+  [Show chat ID] via a reusable mainMenuKeyboard. [My invoices] lists the 5 most
+  recent invoices for the merchant (newest first, plain text + pay links, status
+  via botInvoiceStatus). [Show chat ID] re-shows the chat ID in a <code> block.
+  Both re-arm the menu (bump step). test_telegram_invoices.js 12/12.
+  ALL PHASES COMPLETE. Full suite: longpoll 3, link 22, session 35, invoices 12,
+  seller-name 15 = all green. Ready to push + restart cPanel to test on the live bot.

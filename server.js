@@ -320,6 +320,8 @@ module.exports = {
   clearTelegramSession,
   parseTelegramAmount,
   createInvoiceRecord,
+  buildMyInvoicesText,
+  botInvoiceStatus,
   handleTelegramText,
   handleTelegramCallback,
   TELEGRAM_LINK_DB_PATH,
@@ -2497,15 +2499,66 @@ function parseTelegramAmount(text) {
   return n;
 }
 
-async function showMainMenu(session, greeting) {
+function mainMenuKeyboard(step) {
+  return {
+    inline_keyboard: [
+      [{ text: "Create invoice", callback_data: `act:create:${step}` }],
+      [{ text: "My invoices", callback_data: `act:mine:${step}` }],
+      [{ text: "Show chat ID", callback_data: `act:chatid:${step}` }],
+    ],
+  };
+}
+
+// Send a message that returns the chat to the main menu: resets the draft, bumps
+// the step (so older buttons go stale), and arms a fresh menu keyboard.
+async function showMainMenuMessage(session, text, parseMode) {
   session.state = TG_STATE.MAIN_MENU;
   session.step += 1;
   session.draft = { clientName: "", amount: 0, dueChoice: "", dueDateIso: "" };
   session.draftInvoiceId = "";
   setTelegramSession(session.chatId, session);
-  await sendTelegramMessage(getTelegramToken(), session.chatId, greeting || "What would you like to do?", {
-    reply_markup: { inline_keyboard: [[{ text: "Create invoice", callback_data: `act:create:${session.step}` }]] },
-  });
+  const options = { reply_markup: mainMenuKeyboard(session.step) };
+  if (parseMode) options.parse_mode = parseMode;
+  await sendTelegramMessage(getTelegramToken(), session.chatId, text, options);
+}
+
+async function showMainMenu(session, greeting) {
+  await showMainMenuMessage(session, greeting || "What would you like to do?");
+}
+
+// Display status for a bot invoice list, mirroring the client getInvoiceStatus.
+function botInvoiceStatus(invoice) {
+  if (invoice.status === "paid") return "Paid";
+  if (invoice.status === "verifying") return "Verifying";
+  if (invoice.dueDate && new Date(invoice.dueDate).getTime() < Date.now()) return "Overdue";
+  return "Open";
+}
+
+// Plain-text list of a merchant's 5 most recent invoices. Plain text (not HTML)
+// so a client name with special characters cannot break formatting.
+function buildMyInvoicesText(wallet) {
+  const invoices = loadInvoiceDb().invoices
+    .filter((invoice) => sameAddress(invoice.merchantWallet, wallet))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 5);
+  if (!invoices.length) return "No invoices yet. Tap Create invoice to make your first one.";
+  const base = getPublicBaseUrl();
+  const lines = ["Your 5 most recent invoices:", ""];
+  for (const invoice of invoices) {
+    lines.push(`${botInvoiceStatus(invoice)} - ${Number(invoice.total).toFixed(2)} USDC - ${invoice.clientName || "No client"}`);
+    lines.push(`${base}/pay/${invoice.id}`);
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+async function showMyInvoices(session) {
+  await showMainMenuMessage(session, buildMyInvoicesText(session.merchantWallet));
+}
+
+async function showChatId(session) {
+  const chatIdText = String(session.chatId);
+  await showMainMenuMessage(session, ["Your Telegram chat ID:", `<code>${escapeHtml(chatIdText)}</code>`].join("\n"), "HTML");
 }
 
 async function showAskClient(session) {
@@ -2662,6 +2715,14 @@ async function handleTelegramCallback(cq) {
   }
   if (ns === "act" && value === "create") {
     await showAskClient(session);
+    return;
+  }
+  if (ns === "act" && value === "mine") {
+    await showMyInvoices(session);
+    return;
+  }
+  if (ns === "act" && value === "chatid") {
+    await showChatId(session);
     return;
   }
   if (ns === "due" && session.state === TG_STATE.ASK_DUE) {
