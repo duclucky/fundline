@@ -26,6 +26,9 @@
   box-sizing: border-box;
 }
 
+/* Ensure [hidden] always wins over display rules on specific classes */
+[hidden] { display: none !important; }
+
 html {
   background: var(--bg);
 }

@@ -2343,10 +2343,15 @@ async function sendTelegramTestAlert(event) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chatId: settings.telegramChatId }),
     });
+    if (!response.ok) {
+      const result = await response.json().catch(function () { return {}; });
+      showToast("Telegram alert failed: " + (result.error || "server error " + response.status));
+      return;
+    }
     const result = await response.json();
-    showToast(result.ok ? "Telegram alert verified." : `Telegram alert failed: ${result.error}`);
+    showToast(result.ok ? "Telegram alert verified." : "Telegram alert failed: " + (result.error || "unknown error"));
   } catch (error) {
-    showToast("Telegram alert failed: network error.");
+    showToast("Telegram alert failed: could not reach server.");
   }
 }
 
