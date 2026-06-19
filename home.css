@@ -674,6 +674,10 @@ h3 {
   gap: 14px;
 }
 
+.how-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .how-card {
   display: flex;
   flex-direction: column;
@@ -1383,6 +1387,199 @@ h3 {
 }
 
 /* ====================================================
+   DEV BAND (simplified single-block layout)
+   ==================================================== */
+.dev-band {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 32px;
+  align-items: start;
+}
+
+.dev-band .dev-code-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dev-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.dev-meta-note {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+  margin-bottom: 0;
+}
+
+.dev-creator-note {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted-2);
+}
+
+.dev-actions-inline {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+/* ====================================================
+   TRUST PROOF ROWS
+   ==================================================== */
+.trust-proof-list {
+  max-width: 860px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.trust-proof-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 28px 32px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  transition: background 0.2s;
+}
+
+.trust-proof-row:last-child {
+  border-bottom: none;
+}
+
+.trust-proof-row:hover {
+  background: rgba(212, 175, 55, 0.03);
+}
+
+.trust-proof-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.trust-proof-left strong {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.trust-proof-left p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  margin-bottom: 0;
+  max-width: 520px;
+}
+
+.trust-proof-link {
+  flex-shrink: 0;
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(212, 175, 55, 0.4);
+  white-space: nowrap;
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+
+.trust-proof-link:hover {
+  color: var(--gold-bright);
+  text-decoration-color: var(--gold);
+}
+
+/* ====================================================
+   STATUS SECTION (Live now vs coming)
+   ==================================================== */
+.status-section {
+  width: var(--container);
+  margin: 0 auto;
+  padding: var(--section-y) 0;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.status-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px 28px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+
+.status-col-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 0;
+}
+
+.status-col:first-child .status-col-label {
+  color: #72f6a6;
+}
+
+.status-col:last-child .status-col-label {
+  color: var(--muted-2);
+}
+
+.status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-item {
+  position: relative;
+  padding-left: 20px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.status-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-live::before {
+  background: #72f6a6;
+  box-shadow: 0 0 6px rgba(114, 246, 166, 0.5);
+}
+
+.status-coming::before {
+  background: var(--muted-2);
+  opacity: 0.5;
+}
+
+/* ====================================================
    PROOF SECTION
    ==================================================== */
 .proof-section {
@@ -1531,6 +1728,25 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .how-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dev-band {
+    grid-template-columns: 1fr;
+  }
+
+  .dev-meta {
+    padding-top: 0;
+  }
+
+  .trust-proof-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 22px 22px;
+  }
+
   .footer-inner {
     grid-template-columns: 1fr;
     gap: 32px;
@@ -1571,10 +1787,12 @@ h3 {
 
   .audience-grid,
   .how-grid,
+  .how-grid-3,
   .showcase-grid,
   .features-grid,
   .dev-grid,
   .trust-grid,
+  .status-grid,
   .pricing-grid {
     grid-template-columns: 1fr;
   }

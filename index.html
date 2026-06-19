@@ -106,35 +106,29 @@
       <!-- =============================================
            3. HOW IT WORKS
            ============================================= -->
-      <section class="how-section" aria-labelledby="how-title">
+      <section class="how-section" id="how" aria-labelledby="how-title">
         <div class="section-header">
           <p class="eyebrow">How it works</p>
-          <h2 id="how-title" class="single-line-title">Four steps from invoice to receipt</h2>
+          <h2 id="how-title" class="single-line-title">Invoice to receipt in three steps</h2>
         </div>
-        <div class="how-grid">
+        <div class="how-grid how-grid-3">
 
           <article class="how-card reveal">
             <span class="step-num" aria-hidden="true">01</span>
-            <strong>Create invoice</strong>
-            <p>Add client details, due date, line items and notes. The USDC total is calculated automatically.</p>
+            <strong>Create your invoice</strong>
+            <p>Add client, amount, and due date. Your invoice is a single shareable link at <code>/pay/:id</code>, ready in seconds.</p>
           </article>
 
           <article class="how-card reveal">
             <span class="step-num" aria-hidden="true">02</span>
-            <strong>Share payment link</strong>
-            <p>A public <code>/pay/:id</code> page is generated with a QR code and the receiving wallet address.</p>
+            <strong>Client pays from any chain</strong>
+            <p>They connect a wallet and pay USDC from Arc, Ethereum, or Base. The payment goes straight to your wallet, not through Fundline.</p>
           </article>
 
           <article class="how-card reveal">
             <span class="step-num" aria-hidden="true">03</span>
-            <strong>Verify payment</strong>
-            <p>Arcscan checks the payer wallet, merchant wallet, amount and transaction hash on-chain before marking the invoice paid.</p>
-          </article>
-
-          <article class="how-card reveal">
-            <span class="step-num" aria-hidden="true">04</span>
-            <strong>Send receipt</strong>
-            <p>Paid invoices generate a PDF receipt and CSV record. Telegram alerts fire automatically on confirmation.</p>
+            <strong>Fundline confirms it arrived</strong>
+            <p>Arcscan checks the transaction on-chain. Once confirmed, the invoice flips to paid and you get a PDF receipt and Telegram alert.</p>
           </article>
 
         </div>
@@ -185,7 +179,7 @@
       </section>
 
       <!-- =============================================
-           6. FEATURES GRID
+           5. FEATURES GRID
            ============================================= -->
       <section class="features-section" aria-labelledby="features-title">
         <div class="section-header">
@@ -196,43 +190,42 @@
 
           <article class="feature-card reveal" id="payments">
             <p class="eyebrow">Payments</p>
-            <h3>Direct wallet settlement</h3>
-            <p>PaymentRouter transfers USDC from payer wallet to merchant wallet. The contract holds no funds at any point.</p>
+            <h3>The payment goes wallet to wallet</h3>
+            <p>USDC transfers from your client's wallet directly to yours. Nothing passes through Fundline; the contract holds no balance at any point.</p>
           </article>
 
           <article class="feature-card reveal" id="settlement">
             <p class="eyebrow">Settlement</p>
-            <h3>Native USDC across chains</h3>
-            <p>Prepare Sepolia or Base Sepolia USDC settlement into Arc through a CCTP burn-and-mint pilot. No wrapped bridge assets.</p>
+            <h3>Your client pays from any chain</h3>
+            <p>They can pay from Ethereum or Base and the USDC still lands on Arc, real and unwrapped, in one flow. No manual bridging required.</p>
           </article>
 
           <article class="feature-card reveal" id="agents">
             <p class="eyebrow">Agents</p>
-            <h3>API-first invoice creation</h3>
-            <p>Backends and AI agents can create invoices through protected endpoints and receive payment links programmatically.</p>
+            <h3>Let software pay per request</h3>
+            <p>Software and AI agents can create invoices, receive payment links, and get pinged the moment payment confirms, all via the REST API.</p>
           </article>
 
           <article class="feature-card reveal" id="security">
             <p class="eyebrow">Security</p>
-            <h3>Verify before paid</h3>
-            <p>The paid state is only saved after a matching on-chain payment is found and confirmed. No false positives, no premature settlement.</p>
+            <h3>Verified on-chain before marked paid</h3>
+            <p>The paid status is only set after a matching on-chain transaction is found and confirmed. No confirmed transaction, no paid status.</p>
           </article>
 
         </div>
       </section>
 
       <!-- =============================================
-           7. FOR DEVELOPERS
+           6. BUILD ON FUNDLINE
            ============================================= -->
       <section class="dev-section" id="developers" aria-labelledby="dev-title">
         <div class="section-header">
-          <p class="eyebrow">Developers and AI agents</p>
-          <h2 id="dev-title" class="single-line-title">Automate billing with the Fundline API</h2>
-          <p class="section-sub">Create invoices programmatically and receive real-time webhook events when payment is confirmed on-chain.</p>
+          <p class="eyebrow">Build on Fundline</p>
+          <h2 id="dev-title" class="single-line-title">The API does what the dashboard does.</h2>
+          <p class="section-sub">Create invoices, receive a payment event the moment a transaction confirms, and let agents pay per request, all from the REST API.</p>
         </div>
-        <div class="dev-grid">
-
-          <div class="dev-code-block reveal">
+        <div class="dev-band reveal">
+          <div class="dev-code-block">
             <p class="code-label">Create an invoice via API</p>
             <pre><code>POST /api/agent/invoices
 Authorization: Bearer YOUR_API_KEY
@@ -247,59 +240,85 @@ Content-Type: application/json
   "description": "Design services - June 2026"
 }</code></pre>
           </div>
-
-          <div class="dev-code-block reveal">
-            <p class="code-label">invoice.paid webhook payload</p>
-            <pre><code>{
-  "event": "invoice.paid",
-  "invoiceId": "abc123def456789012",
-  "amount": "500",
-  "currency": "USDC",
-  "payer": "0xPayerWalletAddress",
-  "merchant": "0xMerchantWalletAddress",
-  "txHash": "0xTransactionHashHere",
-  "verifiedAt": "2026-06-14T15:00:00Z"
-}</code></pre>
+          <div class="dev-meta">
+            <p class="dev-meta-note">Your system receives a <code>invoice.paid</code> webhook the moment payment confirms on-chain. Full payload and signature verification in the docs.</p>
+            <p class="dev-meta-note dev-creator-note">Creators: sell pay-per-item products via storefront at <code>/s/:slug</code>, no API key required.</p>
+            <div class="dev-actions dev-actions-inline">
+              <a class="nav-button secondary" href="/docs#agent-api" id="dev-cta-docs">Read API docs</a>
+              <a class="nav-button secondary" href="/docs#webhooks" id="dev-cta-webhooks">Webhook reference</a>
+            </div>
           </div>
-
-        </div>
-        <div class="dev-actions">
-          <a class="nav-button secondary" href="/docs#agent-api" id="dev-cta-docs">Read API docs</a>
-          <a class="nav-button primary" href="/docs#webhooks" id="dev-cta-webhooks">Set up webhooks</a>
         </div>
       </section>
 
       <!-- =============================================
-           8. TRUST AND SECURITY
+           7. TRUST AND SECURITY
            ============================================= -->
       <section class="trust-section" aria-labelledby="trust-title">
         <div class="section-header">
           <p class="eyebrow">Trust and security</p>
-          <h2 id="trust-title" class="single-line-title">Your funds go directly to your wallet</h2>
-          <p class="section-sub">Fundline is non-custodial by design. The smart contract routes USDC and never holds a balance.</p>
+          <h2 id="trust-title" class="single-line-title">Claims you can verify yourself</h2>
         </div>
-        <div class="trust-grid">
+        <div class="trust-proof-list reveal">
 
-          <article class="trust-card reveal">
-            <strong class="trust-title">Funds never touch Fundline</strong>
-            <p>The payment goes wallet to wallet. Fundline routes USDC from payer to merchant; nothing passes through an address we control.</p>
-          </article>
+          <div class="trust-proof-row">
+            <div class="trust-proof-left">
+              <strong>Funds never touch Fundline</strong>
+              <p>USDC transfers from your client's wallet to yours in one transaction. The PaymentRouter contract holds no balance and has no withdrawal path.</p>
+            </div>
+            <a class="trust-proof-link" href="https://testnet.arcscan.app/address/0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24" target="_blank" rel="noopener">Verify contract on Arcscan</a>
+          </div>
 
-          <article class="trust-card reveal">
-            <strong class="trust-title">On-chain verification</strong>
-            <p>Every payment is verified against Arcscan before the invoice is marked paid. Unverified payments are never accepted.</p>
-          </article>
+          <div class="trust-proof-row">
+            <div class="trust-proof-left">
+              <strong>Verified on-chain before marked paid</strong>
+              <p>Every invoice checks Arcscan for a matching transaction before flipping to paid. No confirmed on-chain transaction means no paid status, ever.</p>
+            </div>
+            <a class="trust-proof-link" href="/pay/b07ca63e265599be1e03" target="_blank" rel="noopener">See a verified payment</a>
+          </div>
 
-          <article class="trust-card reveal">
-            <strong class="trust-title">Native USDC only</strong>
-            <p>Built on Circle USDC, the regulated stablecoin. No wrapped tokens, no synthetic assets, no bridging risk.</p>
-          </article>
+          <div class="trust-proof-row">
+            <div class="trust-proof-left">
+              <strong>Real USDC, the regulated digital dollar</strong>
+              <p>Circle USDC, backed 1:1 by USD. Not wrapped, not synthetic. The same USDC used across the global stablecoin market.</p>
+            </div>
+            <a class="trust-proof-link" href="https://www.circle.com/en/usdc" target="_blank" rel="noopener">About Circle USDC</a>
+          </div>
 
-          <article class="trust-card reveal">
-            <strong class="trust-title">Open and auditable</strong>
-            <p>PaymentRouter is deployed at <a href="https://testnet.arcscan.app/address/0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24" target="_blank" rel="noopener" style="color:var(--gold);text-decoration:underline;text-underline-offset:3px">0x7f3b...24</a>. Settlement happens on a public testnet ledger anyone can inspect.</p>
-          </article>
+        </div>
+      </section>
 
+      <!-- =============================================
+           8. LIVE NOW VS COMING
+           ============================================= -->
+      <section class="status-section" aria-labelledby="status-title">
+        <div class="section-header">
+          <p class="eyebrow">Current status</p>
+          <h2 id="status-title" class="single-line-title">Live now, more coming</h2>
+          <p class="section-sub">Everything below is on Arc Testnet today. Nothing here is a roadmap promise disguised as a feature.</p>
+        </div>
+        <div class="status-grid">
+          <div class="status-col">
+            <p class="status-col-label">Live on testnet</p>
+            <ul class="status-list">
+              <li class="status-item status-live">Invoice creation and sharing</li>
+              <li class="status-item status-live">Wallet-to-wallet USDC payment on Arc</li>
+              <li class="status-item status-live">Cross-chain payment from Ethereum and Base</li>
+              <li class="status-item status-live">On-chain payment verification via Arcscan</li>
+              <li class="status-item status-live">PDF receipts and CSV export</li>
+              <li class="status-item status-live">Telegram payment alerts</li>
+              <li class="status-item status-live">REST API for backends and agents</li>
+              <li class="status-item status-live">Creator storefronts at /s/:slug</li>
+            </ul>
+          </div>
+          <div class="status-col">
+            <p class="status-col-label">In development</p>
+            <ul class="status-list">
+              <li class="status-item status-coming">Mainnet: live USDC settlement</li>
+              <li class="status-item status-coming">Escrow for milestone and held payments</li>
+              <li class="status-item status-coming">Custom domains for pay pages</li>
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -323,7 +342,7 @@ Content-Type: application/json
               <li>PDF receipts and CSV export</li>
               <li>Telegram payment alerts</li>
               <li>Agent API access</li>
-              <li>invoice.paid webhooks</li>
+              <li>Payment webhooks</li>
               <li>On-chain payment verification</li>
             </ul>
             <a class="launch-cta" href="/app" id="pricing-cta">Start now</a>
@@ -370,15 +389,6 @@ Content-Type: application/json
             </button>
             <div class="faq-answer" hidden>
               <p>Any EVM-compatible wallet works: MetaMask, Rabby, Coinbase Wallet, or any wallet that supports custom RPC networks. You will need to add the Arc Testnet network and hold some testnet USDC. The documentation has step-by-step wallet setup instructions.</p>
-            </div>
-          </article>
-
-          <article class="faq-item reveal" role="listitem">
-            <button class="faq-question" aria-expanded="false" type="button">
-              Is it safe with no escrow?
-            </button>
-            <div class="faq-answer" hidden>
-              <p>Yes. Removing escrow reduces risk, not increases it. The PaymentRouter contract moves USDC directly from payer to merchant in a single transaction. There is no intermediate holding address, so there is no custodial party that could be compromised or restrict access to your funds.</p>
             </div>
           </article>
 
