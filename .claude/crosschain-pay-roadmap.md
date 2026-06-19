@@ -46,8 +46,14 @@ and handle a payer whose USDC is spread across multiple chains.
    app.js; auto-picks the cheapest single chain that covers, manual dropdown override
    preserved, per-chain summary shown. Highest value, lowest risk.
 3. Relayer-submitted mint - DROPPED per the payer-self-relay decision (Fundline pays $0).
-4. Permit / ERC-3009 on the burn leg - drop the source-chain approve signature. Gated on
-   confirming each source USDC implements it (native Circle USDC does; bridged may not). PENDING.
+4. One-time MaxUint256 approve on the burn leg. DONE 2026-06-20 (commit d6f1c2f): approve
+   MAX_UINT256 once per wallet/chain; the existing allowance check skips approve entirely on
+   repeat payments, so repeat payers hit 1 tx (depositForBurn only). Progress labels updated
+   to say "Approving USDC bridge (one-time)" for transparency.
+   NOTE on true EIP-2612 permit: pure frontend cannot reduce first-payer to 1 tx without a
+   PermitAndBurn wrapper contract (CCTP v2 TokenMessenger has no depositForBurnWithPermit).
+   Defer the wrapper contract until drop-off data shows the first-time approve is a real
+   conversion blocker.
 5. Greedy multi-source aggregation (only when no single chain covers) - LAST, rare, riskiest;
    needs per-source idempotency + a "funds are on Arc, finish paying" recovery state.
 
