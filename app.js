@@ -19,6 +19,7 @@ const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
 const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
 const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
 const ERC20_DECIMALS_SELECTOR = "0x313ce567";
+const MAX_UINT256 = 2n ** 256n - 1n;
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
 const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
@@ -2054,15 +2055,17 @@ async function bridgeAndPayInvoice(id, sourceKey) {
     }
     setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
 
-    setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
-    setButtonBusy(button, "Approving bridge...");
+    setProgressStep(progress, "bridge", "active", "Checking bridge allowance...");
+    setButtonBusy(button, "Checking allowance...");
     const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, source.tokenMessenger);
     if (allowance < amountUnits) {
+      setProgressStep(progress, "bridge", "active", "Approving USDC bridge (one-time)...");
+      setButtonBusy(button, "Approving bridge...");
       const approveTx = await sendUsdcApprove(provider, {
         from: payerWallet,
         token: source.usdc,
         spender: source.tokenMessenger,
-        amount: amountUnits,
+        amount: MAX_UINT256,
       });
       await waitForTransaction(provider, approveTx);
     }
@@ -2145,11 +2148,13 @@ async function _retryBridgePay(id, sourceKey, fromStep) {
       setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
     }
     if (["check", "bridge"].includes(fromStep) && !ctx.cctpMessage) {
-      setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
-      setButtonBusy(button, "Approving bridge...");
+      setProgressStep(progress, "bridge", "active", "Checking bridge allowance...");
+      setButtonBusy(button, "Checking allowance...");
       const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, source.tokenMessenger);
       if (allowance < amountUnits) {
-        const approveTx = await sendUsdcApprove(provider, { from: payerWallet, token: source.usdc, spender: source.tokenMessenger, amount: amountUnits });
+        setProgressStep(progress, "bridge", "active", "Approving USDC bridge (one-time)...");
+        setButtonBusy(button, "Approving bridge...");
+        const approveTx = await sendUsdcApprove(provider, { from: payerWallet, token: source.usdc, spender: source.tokenMessenger, amount: MAX_UINT256 });
         await waitForTransaction(provider, approveTx);
       }
       setProgressStep(progress, "bridge", "active", `Moving USDC from ${source.shortName} to Arc...`);
