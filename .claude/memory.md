@@ -222,6 +222,55 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   test_seller_name.js (15/15: first-write, no-rename-via-invoice, settings override, default
   "Fundline merchant" does not establish a name). node --check passes for all served JS + server.
 
+- 2026-06-19: Memo-vs-PaymentRouter settlement decision (4-lens workflow: security, payer UX,
+  strategy/lock-in, eng cost). VERDICT: keep PaymentRouter as the always-on settlement spine
+  through the mainnet cutover; do NOT build Memo payer flows yet; later add Memo only as an
+  OPTIONAL, feature-flagged, Arc-only 1-tx fast path with PaymentRouter fallback - never the sole
+  path. Why PaymentRouter wins now: (1) mainnet readiness - router is verified on Arcscan, owned,
+  immutable, deployable today; Memo has no confirmed mainnet address, no published audit, testnet-
+  only since ~2026-06-13. (2) Non-custodial is a TIE (both payer->merchant direct), so it does not
+  break the choice. (3) Stronger verify binding - InvoicePaid carries invoiceId+payer+merchant+
+  amount+token in one event; the Memo event lacks merchant/amount so it needs a weaker 2-log
+  re-pair (Memo log + a same-tx USDC Transfer). (4) Memo is EOA-ONLY -> hard-blocks Safe/multisig/
+  smart-account payers (zero-conversion for that B2B segment), so it can never be the only path.
+  (5) Portability - router is standard EVM + brand-owned event; Memo is Arc-specific (relevant to
+  the "Fundline Router" branding idea: router stays, so that name still makes sense). Memo's real
+  win is narrow: 1 tx / no approve / ~61-68k vs ~87k gas, but ONLY for first-time (no-allowance)
+  on-Arc EOA payers - repeat payers already get 1 tx via the allowance>=amount short-circuit, and
+  cross-chain payers' dominant friction is the CCTP bridge legs which Memo does not touch. The
+  (chainId, txHash) double-confirm guard is event-source-agnostic, so it survives either path
+  unchanged. Conditions to revisit Memo later: Memo confirmed on Arc MAINNET at a stable address
+  WITH a published audit of the Memo contract + CallFrom precompile; reliable client-side EOA-vs-
+  smart-account detection (default to router on doubt); Memo verify hardened to the InvoicePaid bar
+  (assert recipient==merchant, amount==total at 6 decimals, bind memoId to the SAME txHash as the
+  matched Transfer); MemoFailed decoded to a friendly message + a memoData size cap; telemetry
+  proving the first-payment approve step is a real drop-off. Only a formal Arc-only commitment
+  (drop multi-chain ambition) plus all the above could justify making Memo primary. NOTE: Memo is
+  still NOT implemented in production server.js/app.js (only test scaffolding from the earlier
+  probe). Earlier conceptual explanation given to user: a memo payment routes USDC.transfer through
+  Arc's Memo contract via CallFrom (preserves payer as msg.sender), carrying the invoiceId in the
+  indexed memoId topic; it is embedded in the tx at send time, not attached to a tx hash afterward.
+
+- 2026-06-19: Telegram bot "create invoice from chat" feature - planning + build started.
+  Full plan in `.claude/telegram-bot-plan.md` (FTP-excluded). Decisions: keep getUpdates
+  POLLING (no webhook); merchant<->chat binding is a CONFIRMED 1:1 link (new
+  data/telegram-links.json, pending until the chat sends /start, closes the paste-someone-
+  elses-chatId spoof); bot-created invoices FORCE merchantWallet = resolved linked wallet;
+  `/start` is the ONLY registered command (dropped /id, /chatid; "Show chat ID" becomes a
+  menu button in P3); no "No due date" option (every bot invoice defaults via 3/7/14/30-day
+  buttons, normalizeInvoice untouched); no emoji in bot text. Phases: P0 long-poll+callback
+  plumbing (DONE, commit a4adcf3, test_telegram_longpoll.js); P1 confirmed chatId<->wallet
+  link store (DONE this session: loadTelegramLinkDb/saveTelegramLinkDb, resolveWalletByChatId
+  [active-only], claimTelegramChatId [1:1, called from the signature-verified settings PUT],
+  activateTelegramLink [pending->active on /start], seedTelegramLinksFromSellers [one-time
+  idempotent migration of existing chatIds as pending], test_telegram_link.js 22/22). P2
+  session state machine + create-invoice flow (NEXT); P3 My invoices + menu polish.
+  IMPORTANT new pattern: server.js now guards `server.listen` behind
+  `if (require.main === module)` and `module.exports` the testable link functions, so tests
+  can require server.js without booting it (test_telegram_link.js relies on this; reuse for
+  P2). Existing tests still spawn `node server.js` and are unaffected. After deploy the cPanel
+  Node app MUST be manually restarted for the new poll loop/handlers to take effect.
+
 ## Open threads / TODOs
 
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
