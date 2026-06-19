@@ -18,6 +18,7 @@
 // Run: node test_telegram_link.js
 
 const fs = require("fs");
+process.env.FUNDLINE_NO_LISTEN = "1"; // require server.js without booting the server
 const server = require("./server.js");
 
 const LINK_PATH = server.TELEGRAM_LINK_DB_PATH;

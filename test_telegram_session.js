@@ -14,6 +14,7 @@
 // Run: node test_telegram_session.js
 
 const fs = require("fs");
+process.env.FUNDLINE_NO_LISTEN = "1"; // require server.js without booting the server
 const server = require("./server.js");
 
 // Force the no-token path so the reducer makes no Telegram network calls.

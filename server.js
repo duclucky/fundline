@@ -290,9 +290,13 @@ function resolveRequestPath(pathname) {
 
 const HOST = process.env.HOST || "0.0.0.0";
 
-// Only listen when run directly (node server.js). When required by a test, the
-// functions below are exported without starting the server or the bot.
-if (require.main === module) {
+// Start the server unless explicitly suppressed. Tests require this module and
+// set FUNDLINE_NO_LISTEN to get the exported functions without booting the
+// server or the bot. Do NOT gate on require.main === module: under cPanel /
+// Phusion Passenger the app is require()d by the Passenger loader (so
+// require.main !== module), and gating on it would skip server.listen and the
+// app would never bind, returning 503.
+if (!process.env.FUNDLINE_NO_LISTEN) {
   server.listen(PORT, HOST, () => {
     console.log(`Fundline running at http://${HOST}:${PORT}`);
     startTelegramPolling();

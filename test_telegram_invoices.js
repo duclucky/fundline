@@ -9,6 +9,7 @@
 // snapshot/restore. Run: node test_telegram_invoices.js
 
 const fs = require("fs");
+process.env.FUNDLINE_NO_LISTEN = "1"; // require server.js without booting the server
 const server = require("./server.js");
 
 delete process.env.TELEGRAM_BOT_TOKEN;
