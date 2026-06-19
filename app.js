@@ -277,10 +277,10 @@ function renderApp() {
 const WALLET_GATE_CONNECT_HTML =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM16 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>Connect wallet';
 const WALLET_GATE_TELEGRAM_HTML =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.73 21a2 2 0 0 1-3.46 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>Set up Telegram alerts';
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.73 21a2 2 0 0 1-3.46 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>Set up Telegram bot';
 
 // The wallet-gate button doubles as the connect action and, once signed in, a shortcut
-// into settings to turn on Telegram alerts (alerts are optional, not required to invoice).
+// into settings to configure the Telegram bot (optional, not required to invoice).
 function handleWalletGateButton() {
   if (hasConnectedWallet()) {
     setView("settings");
@@ -312,12 +312,12 @@ function renderWalletState() {
     els.walletGate.classList.toggle("is-connected", connected);
     els.walletGateTitle.textContent = connected ? "Wallet connected" : "Connect wallet before creating invoice";
     els.walletGateText.textContent = connected
-      ? `${shortAddress(address)} will receive USDC for newly created invoices. Set up Telegram alerts to get notified the moment an invoice is paid.`
+      ? `${shortAddress(address)} will receive USDC for newly created invoices. Set up Telegram bot to get notified the moment an invoice is paid.`
       : "The connected wallet becomes your USDC receiving wallet for this invoice.";
     if (els.walletGateConnect) {
       els.walletGateConnect.hidden = false;
       els.walletGateConnect.innerHTML = connected ? WALLET_GATE_TELEGRAM_HTML : WALLET_GATE_CONNECT_HTML;
-      els.walletGateConnect.setAttribute("title", connected ? "Set up Telegram alerts in settings" : "Connect wallet");
+      els.walletGateConnect.setAttribute("title", connected ? "Set up Telegram bot in settings" : "Connect wallet");
     }
   }
 
