@@ -260,11 +260,21 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   menu button in P3); no "No due date" option (every bot invoice defaults via 3/7/14/30-day
   buttons, normalizeInvoice untouched); no emoji in bot text. Phases: P0 long-poll+callback
   plumbing (DONE, commit a4adcf3, test_telegram_longpoll.js); P1 confirmed chatId<->wallet
-  link store (DONE this session: loadTelegramLinkDb/saveTelegramLinkDb, resolveWalletByChatId
-  [active-only], claimTelegramChatId [1:1, called from the signature-verified settings PUT],
-  activateTelegramLink [pending->active on /start], seedTelegramLinksFromSellers [one-time
-  idempotent migration of existing chatIds as pending], test_telegram_link.js 22/22). P2
-  session state machine + create-invoice flow (NEXT); P3 My invoices + menu polish.
+  link store (DONE: loadTelegramLinkDb/saveTelegramLinkDb, resolveWalletByChatId [active-only],
+  claimTelegramChatId [1:1, called from the signature-verified settings PUT], activateTelegramLink
+  [pending->active on /start], seedTelegramLinksFromSellers [one-time idempotent migration of
+  existing chatIds as pending], test_telegram_link.js 22/22). P2 session state machine +
+  create-invoice flow (DONE: TG_STATE main_menu/ask_client/ask_amount/ask_due/confirm/done,
+  data/telegram-sessions.json [30-min TTL], callback ns:value:step with step-stamp stale-tap
+  guard, shared createInvoiceRecord [merchantWallet forced to linked wallet], idempotent confirm
+  via draftInvoiceId, parseTelegramAmount, test_telegram_session.js 35/35). P3 menu polish (DONE:
+  mainMenuKeyboard [Create invoice / My invoices / Show chat ID], buildMyInvoicesText [5 recent],
+  botInvoiceStatus, test_telegram_invoices.js 12/12). ALL FOUR PHASES COMPLETE, all local commits
+  (a4adcf3, 2526e4d, 4b493b4, e0bc02f), NOT YET PUSHED. answerCallbackQuery is a no-op without a
+  token (correct + enables offline tests). Single sequential poll loop => no per-chat lock needed.
+  Before pushing: this auto-deploys via FTP; the cPanel Node app MUST be manually restarted for
+  the new bot to run. After deploy, existing merchants must send /start once to activate their
+  seeded-pending link.
   IMPORTANT new pattern: server.js now guards `server.listen` behind
   `if (require.main === module)` and `module.exports` the testable link functions, so tests
   can require server.js without booting it (test_telegram_link.js relies on this; reuse for
