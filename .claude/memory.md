@@ -304,6 +304,17 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 - No lint / typecheck / test runner. CI only runs `node --check` on app.js and server.js,
   then FTP-deploys to cPanel on push to main.
 
+## Critical deploy gotcha (cost a prod 503)
+
+- 2026-06-19: cPanel runs server.js via Phusion Passenger, which `require()`s the app
+  (it does NOT run `node server.js`). So `require.main === module` is FALSE in production.
+  NEVER gate `server.listen(...)` on `require.main === module` - it skips listen, the app
+  never binds, and the whole site returns 503 (and startTelegramPolling, called inside the
+  listen callback, never runs, so the bot also goes silent - same root cause). To make
+  server.js requirable by tests without booting, gate listen on an env flag instead:
+  `if (!process.env.FUNDLINE_NO_LISTEN) server.listen(...)`. Tests set
+  `process.env.FUNDLINE_NO_LISTEN = "1"` BEFORE `require("./server.js")`. Fixed in 5e33813.
+
 ## Repo gotcha
 
 - The real git repo is the nested `outputs/arc-invoice-usdc/` (remote
