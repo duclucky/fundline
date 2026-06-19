@@ -175,6 +175,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  const sellerProfileMatch = url.pathname.match(/^\/api\/sellers\/(0x[a-fA-F0-9]{40})$/);
+  if (sellerProfileMatch) {
+    handleSellerProfile(req, res, sellerProfileMatch[1]);
+    return;
+  }
+
   if (url.pathname === "/api/dashboard/webhooks") {
     handleDashboardWebhooks(req, res);
     return;
@@ -339,6 +345,24 @@ async function handleInvoices(req, res, url) {
       if (!input.id) input.id = makeId();
       if (!input.onchainInvoiceId && !input.onchain_invoice_id) input.onchainInvoiceId = randomBytes32();
       const invoice = normalizeInvoice(input);
+      // Merchant display name is owned by the seller profile and persisted per wallet.
+      // An existing name wins for every invoice; the first invoice that carries a real
+      // name establishes it. Only the settings endpoint can change it afterward.
+      const sellerDb = loadSellerDb();
+      const sellerKey = invoice.merchantWallet;
+      const seller = sellerDb.sellers[sellerKey];
+      const establishedName = String(seller?.displayName || "").trim();
+      if (establishedName) {
+        invoice.merchantName = establishedName;
+      } else if (invoice.merchantName && invoice.merchantName !== "Fundline merchant") {
+        sellerDb.sellers[sellerKey] = {
+          wallet: sellerKey,
+          displayName: invoice.merchantName.slice(0, 120),
+          telegramChatId: seller?.telegramChatId || "",
+          alerts: seller?.alerts || { paid: true, failed: true, overdue: true },
+        };
+        saveSellerDb(sellerDb);
+      }
       const db = loadInvoiceDb();
       if (db.invoices.some((item) => item.id === invoice.id)) {
         sendJson(res, 409, { error: "Invoice ID already exists" });
@@ -2766,13 +2790,27 @@ async function handleProductById(req, res, productId) {
 }
 
 
+// Public read of a seller's display name (the name already appears on public invoices,
+// so it is safe to expose; telegram and alerts stay behind the authenticated settings).
+function handleSellerProfile(req, res, wallet) {
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const normalized = normalizeAddress(wallet);
+  const db = loadSellerDb();
+  const seller = normalized ? db.sellers[normalized] : null;
+  sendJson(res, 200, { wallet: normalized, displayName: String(seller?.displayName || "") });
+}
+
 async function handleDashboardSettings(req, res) {
   const sellerId = requireSellerAuth(req, res);
   if (!sellerId) return;
 
   if (req.method === "GET") {
     const db = loadSellerDb();
-    const settings = db.sellers[sellerId] || { wallet: sellerId, telegramChatId: "", alerts: { paid: true, failed: true, overdue: true } };
+    const existing = db.sellers[sellerId] || { wallet: sellerId, displayName: "", telegramChatId: "", alerts: { paid: true, failed: true, overdue: true } };
+    const settings = { displayName: "", ...existing };
     sendJson(res, 200, { settings });
     return;
   }
@@ -2781,17 +2819,18 @@ async function handleDashboardSettings(req, res) {
     try {
       const patch = await readJsonBody(req);
       const db = loadSellerDb();
-      const existing = db.sellers[sellerId] || { wallet: sellerId, telegramChatId: "", alerts: { paid: true, failed: true, overdue: true } };
-      
+      const existing = db.sellers[sellerId] || { wallet: sellerId, displayName: "", telegramChatId: "", alerts: { paid: true, failed: true, overdue: true } };
+
       const alerts = { ...existing.alerts };
       if (patch.alerts) {
         if (typeof patch.alerts.paid === "boolean") alerts.paid = patch.alerts.paid;
         if (typeof patch.alerts.failed === "boolean") alerts.failed = patch.alerts.failed;
         if (typeof patch.alerts.overdue === "boolean") alerts.overdue = patch.alerts.overdue;
       }
-      
+
       db.sellers[sellerId] = {
         wallet: sellerId,
+        displayName: patch.displayName !== undefined ? String(patch.displayName).trim().slice(0, 120) : (existing.displayName || ""),
         telegramChatId: patch.telegramChatId !== undefined ? String(patch.telegramChatId).trim() : existing.telegramChatId,
         alerts
       };

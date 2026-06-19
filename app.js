@@ -211,7 +211,7 @@ function bindEvents() {
   els.walletButton?.addEventListener("click", handleWalletButton);
   els.walletRefreshBalance?.addEventListener("click", refreshWalletBalance);
   els.walletDisconnect?.addEventListener("click", disconnectWallet);
-  els.walletGateConnect?.addEventListener("click", connectWallet);
+  els.walletGateConnect?.addEventListener("click", handleWalletGateButton);
   els.connectWalletSettings?.addEventListener("click", handleWalletButton);
   els.sendTelegramTest?.addEventListener("click", sendTelegramTestAlert);
   els.exportCsv?.addEventListener("click", exportCsv);
@@ -274,6 +274,21 @@ function renderApp() {
   updateInvoiceTotal();
 }
 
+const WALLET_GATE_CONNECT_HTML =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM16 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>Connect wallet';
+const WALLET_GATE_TELEGRAM_HTML =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.73 21a2 2 0 0 1-3.46 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>Set up Telegram alerts';
+
+// The wallet-gate button doubles as the connect action and, once signed in, a shortcut
+// into settings to turn on Telegram alerts (alerts are optional, not required to invoice).
+function handleWalletGateButton() {
+  if (hasConnectedWallet()) {
+    setView("settings");
+    return;
+  }
+  connectWallet();
+}
+
 function renderWalletState() {
   const connected = hasConnectedWallet();
   const address = getConnectedWallet();
@@ -297,9 +312,13 @@ function renderWalletState() {
     els.walletGate.classList.toggle("is-connected", connected);
     els.walletGateTitle.textContent = connected ? "Wallet connected" : "Connect wallet before creating invoice";
     els.walletGateText.textContent = connected
-      ? `${shortAddress(address)} will receive USDC for newly created invoices.`
+      ? `${shortAddress(address)} will receive USDC for newly created invoices. Set up Telegram alerts to get notified the moment an invoice is paid.`
       : "The connected wallet becomes your USDC receiving wallet for this invoice.";
-    els.walletGateConnect.hidden = connected;
+    if (els.walletGateConnect) {
+      els.walletGateConnect.hidden = false;
+      els.walletGateConnect.innerHTML = connected ? WALLET_GATE_TELEGRAM_HTML : WALLET_GATE_CONNECT_HTML;
+      els.walletGateConnect.setAttribute("title", connected ? "Set up Telegram alerts in settings" : "Connect wallet");
+    }
   }
 
   if (els.createInvoiceButton) {
@@ -539,6 +558,18 @@ function normalizePublicConfig(config) {
   };
 }
 
+async function fetchSellerName(wallet) {
+  if (!wallet) return "";
+  try {
+    const response = await fetch(`/api/sellers/${wallet}`);
+    if (!response.ok) return "";
+    const data = await response.json().catch(() => ({}));
+    return String(data.displayName || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 async function syncInvoicesFromServer() {
   const merchantWallet = getConnectedWallet() || "";
   if (!merchantWallet) {
@@ -559,6 +590,12 @@ async function syncInvoicesFromServer() {
     state.invoiceSyncStatus = "ready";
   } catch {
     state.invoiceSyncStatus = "offline-cache";
+  }
+  // The server owns the persisted business name; mirror it into local state.
+  const serverName = await fetchSellerName(merchantWallet);
+  if (serverName && serverName !== state.settings.merchantName) {
+    state.settings = { ...state.settings, merchantName: serverName };
+    saveSettings();
   }
 }
 
@@ -670,6 +707,16 @@ function renderInvoiceRow(invoice) {
 }
 
 function renderSettings() {
+  // Merchant name is one shared value; mirror it into the create-invoice form too.
+  // Once a name exists it is locked here and can only be changed in settings.
+  if (els.invoiceForm?.elements.merchantName) {
+    const nameField = els.invoiceForm.elements.merchantName;
+    const locked = Boolean(state.settings.merchantName);
+    nameField.value = state.settings.merchantName || "";
+    nameField.readOnly = locked;
+    nameField.title = locked ? "Set once. Change your business name in Settings." : "";
+    nameField.placeholder = locked ? "" : "Your studio or name";
+  }
   if (!els.settingsForm) return;
   els.settingsForm.elements.merchantName.value = state.settings.merchantName || "";
   els.settingsForm.elements.merchantWallet.value = getConnectedWallet() || "";
@@ -768,13 +815,6 @@ async function createInvoice(event) {
     return;
   }
 
-  const settingsError = validateSettings();
-  if (settingsError) {
-    showToast(settingsError);
-    setView("settings");
-    return;
-  }
-
   const items = collectLineItems();
   if (!items.length) {
     showToast("Add at least one valid line item.");
@@ -782,6 +822,13 @@ async function createInvoice(event) {
   }
 
   const form = new FormData(els.invoiceForm);
+  // Merchant name is a single value: read it from this form, fall back to saved settings,
+  // and persist it so settings and future invoices stay in sync.
+  const merchantName = String(form.get("merchantName") || "").trim() || state.settings.merchantName || "";
+  if (merchantName && merchantName !== state.settings.merchantName) {
+    state.settings = { ...state.settings, merchantName };
+    saveSettings();
+  }
   const total = roundMoney(items.reduce((sum, item) => sum + item.total, 0));
   if (total <= 0) {
     showToast("Invoice total must be greater than 0.");
@@ -794,7 +841,7 @@ async function createInvoice(event) {
     number: nextInvoiceNumber(),
     // Offchain reference that PaymentRouter emits later in InvoicePaid.
     onchainInvoiceId: randomBytes32(),
-    merchantName: state.settings.merchantName || "Fundline merchant",
+    merchantName: merchantName || "Fundline merchant",
     merchantWallet: getConnectedWallet(),
     telegramChatId: state.settings.telegramChatId || "",
     clientName: String(form.get("clientName") || "").trim(),
@@ -820,6 +867,11 @@ async function createInvoice(event) {
 
   upsertInvoice(savedInvoice);
   saveInvoices();
+  // Adopt the server's authoritative merchant name (it may have been set on first invoice).
+  if (savedInvoice.merchantName && savedInvoice.merchantName !== "Fundline merchant" && savedInvoice.merchantName !== state.settings.merchantName) {
+    state.settings = { ...state.settings, merchantName: savedInvoice.merchantName };
+    saveSettings();
+  }
   els.invoiceForm.reset();
   els.lineItems.innerHTML = "";
   seedLineItems();
@@ -827,12 +879,6 @@ async function createInvoice(event) {
   setView("dashboard");
   showInvoiceDialog(savedInvoice);
   showToast("Invoice created.");
-}
-
-function validateSettings() {
-  if (!state.settings.merchantName?.trim()) return "Add your merchant display name first.";
-  if (!hasConnectedWallet()) return "Connect wallet before creating invoice.";
-  return "";
 }
 
 const SELLER_SESSION_KEY = "fundline_dashboard_session";
@@ -907,6 +953,7 @@ async function saveSettingsFromForm(event) {
           "x-fundline-issued-at": session.issuedAt,
         },
         body: JSON.stringify({
+          displayName: settings.merchantName,
           telegramChatId: settings.telegramChatId,
           alerts: settings.alerts,
         }),
@@ -2926,6 +2973,7 @@ async function fetchServerSettings() {
     if (res.ok) {
       const data = await res.json();
       if (data.settings) {
+        if (data.settings.displayName) state.settings.merchantName = data.settings.displayName;
         state.settings.telegramChatId = data.settings.telegramChatId || "";
         if (data.settings.alerts) {
           state.settings.alerts = { ...state.settings.alerts, ...data.settings.alerts };

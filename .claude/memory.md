@@ -202,6 +202,26 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   fetchApi() as a raw Response (checks .ok / await .json()) but fetchApi already returns parsed
   JSON, so webhooks/logs likely never render even now.
 
+- 2026-06-19: Merchant-name UX overhaul + made the name persistent per wallet (working tree,
+  builds on the session-auth commit d42ac90). Three parts: (a) the wallet-gate button on the
+  create-invoice page now doubles as "Set up Telegram alerts" -> settings when a wallet is
+  connected (previously it was hidden once connected); (b) removed validateSettings() so an
+  invoice can be created immediately after connecting (no forced settings detour; server already
+  defaults merchantName to "Fundline merchant"); (c) merchant name is now ONE value owned by the
+  server per wallet: sellers[wallet].displayName. It is established by the first invoice that
+  carries a real name (server first-write in POST /api/invoices) OR by the authenticated settings
+  PUT (which overwrites); every later invoice inherits the established name and CANNOT rename it -
+  only settings can change it. New PUBLIC endpoint GET /api/sellers/:wallet returns
+  {wallet, displayName} (only the name, already public on invoices; telegram/alerts stay behind
+  auth). Client (app.js/app.html): a "Your business name" field (.form-full) was added to the
+  create-invoice form, prefilled from state.settings.merchantName and set READONLY once a name
+  exists (change only in Settings); fetchSellerName() syncs the name after connect/sync;
+  createInvoice adopts savedInvoice.merchantName; settings PUT now sends displayName and
+  fetchServerSettings reads it. This RESOLVES the earlier caveat that settings (sessionStorage)
+  lost the name on browser close - the name is now server-persistent per wallet. Verified by
+  test_seller_name.js (15/15: first-write, no-rename-via-invoice, settings override, default
+  "Fundline merchant" does not establish a name). node --check passes for all served JS + server.
+
 ## Open threads / TODOs
 
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
