@@ -2337,22 +2337,17 @@ async function sendTelegramTestAlert(event) {
     showToast("Add Telegram chat ID first.");
     return;
   }
-  const sampleInvoice = {
-    id: "telegram-test",
-    number: "TEST-PAID",
-    clientName: "Demo client",
-    total: 25,
-    paidAt: new Date().toISOString(),
-    payerWallet: getConnectedWallet() || "0x0000000000000000000000000000000000000000",
-    merchantWallet: getConnectedWallet() || state.settings.merchantWallet || "0x...",
-    txHash: "demo-telegram-test",
-    verificationSource: "telegram_test",
-  };
-  const result = await sendPaymentNotification(sampleInvoice, {
-    chatId: settings.telegramChatId,
-    force: true,
-  });
-  showToast(result.ok ? "Test Telegram alert sent." : `Telegram alert failed: ${result.error}`);
+  try {
+    const response = await fetch("/api/telegram/verify-alert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId: settings.telegramChatId }),
+    });
+    const result = await response.json();
+    showToast(result.ok ? "Telegram alert verified." : `Telegram alert failed: ${result.error}`);
+  } catch (error) {
+    showToast("Telegram alert failed: network error.");
+  }
 }
 
 async function sendPaymentNotification(invoice, options = {}) {

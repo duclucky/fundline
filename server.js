@@ -220,6 +220,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/telegram/verify-alert") {
+    handleTelegramVerifyAlert(req, res);
+    return;
+  }
+
   if (url.pathname === "/api/gateway/balance") {
     handleGatewayBalance(req, res);
     return;
@@ -1894,6 +1899,48 @@ function buildPaymentMessage(invoice) {
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+async function handleTelegramVerifyAlert(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    const chatId = String(body.chatId || "").trim();
+    if (!chatId) {
+      sendJson(res, 400, { error: "Telegram chat ID is required" });
+      return;
+    }
+    const token = getTelegramToken();
+    if (!token) {
+      console.error("[Telegram] handleTelegramVerifyAlert: TELEGRAM_BOT_TOKEN not set");
+      sendJson(res, 500, { error: "TELEGRAM_BOT_TOKEN is not configured on the server" });
+      return;
+    }
+    const sendResult = await sendTelegramMessage(token, chatId, buildVerifyAlertMessage());
+    if (!sendResult.ok) {
+      sendJson(res, 502, { error: sendResult.error || "Telegram delivery failed" });
+      return;
+    }
+    sendJson(res, 200, { ok: true });
+  } catch (error) {
+    console.error("[Telegram] handleTelegramVerifyAlert error:", error.message);
+    sendJson(res, 500, { error: error.message || "Telegram notification failed" });
+  }
+}
+
+function buildVerifyAlertMessage() {
+  return [
+    "Fundline is connected.",
+    "",
+    "Send a USDC invoice as one link. Your client pays from Arc, Base, or Ethereum.",
+    "Fundline confirms the payment on-chain before marking it received.",
+    "Money goes straight to your wallet - never through us.",
+    "",
+    "Your payment alerts are active.",
+  ].join("\n");
 }
 
 async function dispatchInvoiceTelegramAlert(invoice, event, reason = "") {
