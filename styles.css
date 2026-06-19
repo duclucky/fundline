@@ -406,6 +406,25 @@ h2 {
   flex-shrink: 0;
 }
 
+.wc-qr {
+  display: flex;
+  justify-content: center;
+  margin: 18px 0 10px;
+}
+
+.wc-qr canvas {
+  width: 240px;
+  height: 240px;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.wc-hint {
+  text-align: center;
+  margin: 0 0 14px;
+}
+
 .danger-action {
   color: #ffffff;
   background: linear-gradient(135deg, #b7324e, #e05669);

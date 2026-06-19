@@ -12,6 +12,7 @@ const DEFAULT_PUBLIC_CONFIG = {
   usdcDecimals: ARC_USDC_DECIMALS,
   paymentRouterAddress: "0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24",
   onchainPaymentsEnabled: true,
+  walletConnectProjectId: "",
 };
 
 const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
@@ -415,24 +416,47 @@ function initWalletDiscovery() {
   window.dispatchEvent(new Event("eip6963:requestProvider"));
 }
 
+function walletConnectAvailable() {
+  return Boolean(state.publicConfig.walletConnectProjectId);
+}
+
+// Build the connect choices: every installed wallet (EIP-6963) plus, when a
+// Reown project id is configured, a WalletConnect option for scanning from a
+// mobile wallet that is not installed in this browser.
+function buildWalletOptions() {
+  const options = discoveredWallets.map((w) => ({ kind: "injected", name: w.info.name || "Wallet", icon: w.info.icon || "", provider: w.provider }));
+  if (walletConnectAvailable()) {
+    options.push({ kind: "walletconnect", name: "WalletConnect (scan with mobile)", icon: "" });
+  }
+  return options;
+}
+
 async function connectWallet() {
   if (state.walletConnecting) return;
-  // Multiple installed wallets: let the user pick (needs the dialog element).
-  if (discoveredWallets.length > 1 && els.dialog && els.dialogBody) {
-    openWalletPicker(discoveredWallets.slice());
+  const options = buildWalletOptions();
+  if (options.length > 1 && els.dialog && els.dialogBody) {
+    openWalletPicker(options);
     return;
   }
-  // One discovered wallet (or no dialog to show a picker): connect it directly.
-  if (discoveredWallets.length >= 1) {
-    await connectWithProvider(discoveredWallets[0].provider, discoveredWallets[0].info.name);
+  if (options.length === 1) {
+    await connectWithOption(options[0]);
     return;
   }
-  // No EIP-6963 wallet announced: fall back to the legacy injected provider.
+  // Nothing discovered and no WalletConnect: fall back to the injected provider.
   if (!window.ethereum?.request) {
-    showToast("No wallet found. Install or open OKX Wallet, MetaMask, or another EVM wallet.");
+    showToast("No wallet found. Install a wallet extension, or set up WalletConnect to scan from a mobile wallet.");
     return;
   }
   await connectWithProvider(window.ethereum, "");
+}
+
+async function connectWithOption(option) {
+  if (!option) return;
+  if (option.kind === "walletconnect") {
+    await connectWithWalletConnect();
+    return;
+  }
+  await connectWithProvider(option.provider, option.name);
 }
 
 async function connectWithProvider(provider, name) {
@@ -464,12 +488,12 @@ async function connectWithProvider(provider, name) {
   }
 }
 
-function openWalletPicker(wallets) {
-  const options = wallets
-    .map((w, index) => {
-      const icon = /^(data:|https:)/.test(w.info.icon || "") ? w.info.icon : "";
+function openWalletPicker(options) {
+  const rows = options
+    .map((option, index) => {
+      const icon = /^(data:|https:)/.test(option.icon || "") ? option.icon : "";
       const iconHtml = icon ? `<img class="wallet-option-icon" src="${escapeHtml(icon)}" alt="" />` : "";
-      return `<button class="wallet-option" type="button" data-wallet-index="${index}">${iconHtml}<span>${escapeHtml(w.info.name || "Wallet")}</span></button>`;
+      return `<button class="wallet-option" type="button" data-wallet-index="${index}">${iconHtml}<span>${escapeHtml(option.name || "Wallet")}</span></button>`;
     })
     .join("");
   els.dialogBody.innerHTML = `
@@ -482,17 +506,116 @@ function openWalletPicker(wallets) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
       </button>
     </div>
-    <div class="wallet-options">${options}</div>
+    <div class="wallet-options">${rows}</div>
   `;
   els.dialogBody.querySelector("[data-dialog-close]")?.addEventListener("click", closeDialog);
   els.dialogBody.querySelectorAll("[data-wallet-index]").forEach((button) => {
     button.addEventListener("click", async () => {
-      const chosen = wallets[Number(button.dataset.walletIndex)];
-      closeDialog();
-      if (chosen) await connectWithProvider(chosen.provider, chosen.info.name);
+      const chosen = options[Number(button.dataset.walletIndex)];
+      if (chosen && chosen.kind !== "walletconnect") closeDialog();
+      await connectWithOption(chosen);
     });
   });
   els.dialog.showModal();
+}
+
+// ----- WalletConnect (scan a QR with a mobile wallet) -----
+// Buildless: the provider and QR generator are lazy-imported from a CDN only
+// when the user picks WalletConnect, so the rest of the app pulls nothing extra.
+let _wcProvider = null;
+
+async function getWalletConnectProvider(projectId) {
+  if (_wcProvider) return _wcProvider;
+  const mod = await import("https://esm.sh/@walletconnect/ethereum-provider@2.23.9");
+  const EthereumProvider = mod.EthereumProvider || (mod.default && mod.default.EthereumProvider) || mod.default;
+  const config = state.publicConfig;
+  _wcProvider = await EthereumProvider.init({
+    projectId,
+    showQrModal: false, // we render our own QR in the dialog
+    optionalChains: [config.chainId, 1, 8453, 11155111, 84532],
+    rpcMap: { [config.chainId]: config.rpcUrl },
+    optionalMethods: ["eth_sendTransaction", "personal_sign", "eth_signTypedData_v4", "wallet_switchEthereumChain", "wallet_addEthereumChain"],
+    metadata: {
+      name: "Fundline",
+      description: "USDC invoices on Arc",
+      url: window.location.origin,
+      icons: [`${window.location.origin}/assets/fundline-logo.png`],
+    },
+  });
+  _wcProvider.on("accountsChanged", handleAccountsChanged);
+  _wcProvider.on("disconnect", () => {
+    if (state.walletKind === "walletconnect") disconnectWallet({ silent: false });
+  });
+  return _wcProvider;
+}
+
+async function connectWithWalletConnect() {
+  const projectId = state.publicConfig.walletConnectProjectId;
+  if (!projectId) {
+    showToast("WalletConnect is not configured.");
+    return;
+  }
+  state.walletConnecting = true;
+  renderWalletState();
+  try {
+    const provider = await getWalletConnectProvider(projectId);
+    const onUri = (uri) => showWalletConnectQr(uri);
+    provider.on("display_uri", onUri);
+    try {
+      await provider.enable(); // resolves once the mobile wallet approves the session
+    } finally {
+      provider.removeListener?.("display_uri", onUri);
+    }
+    const address = normalizeAddress((provider.accounts && provider.accounts[0]) || "");
+    if (!address) {
+      showToast("WalletConnect did not return an address.");
+      return;
+    }
+    setActiveProvider(provider, "walletconnect");
+    closeDialog();
+    const authAt = await requireWalletSignature(provider, address);
+    setConnectedWallet(address, { authAt, silent: true });
+    await refreshWalletBalance();
+    if (!isPayRoute()) await syncInvoicesFromServer();
+    refreshCurrentView();
+    showToast("Wallet connected.");
+  } catch (error) {
+    showToast(error?.message || "WalletConnect connection cancelled.");
+  } finally {
+    closeDialog(); // close the QR dialog whether the session was approved or cancelled
+    state.walletConnecting = false;
+    renderWalletState();
+  }
+}
+
+async function showWalletConnectQr(uri) {
+  if (!els.dialog || !els.dialogBody) return;
+  els.dialogBody.innerHTML = `
+    <div class="dialog-head">
+      <div>
+        <p class="eyebrow">Connect</p>
+        <h2>Scan with your wallet</h2>
+      </div>
+      <button class="icon-button" data-dialog-close type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+      </button>
+    </div>
+    <div class="wc-qr"><canvas id="wcQrCanvas"></canvas></div>
+    <p class="muted wc-hint">Open your mobile wallet, choose WalletConnect or Scan, and scan this code.</p>
+    <div class="copy-row">
+      <input readonly value="${escapeHtml(uri)}" />
+      <button class="ghost-action" data-copy-wc="${escapeHtml(uri)}" type="button">Copy link</button>
+    </div>
+  `;
+  els.dialogBody.querySelector("[data-dialog-close]")?.addEventListener("click", closeDialog);
+  els.dialogBody.querySelector("[data-copy-wc]")?.addEventListener("click", (event) => copyText(event.currentTarget.dataset.copyWc));
+  if (!els.dialog.open) els.dialog.showModal();
+  try {
+    const qrcode = (await import("https://esm.sh/qrcode@1.5.4")).default;
+    await qrcode.toCanvas(document.getElementById("wcQrCanvas"), uri, { width: 240, margin: 1 });
+  } catch (_) {
+    // If the QR generator fails to load, the copyable link above is the fallback.
+  }
 }
 
 async function requireWalletSignature(provider, address) {
@@ -544,6 +667,11 @@ async function refreshWalletBalance(event) {
 }
 
 function disconnectWallet(options = {}) {
+  // End a WalletConnect session if it is the active wallet. Clear walletKind
+  // first so the provider's own "disconnect" event does not recurse back here.
+  const wcProvider = state.walletKind === "walletconnect" ? state.provider : null;
+  state.provider = null;
+  state.walletKind = "";
   state.wallet = { connected: false, address: "", balance: "", authAt: "" };
   saveWalletState();
   state.walletMenuOpen = false;
@@ -551,10 +679,14 @@ function disconnectWallet(options = {}) {
     state.settings = { ...state.settings, merchantWallet: "" };
     saveSettings();
   }
-  
+
   state.invoices = [];
   saveInvoices();
-  
+
+  if (wcProvider && typeof wcProvider.disconnect === "function") {
+    wcProvider.disconnect().catch(() => {});
+  }
+
   refreshCurrentView();
   if (!options.silent) showToast("Wallet disconnected.");
 }
@@ -653,6 +785,7 @@ function normalizePublicConfig(config) {
     usdcDecimals: paymentTokenDecimals,
     paymentRouterAddress,
     onchainPaymentsEnabled: Boolean(paymentRouterAddress && usdcTokenAddress),
+    walletConnectProjectId: String(config.walletConnectProjectId || "").trim(),
   };
 }
 

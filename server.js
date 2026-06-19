@@ -71,6 +71,9 @@ const MEMO_CONTRACT_ADDRESS = "0x5294E9927c3306DcBaDb03fe70b92e01cCede505";
 const MEMO_EVENT_TOPIC = "0xeb15ee720798341c37739df41be53acfbbf70ae6802dade35457beec6e47a5e4";
 
 const CIRCLE_GATEWAY_API_KEY = String(process.env.CIRCLE_GATEWAY_API_KEY || "").trim();
+// Public Reown (WalletConnect) project id. A public client key, not a secret;
+// the WalletConnect QR login option is hidden in the UI until this is set.
+const WALLETCONNECT_PROJECT_ID = String(process.env.REOWN_PROJECT_ID || process.env.WALLETCONNECT_PROJECT_ID || "").trim();
 const GATEWAY_API_BASE = "https://gateway-api-testnet.circle.com/v1";
 const GATEWAY_WALLET_ADDRESS = "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
 const GATEWAY_MINTER_ADDRESS = "0x0022222ABE238Cc2C7Bb1f21003F0a260052475B";
@@ -373,6 +376,7 @@ function handlePublicConfig(req, res) {
     gatewayWalletAddress: GATEWAY_WALLET_ADDRESS,
     gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
     gatewayEnabled: Boolean(CIRCLE_GATEWAY_API_KEY),
+    walletConnectProjectId: WALLETCONNECT_PROJECT_ID,
   });
 }
 
