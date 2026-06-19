@@ -182,4 +182,17 @@ link. Future external sales bots integrate via the existing API-key
 ## Build process
 - Phase by phase: implement one phase, node --check + a test_*.js, commit, then
   stop for review before the next phase (user choice).
-- Phase 0 DONE: long-poll rewrite + callback plumbing (commit, test_telegram_longpoll.js).
+- Phase 0 DONE: long-poll rewrite + callback plumbing (test_telegram_longpoll.js).
+- Phase 1 DONE: confirmed chatId<->wallet link store (test_telegram_link.js, 22/22).
+- Phase 2 DONE: session state machine + create-invoice flow. Added the
+  S0..S6-equivalent reducer (TG_STATE main_menu/ask_client/ask_amount/ask_due/
+  confirm/done), data/telegram-sessions.json store (30-min TTL, prune on load),
+  callback encoding ns:value:step with a step-stamp stale-tap guard, a shared
+  createInvoiceRecord helper used by both POST /api/invoices and the bot
+  (merchantWallet forced to the linked wallet), idempotent confirm via a draft
+  id minted at the confirm screen, and parseTelegramAmount reusing roundMoney +
+  amountToUnits. answerCallbackQuery is a no-op without a token (also enables
+  offline tests). /start now opens the main menu when linked. The single
+  sequential poll loop makes a per-chat lock unnecessary (documented). Tests:
+  test_telegram_session.js 35/35; no regression in link/seller/longpoll tests.
+- Phase 3 NEXT: My invoices list, Show chat ID menu button, menu polish.

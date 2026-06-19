@@ -20,6 +20,7 @@ const DISPATCHED_WEBHOOKS_PATH = path.join(DATA_DIR, "dispatched_webhooks.json")
 const API_KEY_DB_PATH = path.join(DATA_DIR, "api-keys.json");
 const EVENT_DB_PATH = path.join(DATA_DIR, "events.json");
 const TELEGRAM_LINK_DB_PATH = path.join(DATA_DIR, "telegram-links.json");
+const TELEGRAM_SESSION_DB_PATH = path.join(DATA_DIR, "telegram-sessions.json");
 
 const AGENT_RATE_LIMIT_PER_MIN = Number(process.env.AGENT_RATE_LIMIT_PER_MIN || 60);
 const rateLimits = new Map();
@@ -304,14 +305,27 @@ module.exports = {
   normalizeAddress,
   loadSellerDb,
   saveSellerDb,
+  loadInvoiceDb,
+  saveInvoiceDb,
   loadTelegramLinkDb,
   saveTelegramLinkDb,
   resolveWalletByChatId,
   claimTelegramChatId,
   activateTelegramLink,
   seedTelegramLinksFromSellers,
+  loadTelegramSessionDb,
+  saveTelegramSessionDb,
+  getTelegramSession,
+  setTelegramSession,
+  clearTelegramSession,
+  parseTelegramAmount,
+  createInvoiceRecord,
+  handleTelegramText,
+  handleTelegramCallback,
   TELEGRAM_LINK_DB_PATH,
+  TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
+  INVOICE_DB_PATH,
 };
 
 function loadEnvFiles() {
@@ -357,6 +371,42 @@ function handlePublicConfig(req, res) {
   });
 }
 
+// Shared invoice-creation core used by both POST /api/invoices and the Telegram
+// bot. Generates ids if missing, runs the canonical normalizeInvoice, applies the
+// per-wallet seller-name first-write model, rejects duplicate ids (throws with
+// code DUPLICATE_ID), prepends, and persists. Returns the created invoice. The
+// bot passes a trusted merchantWallet; this function never derives merchantWallet
+// beyond what normalizeInvoice validates.
+function createInvoiceRecord(input) {
+  if (!input.id) input.id = makeId();
+  if (!input.onchainInvoiceId && !input.onchain_invoice_id) input.onchainInvoiceId = randomBytes32();
+  const invoice = normalizeInvoice(input);
+  const sellerDb = loadSellerDb();
+  const sellerKey = invoice.merchantWallet;
+  const seller = sellerDb.sellers[sellerKey];
+  const establishedName = String(seller?.displayName || "").trim();
+  if (establishedName) {
+    invoice.merchantName = establishedName;
+  } else if (invoice.merchantName && invoice.merchantName !== "Fundline merchant") {
+    sellerDb.sellers[sellerKey] = {
+      wallet: sellerKey,
+      displayName: invoice.merchantName.slice(0, 120),
+      telegramChatId: seller?.telegramChatId || "",
+      alerts: seller?.alerts || { paid: true, failed: true, overdue: true },
+    };
+    saveSellerDb(sellerDb);
+  }
+  const db = loadInvoiceDb();
+  if (db.invoices.some((item) => item.id === invoice.id)) {
+    const error = new Error("Invoice ID already exists");
+    error.code = "DUPLICATE_ID";
+    throw error;
+  }
+  db.invoices = [invoice, ...db.invoices];
+  saveInvoiceDb(db);
+  return invoice;
+}
+
 async function handleInvoices(req, res, url) {
   if (req.method === "GET") {
     const merchantWallet = normalizeAddress(url.searchParams.get("merchantWallet"));
@@ -369,36 +419,13 @@ async function handleInvoices(req, res, url) {
   if (req.method === "POST") {
     try {
       const input = await readJsonBody(req);
-      if (!input.id) input.id = makeId();
-      if (!input.onchainInvoiceId && !input.onchain_invoice_id) input.onchainInvoiceId = randomBytes32();
-      const invoice = normalizeInvoice(input);
-      // Merchant display name is owned by the seller profile and persisted per wallet.
-      // An existing name wins for every invoice; the first invoice that carries a real
-      // name establishes it. Only the settings endpoint can change it afterward.
-      const sellerDb = loadSellerDb();
-      const sellerKey = invoice.merchantWallet;
-      const seller = sellerDb.sellers[sellerKey];
-      const establishedName = String(seller?.displayName || "").trim();
-      if (establishedName) {
-        invoice.merchantName = establishedName;
-      } else if (invoice.merchantName && invoice.merchantName !== "Fundline merchant") {
-        sellerDb.sellers[sellerKey] = {
-          wallet: sellerKey,
-          displayName: invoice.merchantName.slice(0, 120),
-          telegramChatId: seller?.telegramChatId || "",
-          alerts: seller?.alerts || { paid: true, failed: true, overdue: true },
-        };
-        saveSellerDb(sellerDb);
-      }
-      const db = loadInvoiceDb();
-      if (db.invoices.some((item) => item.id === invoice.id)) {
+      const invoice = createInvoiceRecord(input);
+      sendJson(res, 201, { invoice });
+    } catch (error) {
+      if (error.code === "DUPLICATE_ID") {
         sendJson(res, 409, { error: "Invoice ID already exists" });
         return;
       }
-      db.invoices = [invoice, ...db.invoices];
-      saveInvoiceDb(db);
-      sendJson(res, 201, { invoice });
-    } catch (error) {
       sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Could not create invoice" } });
     }
     return;
@@ -836,6 +863,58 @@ function seedTelegramLinksFromSellers() {
     console.log(`Telegram links: seeded ${added} pending from sellers, ${dropped} duplicate chatId(s) skipped`);
   }
   return { added, dropped };
+}
+
+// Ephemeral per-chat conversation state for the create-invoice flow. This is a
+// cursor, NOT a source of truth: invoices live in invoices.json and the
+// chat<->wallet binding lives in the link store, so losing this file only drops
+// in-progress drafts.
+function getTelegramSessionTtlMs() {
+  const n = Number(process.env.TELEGRAM_SESSION_TTL_MS || 0);
+  return Number.isFinite(n) && n >= 60000 ? n : 30 * 60 * 1000;
+}
+
+function loadTelegramSessionDb() {
+  ensureDataDir();
+  if (!fs.existsSync(TELEGRAM_SESSION_DB_PATH)) return { sessions: {} };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(TELEGRAM_SESSION_DB_PATH, "utf8"));
+    const sessions = typeof parsed.sessions === "object" && parsed.sessions !== null ? parsed.sessions : {};
+    const now = Date.now();
+    for (const key of Object.keys(sessions)) {
+      const exp = new Date(sessions[key].expiresAt || 0).getTime();
+      if (!Number.isFinite(exp) || exp < now) delete sessions[key];
+    }
+    return { sessions };
+  } catch {
+    return { sessions: {} };
+  }
+}
+
+function saveTelegramSessionDb(db) {
+  ensureDataDir();
+  fs.writeFileSync(TELEGRAM_SESSION_DB_PATH, `${JSON.stringify({ sessions: db.sessions || {} }, null, 2)}\n`);
+}
+
+function getTelegramSession(chatId) {
+  const db = loadTelegramSessionDb();
+  return db.sessions[String(chatId)] || null;
+}
+
+function setTelegramSession(chatId, session) {
+  const db = loadTelegramSessionDb();
+  const now = Date.now();
+  session.updatedAt = new Date(now).toISOString();
+  session.expiresAt = new Date(now + getTelegramSessionTtlMs()).toISOString();
+  db.sessions[String(chatId)] = session;
+  saveTelegramSessionDb(db);
+  return session;
+}
+
+function clearTelegramSession(chatId) {
+  const db = loadTelegramSessionDb();
+  delete db.sessions[String(chatId)];
+  saveTelegramSessionDb(db);
 }
 
 function loadWebhookDb() {
@@ -2235,12 +2314,10 @@ async function pollTelegramUpdates() {
   }
 }
 
-// Route one Telegram update. Returns true if it was handled. Inline-button
-// (callback_query) routing into the invoice flow is added in a later phase;
-// for now we just acknowledge taps so the Telegram client spinner clears.
+// Route one Telegram update to the conversation reducer. Returns true if handled.
 async function handleTelegramUpdate(update) {
   if (update.callback_query) {
-    await answerCallbackQuery(update.callback_query.id);
+    await handleTelegramCallback(update.callback_query);
     return true;
   }
 
@@ -2248,12 +2325,7 @@ async function handleTelegramUpdate(update) {
   const chat = message?.chat;
   if (!chat?.id) return false;
 
-  const text = String(message.text || "").trim().toLowerCase();
-  if (text === "/start" || text.startsWith("/start ")) {
-    await handleTelegramStart(chat.id);
-    return true;
-  }
-  return false;
+  return handleTelegramText(chat.id, String(message.text || ""));
 }
 
 // Long-poll variant of the Telegram request: a held getUpdates connection must
@@ -2301,7 +2373,7 @@ function requestTelegramLongPoll(token, payload) {
 }
 
 async function answerCallbackQuery(callbackQueryId, text) {
-  if (!callbackQueryId) return;
+  if (!callbackQueryId || !getTelegramToken()) return;
   const payload = { callback_query_id: callbackQueryId };
   if (text) payload.text = text;
   try {
@@ -2332,8 +2404,8 @@ function activateTelegramLink(chatId) {
   return "active";
 }
 
-// Smart /start entry point. Confirms a pending link, greets an already-linked
-// chat, or shows the one-time setup screen when unlinked.
+// Smart /start entry point. Confirms a pending link and opens the main menu, or
+// shows the one-time setup screen when the chat is not linked to a merchant.
 async function handleTelegramStart(chatId) {
   const key = String(chatId).trim();
   const status = activateTelegramLink(key);
@@ -2341,7 +2413,12 @@ async function handleTelegramStart(chatId) {
     await sendTelegramSetup(key);
     return;
   }
-  await sendTelegramLinkedConfirmation(key, status === "activated");
+  const wallet = resolveWalletByChatId(key);
+  const session = freshSession(key, wallet);
+  const greeting = status === "activated"
+    ? "Linked to your Fundline account. What would you like to do?"
+    : "What would you like to do?";
+  await showMainMenu(session, greeting);
 }
 
 // One-time setup screen for a chat not yet linked to a merchant.
@@ -2370,14 +2447,276 @@ async function sendTelegramSetup(chatId) {
   );
 }
 
-// Confirmation once a chat is linked to a merchant wallet. The action menu is
-// added in a later phase; this only acknowledges the connection.
-async function sendTelegramLinkedConfirmation(chatId, justActivated) {
+// ----- Bot conversation: create-invoice state machine -----
+//
+// States: MAIN_MENU -> ASK_CLIENT (typed) -> ASK_AMOUNT (typed) -> ASK_DUE
+// (buttons) -> CONFIRM (buttons) -> DONE. Every keyboard is stamped with the
+// session step; a tap whose step does not match the live session is rejected,
+// which neutralizes stale buttons and double taps. The poll loop processes
+// updates strictly one at a time, so a single load-mutate-save per turn is
+// race-free without a lock; if the bot ever runs in more than one process,
+// revisit this (and the polling-vs-webhook choice).
+const TG_STATE = {
+  MAIN_MENU: "main_menu",
+  ASK_CLIENT: "ask_client",
+  ASK_AMOUNT: "ask_amount",
+  ASK_DUE: "ask_due",
+  CONFIRM: "confirm",
+  DONE: "done",
+};
+
+function freshSession(chatId, wallet) {
+  return {
+    chatId: String(chatId),
+    merchantWallet: wallet,
+    state: TG_STATE.MAIN_MENU,
+    step: 1,
+    draft: { clientName: "", amount: 0, dueChoice: "", dueDateIso: "" },
+    draftInvoiceId: "",
+    lastInvoiceId: "",
+    createdAt: new Date().toISOString(),
+    updatedAt: "",
+    expiresAt: "",
+  };
+}
+
+function formatTelegramDate(iso) {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return String(iso || "");
+  return d.toISOString().slice(0, 10);
+}
+
+// Validate a typed USDC amount. Returns a 2-decimal number, or null if invalid.
+// Mirrors the normalizeInvoice total guard and the 6-decimal base-unit math.
+function parseTelegramAmount(text) {
+  const cleaned = String(text).replace(/,/g, "").trim();
+  if (!/^[0-9]+(\.[0-9]+)?$/.test(cleaned)) return null;
+  const n = roundMoney(cleaned);
+  if (!Number.isFinite(n) || n <= 0 || n > 1e12) return null;
+  if (amountToUnits(String(n), 6) <= 0n) return null;
+  return n;
+}
+
+async function showMainMenu(session, greeting) {
+  session.state = TG_STATE.MAIN_MENU;
+  session.step += 1;
+  session.draft = { clientName: "", amount: 0, dueChoice: "", dueDateIso: "" };
+  session.draftInvoiceId = "";
+  setTelegramSession(session.chatId, session);
+  await sendTelegramMessage(getTelegramToken(), session.chatId, greeting || "What would you like to do?", {
+    reply_markup: { inline_keyboard: [[{ text: "Create invoice", callback_data: `act:create:${session.step}` }]] },
+  });
+}
+
+async function showAskClient(session) {
+  session.state = TG_STATE.ASK_CLIENT;
+  session.step += 1;
+  setTelegramSession(session.chatId, session);
+  await sendTelegramMessage(getTelegramToken(), session.chatId, "Send the client name.", {
+    reply_markup: { inline_keyboard: [[{ text: "Cancel", callback_data: `act:cancel:${session.step}` }]] },
+  });
+}
+
+async function showAskAmount(session) {
+  session.state = TG_STATE.ASK_AMOUNT;
+  session.step += 1;
+  setTelegramSession(session.chatId, session);
+  await sendTelegramMessage(getTelegramToken(), session.chatId, "Send the amount in USDC, for example 25 or 25.50.", {
+    reply_markup: { inline_keyboard: [[{ text: "Cancel", callback_data: `act:cancel:${session.step}` }]] },
+  });
+}
+
+async function showAskDue(session) {
+  session.state = TG_STATE.ASK_DUE;
+  session.step += 1;
+  setTelegramSession(session.chatId, session);
+  const s = session.step;
+  await sendTelegramMessage(getTelegramToken(), session.chatId, "Choose a due date.", {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "3 days", callback_data: `due:3:${s}` }, { text: "7 days", callback_data: `due:7:${s}` }],
+        [{ text: "14 days", callback_data: `due:14:${s}` }, { text: "30 days", callback_data: `due:30:${s}` }],
+        [{ text: "Cancel", callback_data: `act:cancel:${s}` }],
+      ],
+    },
+  });
+}
+
+async function showConfirm(session) {
+  session.state = TG_STATE.CONFIRM;
+  session.step += 1;
+  // Mint the invoice id once at the confirm screen so a redelivered Confirm is idempotent.
+  if (!session.draftInvoiceId) session.draftInvoiceId = makeId();
+  setTelegramSession(session.chatId, session);
+  const s = session.step;
+  const lines = [
+    "Confirm invoice:",
+    "",
+    `Client: ${session.draft.clientName}`,
+    `Amount: ${Number(session.draft.amount).toFixed(2)} USDC`,
+    `Due: ${formatTelegramDate(session.draft.dueDateIso)}`,
+  ];
+  await sendTelegramMessage(getTelegramToken(), session.chatId, lines.join("\n"), {
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "Confirm", callback_data: `act:confirm:${s}` },
+        { text: "Cancel", callback_data: `act:cancel:${s}` },
+      ]],
+    },
+  });
+}
+
+async function showDone(session, invoice) {
+  session.state = TG_STATE.DONE;
+  session.step += 1;
+  session.lastInvoiceId = invoice.id;
+  session.draftInvoiceId = "";
+  session.draft = { clientName: "", amount: 0, dueChoice: "", dueDateIso: "" };
+  setTelegramSession(session.chatId, session);
+  const link = `${getPublicBaseUrl()}/pay/${invoice.id}`;
+  await sendTelegramMessage(getTelegramToken(), session.chatId, ["Invoice created.", "", link].join("\n"), {
+    reply_markup: { inline_keyboard: [[{ text: "New invoice", callback_data: `act:create:${session.step}` }]] },
+  });
+}
+
+// Typed input (client name, amount) and the /start command.
+async function handleTelegramText(chatId, rawText) {
+  const text = String(rawText || "");
+  const lower = text.trim().toLowerCase();
+  if (lower === "/start" || lower.startsWith("/start ")) {
+    await handleTelegramStart(chatId);
+    return true;
+  }
+
   const wallet = resolveWalletByChatId(chatId);
-  const lines = [justActivated ? "Linked to your Fundline account." : "Your Fundline account is connected."];
-  if (wallet) lines.push("", `Wallet: <code>${escapeHtml(`${wallet.slice(0, 6)}...${wallet.slice(-4)}`)}</code>`);
-  lines.push("", "You will receive paid invoice alerts here.");
-  await sendTelegramMessage(getTelegramToken(), String(chatId), lines.join("\n"), { parse_mode: "HTML" });
+  if (!wallet) return false; // Unlinked: only /start is meaningful.
+
+  let session = getTelegramSession(chatId);
+  if (!session || session.merchantWallet !== wallet) {
+    session = freshSession(chatId, wallet);
+    await showMainMenu(session);
+    return true;
+  }
+
+  if (session.state === TG_STATE.ASK_CLIENT) {
+    const name = text.trim().slice(0, 160);
+    if (!name) {
+      await sendTelegramMessage(getTelegramToken(), chatId, "Please send a client name.");
+      return true;
+    }
+    session.draft.clientName = name;
+    await showAskAmount(session);
+    return true;
+  }
+
+  if (session.state === TG_STATE.ASK_AMOUNT) {
+    const amount = parseTelegramAmount(text);
+    if (amount === null) {
+      await sendTelegramMessage(getTelegramToken(), chatId, "Enter an amount greater than 0, for example 25 or 25.50.");
+      return true;
+    }
+    session.draft.amount = amount;
+    await showAskDue(session);
+    return true;
+  }
+
+  await sendTelegramMessage(getTelegramToken(), chatId, "Please use the buttons above.");
+  return true;
+}
+
+// Inline-button taps.
+async function handleTelegramCallback(cq) {
+  const chatId = cq && cq.message && cq.message.chat ? cq.message.chat.id : null;
+  if (!chatId) {
+    await answerCallbackQuery(cq && cq.id);
+    return;
+  }
+
+  const wallet = resolveWalletByChatId(chatId);
+  if (!wallet) {
+    await answerCallbackQuery(cq.id, "Please send /start to begin.");
+    return;
+  }
+
+  const [ns, value, stepRaw] = String(cq.data || "").split(":");
+  const step = Number(stepRaw);
+
+  let session = getTelegramSession(chatId);
+  if (!session || session.merchantWallet !== wallet) {
+    await answerCallbackQuery(cq.id);
+    session = freshSession(chatId, wallet);
+    await showMainMenu(session, "Let's start over. What would you like to do?");
+    return;
+  }
+
+  if (!Number.isFinite(step) || step !== session.step) {
+    await answerCallbackQuery(cq.id, "This button has expired. Use the latest message.");
+    return;
+  }
+
+  await answerCallbackQuery(cq.id);
+
+  if (ns === "act" && value === "cancel") {
+    await showMainMenu(session, "Cancelled. What would you like to do?");
+    return;
+  }
+  if (ns === "act" && value === "create") {
+    await showAskClient(session);
+    return;
+  }
+  if (ns === "due" && session.state === TG_STATE.ASK_DUE) {
+    const days = Number(value);
+    if ([3, 7, 14, 30].includes(days)) {
+      session.draft.dueChoice = String(days);
+      session.draft.dueDateIso = new Date(Date.now() + days * 86400000).toISOString();
+      await showConfirm(session);
+    }
+    return;
+  }
+  if (ns === "act" && value === "confirm" && session.state === TG_STATE.CONFIRM) {
+    await confirmAndCreateInvoice(session);
+    return;
+  }
+  // Unknown or legacy callback: already acknowledged, nothing to do.
+}
+
+// Create the invoice on Confirm. Re-validates the link, forces merchantWallet to
+// the resolved wallet (a bot user can only invoice for their own wallet), and is
+// idempotent via the draft invoice id minted at the confirm screen.
+async function confirmAndCreateInvoice(session) {
+  const chatId = session.chatId;
+  const wallet = resolveWalletByChatId(chatId);
+  if (!wallet || wallet !== session.merchantWallet) {
+    clearTelegramSession(chatId);
+    await sendTelegramMessage(getTelegramToken(), chatId, "Your Telegram link changed. Send /start to reconnect.");
+    return;
+  }
+
+  if (session.draftInvoiceId) {
+    const existing = loadInvoiceDb().invoices.find((inv) => inv.id === session.draftInvoiceId);
+    if (existing) {
+      await showDone(session, existing);
+      return;
+    }
+  }
+
+  let invoice;
+  try {
+    const clientName = session.draft.clientName;
+    invoice = createInvoiceRecord({
+      id: session.draftInvoiceId || makeId(),
+      merchantWallet: wallet,
+      clientName,
+      dueDate: session.draft.dueDateIso,
+      items: [{ description: `Invoice for ${clientName}`.slice(0, 220), quantity: 1, unitPrice: session.draft.amount, total: session.draft.amount }],
+      total: session.draft.amount,
+    });
+  } catch (error) {
+    clearTelegramSession(chatId);
+    await sendTelegramMessage(getTelegramToken(), chatId, `Could not create the invoice: ${error.message || "unknown error"}. Send /start to try again.`);
+    return;
+  }
+  await showDone(session, invoice);
 }
 
 async function setTelegramCommands() {
