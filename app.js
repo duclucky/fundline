@@ -68,16 +68,41 @@ const CCTP_TESTNET_CHAINS = {
   },
 };
 
-const state = {
-  invoices: loadInvoices(),
-  settings: loadSettings(),
-  publicConfig: { ...DEFAULT_PUBLIC_CONFIG },
-  wallet: {
+const WALLET_SESSION_KEY = "arc-invoice-usdc-wallet-session";
+
+function loadWalletState() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WALLET_SESSION_KEY) || "null");
+    if (parsed && parsed.address) {
+      return {
+        connected: true,
+        address: String(parsed.address),
+        balance: parsed.balance || "",
+        authAt: parsed.authAt || "",
+      };
+    }
+  } catch {}
+  return {
     connected: false,
     address: "",
     balance: "",
     authAt: "",
-  },
+  };
+}
+
+function saveWalletState() {
+  if (state.wallet.connected) {
+    localStorage.setItem(WALLET_SESSION_KEY, JSON.stringify(state.wallet));
+  } else {
+    localStorage.removeItem(WALLET_SESSION_KEY);
+  }
+}
+
+const state = {
+  invoices: loadInvoices(),
+  settings: loadSettings(),
+  publicConfig: { ...DEFAULT_PUBLIC_CONFIG },
+  wallet: loadWalletState(),
   walletMenuOpen: false,
   walletConnecting: false,
   invoiceSyncStatus: "idle",
@@ -379,11 +404,13 @@ async function refreshWalletBalance(event) {
   } catch {
     state.wallet.balance = "Unavailable";
   }
+  saveWalletState();
   renderWalletState();
 }
 
 function disconnectWallet(options = {}) {
   state.wallet = { connected: false, address: "", balance: "", authAt: "" };
+  saveWalletState();
   state.walletMenuOpen = false;
   if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: "" };
@@ -401,6 +428,7 @@ function setConnectedWallet(address, options = {}) {
   const normalized = normalizeAddress(address);
   if (!normalized) return;
   state.wallet = { connected: true, address: normalized, balance: state.wallet.balance || "", authAt: options.authAt || new Date().toISOString() };
+  saveWalletState();
   if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: normalized };
     saveSettings();

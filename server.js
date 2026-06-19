@@ -64,6 +64,9 @@ const ARC_PAYMENT_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_PAYMENT_ROUT
 const TELEGRAM_UPDATE_INTERVAL_MS = getTelegramUpdateIntervalMs();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
+// Arc Transaction Memos (read-only reconciliation). Memo contract is predeployed on Arc.
+const MEMO_CONTRACT_ADDRESS = "0x5294E9927c3306DcBaDb03fe70b92e01cCede505";
+const MEMO_EVENT_TOPIC = "0xeb15ee720798341c37739df41be53acfbbf70ae6802dade35457beec6e47a5e4";
 
 const CIRCLE_GATEWAY_API_KEY = String(process.env.CIRCLE_GATEWAY_API_KEY || "").trim();
 const GATEWAY_API_BASE = "https://gateway-api-testnet.circle.com/v1";
@@ -229,6 +232,12 @@ const server = http.createServer((req, res) => {
   const gatewayStatusMatch = url.pathname.match(/^\/api\/gateway\/transfer\/([^/]+)$/);
   if (gatewayStatusMatch) {
     handleGatewayStatus(req, res, gatewayStatusMatch[1]);
+    return;
+  }
+
+  const memoReconcileMatch = url.pathname.match(/^\/api\/memo\/reconcile\/(0x[0-9a-fA-F]{64})$/);
+  if (memoReconcileMatch) {
+    handleMemoReconcile(req, res, memoReconcileMatch[1]);
     return;
   }
 
@@ -2309,6 +2318,79 @@ async function handleGatewayStatus(req, res, transferId) {
   } catch (error) {
     console.error("[Gateway] status error:", error.message);
     sendJson(res, 502, { error: { code: "GATEWAY_ERROR", message: error.message } });
+  }
+}
+
+// Format a raw USDC unit string (6 decimals) as a human decimal string.
+function memoFormatUsdc(unitsStr, decimals) {
+  const n = BigInt(unitsStr);
+  const divisor = BigInt(10) ** BigInt(decimals);
+  const whole = n / divisor;
+  const fraction = (n % divisor).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : `${whole}`;
+}
+
+// Read-only reconciliation of an invoice paid via an Arc Transaction Memo. Given a bytes32
+// invoiceId (the memoId), it scans the Memo contract's events for that id and pairs each
+// memo with the USDC Transfer in the same tx to recover payer, recipient, and amount.
+// This never moves funds and never writes state; it only reads chain data.
+async function handleMemoReconcile(req, res, invoiceId) {
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const id = String(invoiceId || "").toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(id)) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "invoiceId must be a 0x-prefixed bytes32" } });
+    return;
+  }
+  try {
+    const latestHex = await rpcRequest("eth_blockNumber", []);
+    const latest = parseInt(latestHex, 16) || 0;
+    const filter = { address: MEMO_CONTRACT_ADDRESS, topics: [MEMO_EVENT_TOPIC, null, null, id] };
+
+    let logs;
+    try {
+      logs = await rpcRequest("eth_getLogs", [{ ...filter, fromBlock: "0x0", toBlock: "latest" }]);
+    } catch {
+      // Some RPCs cap wide ranges; retry over a bounded recent window.
+      const from = Math.max(0, latest - 100000);
+      logs = await rpcRequest("eth_getLogs", [{ ...filter, fromBlock: "0x" + from.toString(16), toBlock: "latest" }]);
+    }
+
+    const payments = [];
+    for (const log of Array.isArray(logs) ? logs : []) {
+      const payer = "0x" + String(log.topics[1] || "").slice(26);
+      const txHash = log.transactionHash;
+      const block = parseInt(log.blockNumber, 16) || null;
+      let to = null;
+      let amountUnits = null;
+      const receipt = await rpcRequest("eth_getTransactionReceipt", [txHash]);
+      if (receipt && Array.isArray(receipt.logs)) {
+        const transfer = receipt.logs.find(
+          (l) =>
+            normalizeAddress(l.address) === ARC_USDC_TOKEN_ADDRESS &&
+            String(l.topics[0] || "").toLowerCase() === ERC20_TRANSFER_TOPIC,
+        );
+        if (transfer) {
+          to = "0x" + String(transfer.topics[2] || "").slice(26);
+          amountUnits = BigInt(transfer.data).toString();
+        }
+      }
+      payments.push({
+        payer,
+        to,
+        amountUnits,
+        amount: amountUnits ? memoFormatUsdc(amountUnits, ARC_USDC_DECIMALS) : null,
+        txHash,
+        block,
+      });
+    }
+
+    sendJson(res, 200, { invoiceId: id, paid: payments.length > 0, count: payments.length, payments });
+  } catch (error) {
+    console.error("[Memo] reconcile error:", error.message);
+    sendJson(res, 502, { error: { code: "MEMO_ERROR", message: error.message } });
   }
 }
 
