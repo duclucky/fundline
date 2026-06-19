@@ -161,12 +161,12 @@
           <p class="eyebrow">Quick start</p>
           <h2>From invoice to paid status</h2>
           <ol class="steps">
-            <li><strong>Start the app server.</strong><span>Open <code>run-arc-invoice-server.bat</code> and visit <code>http://127.0.0.1:5190</code>.</span></li>
-            <li><strong>Connect merchant wallet.</strong><span>The connected wallet becomes the USDC receiving wallet for new invoices.</span></li>
-            <li><strong>Create an invoice.</strong><span>Add client details, due date, note and line items. Fundline calculates total USDC.</span></li>
-            <li><strong>Send the payment link.</strong><span>Share the public <code>/pay/:invoiceId</code> link or QR code with the customer.</span></li>
-            <li><strong>Customer pays.</strong><span>The customer can use the wallet payment button or pay manually and verify the transaction.</span></li>
-            <li><strong>Receive alerts and receipt.</strong><span>After verification, the invoice becomes paid, Telegram/webhooks run and PDF receipt becomes available.</span></li>
+            <li><strong>Connect your wallet.</strong><span>Go to <code>fundline.xyz/app</code> and connect an EVM wallet. The connected address becomes your USDC receiving wallet.</span></li>
+            <li><strong>Create an invoice.</strong><span>Add client name, due date, and line items. Fundline calculates the USDC total and saves the invoice.</span></li>
+            <li><strong>Send the payment link.</strong><span>Copy the <code>fundline.xyz/pay/:invoiceId</code> link and send it to your client by email, chat, or any channel.</span></li>
+            <li><strong>Client pays.</strong><span>The client opens the link and pays in USDC from Arc, Base, or Ethereum. No account needed on their side.</span></li>
+            <li><strong>Fundline confirms on-chain.</strong><span>Fundline verifies the transaction on Arc. Once confirmed, the invoice status changes to paid and the money is in your wallet.</span></li>
+            <li><strong>Receive your alert and receipt.</strong><span>A Telegram notification fires and a PDF receipt is available on the invoice page.</span></li>
           </ol>
         </section>
 
@@ -188,9 +188,7 @@
           <p class="eyebrow">Product</p>
           <h2>Create invoice</h2>
           <p>
-            An invoice contains client name, client email, due date, note and line items. The server stores invoices
-            locally for demo usage. Production should move this storage to Supabase,
-            Postgres, or another durable database.
+            An invoice contains client name, client email, due date, note and line items.
           </p>
           <table>
             <thead>
