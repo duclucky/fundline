@@ -203,6 +203,12 @@ async function init() {
     renderPayPage(getPayInvoiceId());
     return;
   }
+  if (isBatchRoute()) {
+    await loadBatch(getBatchId());
+    renderWalletState();
+    renderBatchPayPage(getBatchId());
+    return;
+  }
   await syncInvoicesFromServer();
   seedLineItems();
   renderApp();
@@ -259,6 +265,20 @@ function getPayInvoiceId() {
     return window.location.pathname.split("/pay/")[1]?.split("/")[0] || "";
   }
   return new URLSearchParams(window.location.search).get("pay") || "";
+}
+
+function isBatchRoute() {
+  return window.location.pathname.startsWith("/batch/");
+}
+
+function getBatchId() {
+  return isBatchRoute() ? window.location.pathname.split("/batch/")[1]?.split("/")[0] || "" : "";
+}
+
+// Both the invoice pay page and the batch payout page are public, payer-facing routes
+// where the connected wallet is the payer, not the merchant receiving/owning wallet.
+function isPublicPaymentRoute() {
+  return isPayRoute() || isBatchRoute();
 }
 
 function setView(view) {
@@ -392,6 +412,11 @@ function refreshCurrentView() {
     renderPayPage(getPayInvoiceId());
     return;
   }
+  if (isBatchRoute()) {
+    renderWalletState();
+    renderBatchPayPage(getBatchId());
+    return;
+  }
   renderApp();
 }
 
@@ -499,7 +524,7 @@ async function connectWithProvider(provider, name) {
     const authAt = await requireWalletSignature(provider, address);
     setConnectedWallet(address, { authAt, silent: true });
     await refreshWalletBalance();
-    if (!isPayRoute()) await syncInvoicesFromServer();
+    if (!isPublicPaymentRoute()) await syncInvoicesFromServer();
     refreshCurrentView();
     showToast(name ? `Connected with ${name}.` : "Wallet connected.");
   } catch (error) {
@@ -598,7 +623,7 @@ async function connectWithWalletConnect() {
     const authAt = await requireWalletSignature(provider, address);
     setConnectedWallet(address, { authAt, silent: true });
     await refreshWalletBalance();
-    if (!isPayRoute()) await syncInvoicesFromServer();
+    if (!isPublicPaymentRoute()) await syncInvoicesFromServer();
     refreshCurrentView();
     showToast("Wallet connected.");
   } catch (error) {
@@ -697,7 +722,7 @@ function disconnectWallet(options = {}) {
   state.wallet = { connected: false, address: "", balance: "", authAt: "" };
   saveWalletState();
   state.walletMenuOpen = false;
-  if (!isPayRoute()) {
+  if (!isPublicPaymentRoute()) {
     state.settings = { ...state.settings, merchantWallet: "" };
     saveSettings();
   }
@@ -718,12 +743,12 @@ function setConnectedWallet(address, options = {}) {
   if (!normalized) return;
   state.wallet = { connected: true, address: normalized, balance: state.wallet.balance || "", authAt: options.authAt || new Date().toISOString() };
   saveWalletState();
-  if (!isPayRoute()) {
+  if (!isPublicPaymentRoute()) {
     state.settings = { ...state.settings, merchantWallet: normalized };
     saveSettings();
   }
   refreshCurrentView();
-  if (!options.silent) showToast(isPayRoute() ? "Payer wallet connected." : "Receiving wallet set from connected wallet.");
+  if (!options.silent) showToast(isPublicPaymentRoute() ? "Payer wallet connected." : "Receiving wallet set from connected wallet.");
 }
 
 function handleAccountsChanged(accounts) {
@@ -1408,6 +1433,238 @@ function confirmMemoPublish(fields) {
     dialog.addEventListener("cancel", onCancel);
     dialog.showModal();
   });
+}
+
+// ---- Batch payout pay page (/batch/:id) ----
+
+let _payBatchData = null;
+
+async function loadBatch(id) {
+  _payBatchData = null;
+  try {
+    const res = await fetch(`/api/batches/${id}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    _payBatchData = data.batch || null;
+  } catch (error) {
+    _payBatchData = null;
+  }
+}
+
+function resetBusyButton(button) {
+  if (!button) return;
+  button.disabled = false;
+  if (button.dataset.originalHtml) {
+    button.innerHTML = button.dataset.originalHtml;
+    delete button.dataset.originalHtml;
+  }
+}
+
+function renderBatchPayPage(id) {
+  const batch = _payBatchData;
+  document.body.classList.add("payment-mode");
+  els.appPage.hidden = true;
+  els.payPage.hidden = false;
+  els.pageEyebrow.textContent = "Bulk payout";
+  els.pageTitle.textContent = batch ? batch.title || "Bulk payout" : "Payout not found";
+
+  if (!batch) {
+    els.payPage.innerHTML = `
+      <section class="pay-card checkout-card">
+        <div class="payment-hero"><div class="payment-merchant"><p class="eyebrow">Missing payout</p><h1>Payout not found</h1></div></div>
+        <div class="checkout-grid"><div class="empty-state">This payout link was not found on the server. Check the link.</div></div>
+      </section>`;
+    return;
+  }
+
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  const paid = batch.status === "paid";
+  const connected = hasConnectedWallet();
+  const totalText = `${formatUsdc(batch.total)} USDC`;
+  const countText = `${batch.count} recipient${batch.count > 1 ? "s" : ""}`;
+  const rows = batch.items
+    .map(
+      (item, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(item.recipientName) || "-"}</td>
+        <td class="bulk-wallet">${escapeHtml(shortAddress(item.recipientWallet))}</td>
+        <td class="bulk-amt">${formatUsdc(item.amount)}</td>
+        ${batch.withMemo ? `<td>${escapeHtml(item.reference) || "-"}</td>` : ""}
+      </tr>`,
+    )
+    .join("");
+  const explorerTx = batch.txHash ? `${config.explorerBase || ARC_EXPLORER_URL}/tx/${batch.txHash}` : "";
+
+  let actionBlock;
+  if (paid) {
+    actionBlock = `
+      <div class="batch-pay-done">
+        <span class="pay-status pay-status-paid">Paid</span>
+        <p>This payout has been settled on Arc. Every recipient received their USDC in one transaction.</p>
+        ${explorerTx ? `<a class="ghost-action" href="${escapeHtml(explorerTx)}" target="_blank" rel="noreferrer">View transaction on Arcscan</a>` : ""}
+      </div>`;
+  } else if (!config.batchPaymentsEnabled) {
+    actionBlock = `<div class="empty-state">Batch payouts are not enabled on this server yet.</div>`;
+  } else if (!connected) {
+    actionBlock = `
+      <button class="primary-action" id="batchConnectBtn" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM16 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        Connect wallet to pay
+      </button>
+      <p class="batch-pay-note">Connect the wallet that will fund this payout. It will send ${totalText} to all recipients in one transaction.</p>`;
+  } else {
+    actionBlock = `
+      <button class="primary-action" id="payBatchBtn" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        Pay all ${countText}
+      </button>
+      <p class="batch-pay-note">One transaction sends ${totalText} from your wallet to every recipient. You approve USDC once, then confirm the payout.</p>
+      <p class="batch-pay-status" id="batchPayStatus"></p>`;
+  }
+
+  els.payPage.innerHTML = `
+    <section class="pay-card checkout-card">
+      <div class="payment-hero">
+        <div class="payment-merchant">
+          <p class="eyebrow">Bulk payout from</p>
+          <h1>${escapeHtml(batch.creatorName || "Fundline")}</h1>
+          <div class="invoice-number-row">
+            <span>${escapeHtml(batch.title || "Payout")}</span>
+            <span class="pay-status pay-status-${paid ? "paid" : "open"}">${paid ? "paid" : "open"}</span>
+          </div>
+        </div>
+        <div class="batch-pay-amount">
+          <span>Total payout</span>
+          <strong>${totalText}</strong>
+          <span class="bulk-count">${countText}</span>
+        </div>
+      </div>
+      <div class="checkout-grid">
+        <div class="checkout-panel">
+          <div class="bulk-table-wrap">
+            <table class="bulk-table">
+              <thead><tr><th>#</th><th>Name</th><th>Wallet</th><th>Amount</th>${batch.withMemo ? "<th>Reference</th>" : ""}</tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+        <div class="checkout-panel">${actionBlock}</div>
+      </div>
+    </section>`;
+
+  document.querySelector("#batchConnectBtn")?.addEventListener("click", () => connectWallet());
+  document.querySelector("#payBatchBtn")?.addEventListener("click", () => payBatchAll(id));
+}
+
+async function payBatchAll(id) {
+  const batch = _payBatchData;
+  if (!batch || batch.status === "paid") return;
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  if (!config.batchRouterAddress || !config.batchPaymentsEnabled) {
+    showToast("Batch payouts are not enabled on this server yet.");
+    return;
+  }
+  if (!window.FundlineBatch) {
+    showToast("Batch helper failed to load. Hard refresh and try again.");
+    return;
+  }
+  const provider = getProvider();
+  if (!provider?.request) {
+    showToast("No wallet extension found. Install or open an EVM wallet.");
+    return;
+  }
+  let payer = getConnectedWallet();
+  if (!payer) {
+    await connectWallet();
+    payer = getConnectedWallet();
+  }
+  if (!payer) return;
+
+  const button = document.querySelector("#payBatchBtn");
+  const statusEl = document.querySelector("#batchPayStatus");
+  const setStatus = (text) => {
+    if (statusEl) statusEl.textContent = text;
+  };
+
+  try {
+    setButtonBusy(button, "Checking balance...");
+    setStatus("Switching to Arc and checking USDC balance...");
+    await ensurePaymentNetwork(provider, config);
+    const totalUnits = BigInt(batch.totalUnits);
+    const balance = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payer);
+    if (balance < totalUnits) {
+      throw new Error(`Insufficient USDC. Need ${formatUnits(totalUnits, ARC_USDC_DECIMALS)} USDC, wallet has ${formatUnits(balance, ARC_USDC_DECIMALS)} USDC.`);
+    }
+    const allowance = await readUsdcAllowance(provider, config.usdcTokenAddress, payer, config.batchRouterAddress);
+    if (allowance < totalUnits) {
+      setButtonBusy(button, "Approve USDC (1 of 2)...");
+      setStatus("Approve USDC for the batch router (step 1 of 2)...");
+      const approveTx = await sendUsdcApprove(provider, {
+        from: payer,
+        token: config.usdcTokenAddress,
+        spender: config.batchRouterAddress,
+        amount: totalUnits,
+      });
+      setStatus("Confirming approval...");
+      await waitForArcTx(provider, approveTx);
+      setButtonBusy(button, "Pay all (2 of 2)...");
+    } else {
+      setButtonBusy(button, "Paying all...");
+    }
+    setStatus(`Sending one transaction to pay ${batch.count} recipient(s)...`);
+    const txHash = await sendBatchPayment(provider, { from: payer, router: config.batchRouterAddress, batch });
+    setStatus("Waiting for confirmation...");
+    await waitForArcTx(provider, txHash);
+    setStatus("Verifying payout on Arc...");
+    const verified = await verifyBatch(id, payer, txHash);
+    if (verified) {
+      showToast("Batch payout verified.");
+      await loadBatch(id);
+      renderBatchPayPage(id);
+    } else {
+      setStatus("Payment sent, but verification is still pending. Refresh in a few seconds.");
+      resetBusyButton(button);
+    }
+  } catch (error) {
+    const rejected = error?.code === 4001 || /rejected|denied/i.test(String(error?.message));
+    setStatus("");
+    showToast(rejected ? "Transaction rejected by user." : error?.message || "Payout failed.");
+    resetBusyButton(button);
+  }
+}
+
+function sendBatchPayment(provider, { from, router, batch }) {
+  const recipients = batch.items.map((item) => item.recipientWallet);
+  const amounts = batch.items.map((item) => parseTokenUnits(item.amount, ARC_USDC_DECIMALS));
+  const batchId = batch.onchainBatchId;
+  const data = batch.withMemo
+    ? window.FundlineBatch.encodePayBatchWithMemo({ batchId, recipients, amounts, memos: batch.items.map((item) => item.reference || "") })
+    : window.FundlineBatch.encodePayBatch({ batchId, recipients, amounts });
+  return provider.request({
+    method: "eth_sendTransaction",
+    params: [{ from, to: router, data, value: "0x0" }],
+  });
+}
+
+async function verifyBatch(id, payerWallet, txHash) {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      const res = await fetch(`/api/batches/${id}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ txHash, payerWallet }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.batch && data.batch.status === "paid") return true;
+      }
+    } catch (error) {
+      /* retry */
+    }
+    if (attempt < 4) await delay(3000);
+  }
+  return false;
 }
 
 function renderPayPage(invoiceId) {

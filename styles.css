@@ -952,6 +952,56 @@ h2 {
   line-height: 1.6;
 }
 
+/* Batch payout pay page */
+.batch-pay-amount {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+
+.batch-pay-amount span {
+  color: var(--muted-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.batch-pay-amount strong {
+  font-size: 24px;
+  font-weight: 950;
+  letter-spacing: -0.04em;
+  color: var(--gold);
+}
+
+.batch-pay-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.batch-pay-status {
+  margin: 10px 0 0;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 12px;
+  min-height: 16px;
+}
+
+.batch-pay-done {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.batch-pay-done p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
 label {
   display: grid;
   gap: 8px;
