@@ -281,6 +281,48 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   P2). Existing tests still spawn `node server.js` and are unaffected. After deploy the cPanel
   Node app MUST be manually restarted for the new poll loop/handlers to take effect.
 
+- 2026-06-20: Direct/native USDC transfer verification fallback shipped (`71d401f`, pushed).
+  Context: QR/manual payers who do NOT connect a wallet settle with a plain transfer (no
+  PaymentRouter), so no InvoicePaid event. In production requireInvoiceReference is ALWAYS true
+  (router deployed + onchainInvoiceId always set via randomBytes32), so the strict path REQUIRED
+  the InvoicePaid event -> direct transfers never verified -> the manual-verify flow was
+  effectively dead for non-connect payers. Fix in findArcPayment (server.js): try strict router
+  path FIRST (unchanged for connect-wallet payers; it returns immediately so no shadowing/
+  regression), then on no match FALL THROUGH to a direct-transfer fallback: txHash-scoped
+  (findPaymentInRpcReceipt with requireInvoiceReference:false -> ERC-20 Transfer log, then
+  findTokenTransferByTx, then findNativeTransferByTx), then recent-list scans (findRecentToken/
+  NativeTransfer). Precedence router > ERC-20 > native. This is a GLOBAL relaxation (all invoices
+  accept direct transfers as fallback), NOT per-invoice, because the QR is on every pay page.
+  Tradeoff the user explicitly approved: direct transfers carry no on-chain invoiceId, so binding
+  rests on exact amount + recipient + recency + the (txHash) double-spend guard. SECURITY HARDENING
+  done because the fallback activates code that was dead in prod: (1) findMatchingNativeTransaction
+  value>=expected -> exact === (an unrelated larger native transfer must not settle a smaller
+  invoice); (2) isMatchingTokenTransfer now REQUIRES the canonical USDC address when set (dropped
+  the symbol=="USDC" escape that let a spoofed token pass) and forces 6 decimals for the canonical
+  token; (3) both Arcscan matchers reject a match with empty txHash so the dedup guard stays
+  airtight. QR CHANGED again: app.js pay-page QR is now an EIP-681 NATIVE transfer URI
+  (`ethereum:<merchant>@<chainId>?value=<amount*10^18>`), replacing the ERC-20 transfer URI from
+  e76bc71. Reason: OKX (and exchange apps) refused the ERC-20 URI with "add the token and try
+  again" because they don't recognize the 0x3600 system-USDC contract; a NATIVE send needs no
+  token import (USDC IS the Arc gas token). Native value = 18 decimals; server verifies native at
+  ARC_NATIVE_USDC_DECIMALS=18; /api/config now ships nativeUsdcDecimals; app.js adds
+  ARC_NATIVE_USDC_DECIMALS=18 + normalizePublicConfig parsing. server.js now exports
+  findMatchingTokenTransfer/findMatchingNativeTransaction/amountToUnits. New test
+  test_native_transfer_fallback.js (24 assertions: exact-match, overpay-reject, spoof-reject,
+  forced-6-decimals, no-txHash-reject, both Arcscan field shapes). Built via 2 workflows: a
+  6-reader "understand" pass (mapped the whole verify path + surfaced the >=/spoof/decimals risks)
+  and a 6-lens adversarial review that FAILED on session limit (not run) - so the review was done
+  manually instead. OPERATIONAL CAVEATS TO LIVE-TEST (could not verify offline): (a) does OKX/
+  exchange wallets actually honor the EIP-681 native `value` + `@chainId` on scan; (b) does a plain
+  native USDC send on Arc appear in Arcscan /addresses/:payer/transactions and /transactions/:hash
+  with to=merchant + value at 18 decimals so findMatchingNativeTransaction finds it. Pre-existing
+  gaps left out of scope (noted by the understand workflow): the dedup guard is txHash-only (NO
+  chainId dimension, contra the docs rule) - harmless while settlement is Arc-only; TOCTOU on the
+  read-modify-write JSON store (two concurrent verifies of different invoices citing one txHash
+  could both pass); isRecentEnough has a 5-min-early tolerance and no upper bound. Earlier this
+  session also: cross-chain roadmap steps 1 (CHAINS table refactor, 691d88b) + 4 (MaxUint256
+  one-time approve, d6f1c2f); pay-page UX split into wallet vs manual flows (3020e9b).
+
 ## Open threads / TODOs
 
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
