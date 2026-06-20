@@ -1766,7 +1766,11 @@ h3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
-  align-items: start;
+  align-items: stretch;
+}
+
+.proof-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .proof-grid .proof-panel {

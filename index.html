@@ -142,9 +142,9 @@
         <div class="section-header">
           <p class="eyebrow">Live on testnet</p>
           <h2 id="proof-title">Every payment, confirmed on-chain.</h2>
-          <p class="section-sub">These are real USDC payments on Arc Testnet. One is a plain payment; the other writes the invoice details on-chain as a public, permanent memo. Anyone can verify both.</p>
+          <p class="section-sub">These are real USDC payments on Arc Testnet. One is a plain payment, one is paid cross-chain via CCTP, and one writes the invoice details on-chain as a public, permanent memo. Anyone can verify them.</p>
         </div>
-        <div class="proof-grid">
+        <div class="proof-grid proof-grid-3">
           <div class="proof-panel reveal">
             <div class="proof-header">
               <span class="proof-badge">Payment verified</span>
@@ -180,6 +180,43 @@
             <div class="proof-actions">
               <a class="nav-button secondary" href="/pay/0484be5a14e152dcd648">See the payment page</a>
               <a class="nav-button secondary" href="https://testnet.arcscan.app/tx/0x6def2db0dae28e9a62ad77b4380bfe464711935c8405996de69831d257630826" target="_blank" rel="noopener">View on Arcscan</a>
+            </div>
+          </div>
+          <div class="proof-panel reveal">
+            <div class="proof-header">
+              <span class="proof-badge">Payment verified</span>
+              <span class="proof-chain">Arc Testnet</span>
+            </div>
+            <p class="proof-title">Cross-chain payment</p>
+            <div class="proof-rows">
+              <div class="proof-row">
+                <span class="proof-label">Amount</span>
+                <span class="proof-value proof-amount">10 USDC</span>
+              </div>
+              <div class="proof-row">
+                <span class="proof-label">Route</span>
+                <span class="proof-value">Bridged via CCTP, then paid on Arc</span>
+              </div>
+              <div class="proof-row">
+                <span class="proof-label">Transaction</span>
+                <a class="proof-value proof-link proof-hash" href="https://testnet.arcscan.app/tx/0xcccd940ba3aa92218fd2c8c1c7caf9f37370fbcaa3857d9e4f5d2fcaaa378987" target="_blank" rel="noopener">0xcccd940ba3aa92218fd2c8c1c7caf9f37370fbca...78987</a>
+              </div>
+              <div class="proof-row">
+                <span class="proof-label">Router</span>
+                <a class="proof-value proof-link proof-hash" href="https://testnet.arcscan.app/address/0x5613D701D2e6A70643680eabBeEdc0e924b30848" target="_blank" rel="noopener">FundlineMemoRouter</a>
+              </div>
+              <div class="proof-row">
+                <span class="proof-label">On-chain memo</span>
+                <span class="proof-value">None (kept private)</span>
+              </div>
+              <div class="proof-row">
+                <span class="proof-label">Status</span>
+                <span class="proof-value proof-status-paid">Paid, verified once</span>
+              </div>
+            </div>
+            <div class="proof-actions">
+              <a class="nav-button secondary" href="https://testnet.arcscan.app/tx/0xcccd940ba3aa92218fd2c8c1c7caf9f37370fbcaa3857d9e4f5d2fcaaa378987" target="_blank" rel="noopener">View transaction on Arcscan</a>
+              <a class="nav-button secondary" href="https://testnet.arcscan.app/address/0x5613D701D2e6A70643680eabBeEdc0e924b30848" target="_blank" rel="noopener">View contract source</a>
             </div>
           </div>
           <div class="proof-panel reveal">
