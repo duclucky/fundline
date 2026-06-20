@@ -1323,8 +1323,18 @@ function renderPayPage(invoiceId) {
   }
 
   const status = getInvoiceStatus(invoice);
-  const payLink = getInvoicePayLink(invoice);
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=8&data=${encodeURIComponent(payLink)}`;
+  const payConfig = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  // EIP-681 payment URI. A wallet or exchange app that supports it prefills the
+  // recipient, token and amount on scan (a direct USDC transfer, verified later
+  // by matching recipient + amount). The wallet must already have this network
+  // configured. Falls back to the pay link for paid invoices (nothing to pay).
+  const amountAtomic = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS).toString();
+  const payUri =
+    invoice.status === "paid"
+      ? getInvoicePayLink(invoice)
+      : `ethereum:${payConfig.usdcTokenAddress}@${payConfig.chainId}/transfer?address=${invoice.merchantWallet}&uint256=${amountAtomic}`;
+  const qrCaption = invoice.status === "paid" ? "Payment link QR" : "Scan to pay";
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=8&data=${encodeURIComponent(payUri)}`;
   els.payPage.innerHTML = `
     <section class="pay-card checkout-card">
       <div class="payment-hero">
@@ -1344,7 +1354,7 @@ function renderPayPage(invoiceId) {
           </div>
           <div class="qr-box">
             <img src="${escapeHtml(qrUrl)}" alt="Payment QR code" />
-            <span>Payment link QR</span>
+            <span>${escapeHtml(qrCaption)}</span>
           </div>
         </div>
       </div>
