@@ -333,13 +333,19 @@ function renderWalletState() {
   }
 
   if (els.walletGate) {
+    const telegramReady = connected && Boolean(state.settings && state.settings.telegramChatId);
     els.walletGate.classList.toggle("is-connected", connected);
     els.walletGateTitle.textContent = connected ? "Wallet connected" : "Connect wallet before creating invoice";
-    els.walletGateText.textContent = connected
-      ? `${shortAddress(address)} will receive USDC for newly created invoices. Set up Telegram bot to get notified the moment an invoice is paid.`
-      : "The connected wallet becomes your USDC receiving wallet for this invoice.";
+    if (!connected) {
+      els.walletGateText.textContent = "The connected wallet becomes your USDC receiving wallet for this invoice.";
+    } else if (telegramReady) {
+      els.walletGateText.textContent = `${shortAddress(address)} will receive USDC for newly created invoices. Telegram alerts are on, so you will be notified the moment an invoice is paid.`;
+    } else {
+      els.walletGateText.textContent = `${shortAddress(address)} will receive USDC for newly created invoices. Set up Telegram bot to get notified the moment an invoice is paid.`;
+    }
     if (els.walletGateConnect) {
-      els.walletGateConnect.hidden = false;
+      // Once Telegram is configured the shortcut button has nothing left to do, so hide it.
+      els.walletGateConnect.hidden = telegramReady;
       els.walletGateConnect.innerHTML = connected ? WALLET_GATE_TELEGRAM_HTML : WALLET_GATE_CONNECT_HTML;
       els.walletGateConnect.setAttribute("title", connected ? "Set up Telegram bot in settings" : "Connect wallet");
     }
@@ -1274,6 +1280,7 @@ async function saveSettingsFromForm(event) {
   };
   saveSettings();
   renderSettings();
+  renderWalletState();
   showToast("Settings saved.");
 }
 
@@ -3549,6 +3556,7 @@ async function fetchServerSettings() {
         }
         saveSettings();
         renderSettings();
+        renderWalletState();
       }
     }
   } catch(e) {}
