@@ -1,4 +1,4 @@
-// Unit test for the PaymentRouterV2 on-chain memo helpers (memo-util.js).
+// Unit test for the FundlineMemoRouter on-chain memo helpers (memo-util.js).
 //
 // Covers the two correctness-critical pure functions:
 //   encodePayInvoiceWithMemo - the hand-rolled ABI encoding of

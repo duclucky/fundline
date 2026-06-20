@@ -360,6 +360,27 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   the frontend so payInvoiceWithMemo hits V2. Memo-off invoices are safe in any order. Consider
   Arcscan-verifying V2 like V1 and updating onchain-reference.md with the V2 address once deployed.
 
+- 2026-06-20: FundlineMemoRouter DEPLOYED + VERIFIED on Arc testnet. Renamed from the
+  initial PaymentRouterV2 (user wanted the router named "FundLine Memo Router"; Solidity
+  identifier FundlineMemoRouter, no spaces). Files renamed: contracts/PaymentRouterV2.sol ->
+  contracts/FundlineMemoRouter.sol, scripts/deploy-payment-router-v2.js ->
+  scripts/deploy-memo-router.js, ABI -> contracts/FundlineMemoRouter.abi.json; npm script
+  deploy:memo-router. NOTE first deploy under the old name PaymentRouterV2 landed at
+  0x94d4f81d2cD0747C158D0E7bb8aE518928aB78dD (tx 0x898314f7...) and is now ORPHANED/unused
+  (renaming changes the metadata hash so it could not verify as FundlineMemoRouter; redeployed).
+  ACTIVE router: FundlineMemoRouter at 0x5613D701D2e6A70643680eabBeEdc0e924b30848 (deploy tx
+  0xcba05b08..., block 47840156). Local .env ARC_PAYMENT_ROUTER_ADDRESS now points to it; app.js
+  DEFAULT_PUBLIC_CONFIG.paymentRouterAddress hardcoded fallback updated to it too. VERIFIED on
+  Arcscan via the same Blockscout recipe as V1 (POST /api/v2/smart-contracts/{addr}/verification/
+  via/flattened-code, compiler v0.8.35+commit.47b9dedd, optimizer on/200, evm_version "default",
+  single flattened source, contract_name FundlineMemoRouter, autodetect_constructor_args true,
+  license mit) - is_fully_verified=true, name shows FundlineMemoRouter. STILL PENDING (not done):
+  (1) cPanel env ARC_PAYMENT_ROUTER_ADDRESS must be updated to 0x5613D701... + restart the Node
+  app, BEFORE/with pushing the frontend (else the pushed app.js calls payInvoiceWithMemo on the
+  old V1 router which lacks it -> revert for memo-enabled invoices); (2) the feature commit
+  (74924e6, local, not pushed) plus this rename are NOT pushed yet. Update onchain-reference.md
+  already done (FundlineMemoRouter listed as ACTIVE, V1 marked LEGACY).
+
 ## Open threads / TODOs
 
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file

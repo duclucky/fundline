@@ -14,7 +14,7 @@ const DEFAULT_PUBLIC_CONFIG = {
   usdcTokenAddress: "0x3600000000000000000000000000000000000000",
   usdcDecimals: ARC_USDC_DECIMALS,
   nativeUsdcDecimals: ARC_NATIVE_USDC_DECIMALS,
-  paymentRouterAddress: "0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24",
+  paymentRouterAddress: "0x5613D701D2e6A70643680eabBeEdc0e924b30848",
   onchainPaymentsEnabled: true,
   walletConnectProjectId: "",
 };

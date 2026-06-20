@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "deploy:payment-router": "node scripts/deploy-payment-router.js",
-    "deploy:payment-router-v2": "node scripts/deploy-payment-router-v2.js"
+    "deploy:memo-router": "node scripts/deploy-memo-router.js"
   },
   "dependencies": {
     "acorn": "^8.17.0",

@@ -1,6 +1,10 @@
 # Key on-chain facts (verbatim, do not alter)
 
-- PaymentRouter (Arc testnet): `0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24`
+- FundlineMemoRouter (Arc testnet, ACTIVE settlement router): `0x5613D701D2e6A70643680eabBeEdc0e924b30848`
+  (verified on Arcscan; superset of PaymentRouter, adds opt-in payInvoiceWithMemo + InvoiceMemo
+  log; same payInvoice selector and same InvoicePaid event/topic as V1). Set
+  `ARC_PAYMENT_ROUTER_ADDRESS` to this.
+- PaymentRouter (Arc testnet, LEGACY, superseded by FundlineMemoRouter): `0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24`
 - Deployer wallet: `0x8124ca3f0ca935e6beb69f2857e33d32fa3b54ea`
 - USDC on Arc (system contract, 6 decimals): `0x3600000000000000000000000000000000000000`
 - Arc chainId: `5042002`

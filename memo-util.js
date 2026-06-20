@@ -1,4 +1,4 @@
-// Shared memo helpers for the PaymentRouterV2 on-chain invoice memo. Pure, dependency
+// Shared memo helpers for the FundlineMemoRouter on-chain invoice memo. Pure, dependency
 // free, and usable in both the browser (loaded as a plain <script>, exposes
 // window.FundlineMemo) and Node (require, for tests). Keep it free of DOM/browser
 // globals so the test can import it directly.
@@ -6,14 +6,14 @@
 // The memo is an opt-in, human-readable record a merchant may embed in the payment
 // transaction. The merchant picks which invoice fields go on-chain at create time;
 // this module turns that selection into a deterministic memo string and ABI-encodes
-// the PaymentRouterV2.payInvoiceWithMemo(bytes32,address,uint256,bytes) calldata.
+// the FundlineMemoRouter.payInvoiceWithMemo(bytes32,address,uint256,bytes) calldata.
 (function (global) {
   "use strict";
 
   // Canonical field set and order. Must match ONCHAIN_MEMO_FIELD_KEYS in server.js.
   var MEMO_FIELD_KEYS = ["number", "total", "createdAt", "dueDate", "merchantName", "clientName", "items", "note", "hash"];
   var PAY_WITH_MEMO_SELECTOR = "0x53a2a881"; // payInvoiceWithMemo(bytes32,address,uint256,bytes)
-  var MAX_MEMO_BYTES = 2048; // must match PaymentRouterV2.MAX_MEMO_BYTES
+  var MAX_MEMO_BYTES = 2048; // must match FundlineMemoRouter.MAX_MEMO_BYTES
 
   function strip0x(value) {
     return String(value == null ? "" : value).replace(/^0x/i, "");

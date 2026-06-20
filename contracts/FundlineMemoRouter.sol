@@ -5,7 +5,7 @@ interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
 }
 
-// PaymentRouterV2 is a drop-in successor to PaymentRouter. It keeps the exact same
+// FundlineMemoRouter is a drop-in successor to PaymentRouter. It keeps the exact same
 // payInvoice(bytes32,address,uint256) entry point and the exact same InvoicePaid event
 // signature, so the existing payment and verification paths work unchanged when the
 // configured router address is pointed here. It adds an optional payInvoiceWithMemo
@@ -16,7 +16,7 @@ interface IERC20 {
 // Non-custodial invariant (unchanged): the only fund movement is
 // transferFrom(payer -> merchant). The contract holds no balance and has no owner,
 // admin, or withdraw path. The memo cannot redirect or seize funds.
-contract PaymentRouterV2 {
+contract FundlineMemoRouter {
     address public immutable usdc;
 
     // Hard cap on memo size to keep gas bounded and block oversized calldata.

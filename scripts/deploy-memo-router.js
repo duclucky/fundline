@@ -5,8 +5,8 @@ const { ContractFactory, JsonRpcProvider, Wallet, getAddress } = require("ethers
 
 const ROOT = path.resolve(__dirname, "..");
 const ENV_PATH = path.join(ROOT, ".env");
-const CONTRACT_PATH = path.join(ROOT, "contracts", "PaymentRouterV2.sol");
-const ABI_OUT_PATH = path.join(ROOT, "contracts", "PaymentRouterV2.abi.json");
+const CONTRACT_PATH = path.join(ROOT, "contracts", "FundlineMemoRouter.sol");
+const ABI_OUT_PATH = path.join(ROOT, "contracts", "FundlineMemoRouter.abi.json");
 
 main().catch((error) => {
   console.error(error.message || error);
@@ -20,7 +20,7 @@ async function main() {
   const privateKey = normalizePrivateKey(requiredEnv("ARC_DEPLOYER_PRIVATE_KEY"));
   const usdc = getAddress(requiredEnv("ARC_USDC_TOKEN_ADDRESS"));
 
-  const { abi, bytecode } = compilePaymentRouterV2();
+  const { abi, bytecode } = compileMemoRouter();
   fs.writeFileSync(ABI_OUT_PATH, `${JSON.stringify(abi, null, 2)}\n`);
 
   const provider = new JsonRpcProvider(rpcUrl);
@@ -32,7 +32,7 @@ async function main() {
     throw new Error(`Deployer ${wallet.address} has 0 native gas balance on chain ${network.chainId}.`);
   }
 
-  console.log(`Deploying PaymentRouterV2 on chain ${network.chainId}`);
+  console.log(`Deploying FundlineMemoRouter on chain ${network.chainId}`);
   console.log(`Deployer: ${wallet.address}`);
   console.log(`USDC: ${usdc}`);
 
@@ -47,18 +47,18 @@ async function main() {
 
   updateEnvValue(ENV_PATH, "ARC_PAYMENT_ROUTER_ADDRESS", address);
 
-  console.log(`PaymentRouterV2 deployed: ${address}`);
+  console.log(`FundlineMemoRouter deployed: ${address}`);
   console.log(`Block: ${receipt?.blockNumber || "-"}`);
   console.log("Updated .env: ARC_PAYMENT_ROUTER_ADDRESS");
   console.log("Next: update the hardcoded paymentRouterAddress fallback in app.js + server.js if needed, then restart the app.");
 }
 
-function compilePaymentRouterV2() {
+function compileMemoRouter() {
   const source = fs.readFileSync(CONTRACT_PATH, "utf8");
   const input = {
     language: "Solidity",
     sources: {
-      "PaymentRouterV2.sol": { content: source },
+      "FundlineMemoRouter.sol": { content: source },
     },
     settings: {
       optimizer: { enabled: true, runs: 200 },
@@ -80,9 +80,9 @@ function compilePaymentRouterV2() {
     throw new Error(fatal.map((item) => item.formattedMessage || item.message).join("\n"));
   }
 
-  const contract = output.contracts?.["PaymentRouterV2.sol"]?.PaymentRouterV2;
+  const contract = output.contracts?.["FundlineMemoRouter.sol"]?.FundlineMemoRouter;
   if (!contract?.abi || !contract?.evm?.bytecode?.object) {
-    throw new Error("PaymentRouterV2 compile output is missing ABI or bytecode.");
+    throw new Error("FundlineMemoRouter compile output is missing ABI or bytecode.");
   }
 
   return {
