@@ -97,6 +97,22 @@ a {
   min-height: 58px;
   padding: 0 4px 16px;
   border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.brand:hover {
+  opacity: 0.82;
+}
+
+.brand strong {
+  transition: color 0.15s;
+}
+
+.brand:hover strong {
+  color: var(--gold);
 }
 
 .brand-img {
