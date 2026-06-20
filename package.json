@@ -5,7 +5,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "deploy:payment-router": "node scripts/deploy-payment-router.js"
+    "deploy:payment-router": "node scripts/deploy-payment-router.js",
+    "deploy:payment-router-v2": "node scripts/deploy-payment-router-v2.js"
   },
   "dependencies": {
     "acorn": "^8.17.0",

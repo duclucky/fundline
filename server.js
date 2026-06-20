@@ -66,6 +66,11 @@ const ARC_PAYMENT_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_PAYMENT_ROUT
 const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
+// Fields a merchant may opt to embed in the on-chain payment memo (PaymentRouterV2
+// InvoiceMemo log). The picker on the create form is whitelisted to these keys so a
+// client cannot push arbitrary invoice attributes on-chain. "hash" adds a tamper-proof
+// commitment of the whole invoice without revealing its contents.
+const ONCHAIN_MEMO_FIELD_KEYS = ["number", "total", "createdAt", "dueDate", "merchantName", "clientName", "items", "note", "hash"];
 // Arc Transaction Memos (read-only reconciliation). Memo contract is predeployed on Arc.
 const MEMO_CONTRACT_ADDRESS = "0x5294E9927c3306DcBaDb03fe70b92e01cCede505";
 const MEMO_EVENT_TOPIC = "0xeb15ee720798341c37739df41be53acfbbf70ae6802dade35457beec6e47a5e4";
@@ -1106,6 +1111,7 @@ function normalizeInvoice(input, options = {}) {
     clientEmail: String(input.clientEmail || "").trim().slice(0, 180),
     dueDate,
     note: String(input.note || "").trim().slice(0, 1000),
+    onchainMemoFields: normalizeMemoFields(input.onchainMemoFields),
     items,
     total,
     status,
@@ -1280,6 +1286,15 @@ function getAgentIdempotencyKey(req, input = {}) {
 
 function normalizeIdempotencyKey(value) {
   return String(value || "").trim().slice(0, 120);
+}
+
+// Sanitize the merchant's on-chain memo field selection: keep only known keys, drop
+// duplicates, and preserve the canonical order so the memo text is deterministic. An
+// empty result means no memo is attached (the "do not attach info" choice).
+function normalizeMemoFields(value) {
+  if (!Array.isArray(value)) return [];
+  const chosen = new Set(value.map((item) => String(item || "").trim()));
+  return ONCHAIN_MEMO_FIELD_KEYS.filter((key) => chosen.has(key));
 }
 
 function clampListLimit(value, fallback, max) {

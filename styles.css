@@ -690,6 +690,66 @@ h2 {
   padding: 18px 20px;
 }
 
+.memo-onchain {
+  margin: 0 20px 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--control);
+  background: rgba(212, 175, 55, 0.04);
+}
+
+.memo-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.memo-toggle input[type="checkbox"] {
+  accent-color: var(--gold);
+  width: 16px;
+  height: 16px;
+}
+
+.memo-fields {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.memo-hint {
+  margin: 0;
+  color: var(--muted-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.memo-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+
+.memo-options label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: none;
+}
+
+.memo-options input[type="checkbox"] {
+  accent-color: var(--gold);
+  width: 15px;
+  height: 15px;
+}
+
+.memo-options .memo-sensitive {
+  color: var(--amber);
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -1492,6 +1552,7 @@ select {
   }
 
   .form-grid,
+  .memo-options,
   .payment-source-box,
   .progress-step,
   .payment-hero,

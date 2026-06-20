@@ -226,6 +226,7 @@ function bindEvents() {
   els.lineItems?.addEventListener("input", updateInvoiceTotal);
   els.lineItems?.addEventListener("click", handleLineItemAction);
   els.invoiceForm?.addEventListener("submit", createInvoice);
+  wireMemoToggle();
   els.invoiceList?.addEventListener("click", handleInvoiceAction);
   els.settingsForm?.addEventListener("submit", saveSettingsFromForm);
   els.walletButton?.addEventListener("click", handleWalletButton);
@@ -992,6 +993,28 @@ function setDefaultDueDate() {
   dueDate.value = date.toISOString().slice(0, 10);
 }
 
+// Show/hide the on-chain memo field list when the master toggle flips. The memo is
+// off by default, so the field list starts hidden.
+function wireMemoToggle() {
+  const toggle = document.querySelector("#memoEnabled");
+  const fields = document.querySelector("#memoFields");
+  if (!toggle || !fields) return;
+  const sync = () => {
+    fields.hidden = !toggle.checked;
+  };
+  toggle.addEventListener("change", sync);
+  sync();
+}
+
+// Collect the merchant's on-chain memo selection from the create form. Returns [] when
+// the master toggle is off (no memo attached). Filtered to the canonical whitelist.
+function collectMemoFields() {
+  const toggle = document.querySelector("#memoEnabled");
+  if (!toggle || !toggle.checked) return [];
+  const checked = Array.from(document.querySelectorAll("input[name='memoField']:checked")).map((el) => el.value);
+  return window.FundlineMemo ? window.FundlineMemo.normalizeMemoFields(checked) : checked;
+}
+
 function addLineItem(item = {}) {
   const row = document.createElement("div");
   row.className = "line-item";
@@ -1099,6 +1122,7 @@ async function createInvoice(event) {
     clientEmail: String(form.get("clientEmail") || "").trim(),
     dueDate: String(form.get("dueDate") || ""),
     note: String(form.get("note") || "").trim(),
+    onchainMemoFields: collectMemoFields(),
     items,
     total,
     status: "open",
@@ -1990,6 +2014,33 @@ async function submitArcPayment(invoice, payerWallet, button) {
   return autoVerifySubmittedPayment(invoice.id, { payerWallet, txHash, button });
 }
 
+// SHA-256 (hex) of the invoice's canonical content, for the optional on-chain
+// commitment. Uses the same canonical string the verifier would, so the hash is
+// reproducible off-chain.
+async function computeInvoiceCommitHash(invoice) {
+  const canonical = window.FundlineMemo.canonicalInvoiceForHash(invoice);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Build the opt-in on-chain memo text for an invoice from its stored field selection.
+// Returns "" when the merchant did not opt in, in which case the plain payInvoice path
+// is used and nothing extra is written on-chain.
+async function buildOnchainMemo(invoice) {
+  const memo = window.FundlineMemo;
+  const fields = memo ? memo.normalizeMemoFields(invoice.onchainMemoFields) : [];
+  if (!memo || fields.length === 0) return "";
+  let hashHex = "";
+  if (fields.includes("hash")) {
+    try {
+      hashHex = await computeInvoiceCommitHash(invoice);
+    } catch (error) {
+      hashHex = "";
+    }
+  }
+  return memo.buildInvoiceMemoText(invoice, fields, hashHex);
+}
+
 // Stepper-aware version used by direct pay path.
 async function submitArcPaymentWithProgress(invoice, payerWallet, button, progress) {
   const provider = getProvider();
@@ -2022,12 +2073,14 @@ async function submitArcPaymentWithProgress(invoice, payerWallet, button, progre
     setProgressStep(progress, "pay", "active", "Paying invoice...");
     setButtonBusy(button, "Paying invoice...");
   }
+  const memoText = await buildOnchainMemo(invoice);
   const txHash = await sendRouterPayment(provider, {
     from: payerWallet,
     router: config.paymentRouterAddress,
     invoiceId: invoice.onchainInvoiceId,
     merchantWallet: invoice.merchantWallet,
     amount: amountUnits,
+    memoText,
   });
   setProgressStep(progress, "pay", "done", "Payment submitted");
   if (_activeBridgeContext) _activeBridgeContext.arcTxHash = txHash;
@@ -2423,10 +2476,15 @@ async function waitForArcTx(provider, txHash) {
   throw new Error("Transaction not confirmed after 3 minutes.");
 }
 
-function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, amount }) {
+function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, amount, memoText }) {
   const invoiceBytes = normalizeBytes32(invoiceId);
   if (!invoiceBytes) throw new Error("Invoice is missing a valid onchain invoice ID.");
-  const data = `${PAYMENT_ROUTER_PAY_SELECTOR}${encodeBytes32(invoiceBytes)}${encodeAddress(merchantWallet)}${encodeUint256(amount)}`;
+  // With an opt-in memo, call payInvoiceWithMemo so the chosen invoice fields are written
+  // on-chain in the same settlement tx. Without one, use the plain payInvoice selector so
+  // nothing extra is emitted and the calldata is identical to the pre-memo path.
+  const data = memoText && window.FundlineMemo
+    ? window.FundlineMemo.encodePayInvoiceWithMemo({ invoiceId: invoiceBytes, merchant: merchantWallet, amount, memoText })
+    : `${PAYMENT_ROUTER_PAY_SELECTOR}${encodeBytes32(invoiceBytes)}${encodeAddress(merchantWallet)}${encodeUint256(amount)}`;
   return provider.request({
     method: "eth_sendTransaction",
     params: [{ from, to: router, data, value: "0x0" }],

@@ -180,6 +180,30 @@
                 </label>
               </div>
 
+              <div class="memo-onchain" id="memoOnchain">
+                <label class="memo-toggle">
+                  <input type="checkbox" id="memoEnabled" name="memoEnabled" />
+                  <span class="field-label">
+                    Attach invoice details on-chain
+                    <span class="help-tip" tabindex="0" data-help="Records the chosen fields in the payment transaction as a public, permanent memo on Arc. Off by default. Anything you tick becomes readable by anyone on the explorer, so leave it off if the invoice is private." aria-label="On-chain memo help">?</span>
+                  </span>
+                </label>
+                <div class="memo-fields" id="memoFields" hidden>
+                  <p class="memo-hint">Pick what to write on-chain. The safe fields are preselected. The marked fields reveal customer or order details publicly and forever.</p>
+                  <div class="memo-options">
+                    <label><input type="checkbox" name="memoField" value="number" checked /> Invoice number</label>
+                    <label><input type="checkbox" name="memoField" value="total" checked /> Total amount</label>
+                    <label><input type="checkbox" name="memoField" value="createdAt" checked /> Issue date</label>
+                    <label><input type="checkbox" name="memoField" value="dueDate" checked /> Due date</label>
+                    <label><input type="checkbox" name="memoField" value="merchantName" checked /> Your business name</label>
+                    <label class="memo-sensitive"><input type="checkbox" name="memoField" value="clientName" /> Client name (public)</label>
+                    <label class="memo-sensitive"><input type="checkbox" name="memoField" value="items" /> Line item details (public)</label>
+                    <label class="memo-sensitive"><input type="checkbox" name="memoField" value="note" /> Invoice note (public)</label>
+                    <label><input type="checkbox" name="memoField" value="hash" /> Tamper-proof hash (hides content)</label>
+                  </div>
+                </div>
+              </div>
+
               <div class="line-items">
                 <div class="line-head">
                   <div>
@@ -292,6 +316,7 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/memo-util.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

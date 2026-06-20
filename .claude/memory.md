@@ -323,6 +323,43 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   session also: cross-chain roadmap steps 1 (CHAINS table refactor, 691d88b) + 4 (MaxUint256
   one-time approve, d6f1c2f); pay-page UX split into wallet vs manual flows (3020e9b).
 
+- 2026-06-20: PaymentRouterV2 + opt-in on-chain invoice memo BUILT (committed, NOT pushed,
+  NOT deployed). Decision recap: rejected the "Memo contract + PaymentRouter in parallel"
+  option (Arc Memo is EOA-only via CallFrom tx.origin semantics -> breaks Safe/smart-account
+  payers; Arc-only -> useless for the CCTP cross-chain leg; weaker 2-log verify) in favor of
+  extending the router. This is CONSISTENT with the 2026-06-19 Memo-vs-Router verdict (router
+  stays the spine). contracts/PaymentRouterV2.sol: keeps payInvoice(bytes32,address,uint256)
+  with the IDENTICAL selector 0xe1a9ef45 AND the IDENTICAL InvoicePaid event signature/topic
+  (0x3c732fcd...) so the existing verify path + Arcscan indexer work unchanged when the
+  configured router is pointed at V2; adds payInvoiceWithMemo(bytes32,address,uint256,bytes)
+  selector 0x53a2a881 which, after the same transferFrom settlement, emits
+  InvoiceMemo(bytes32 indexed invoiceId, address indexed payer, bytes memo) only when memo
+  length > 0. MAX_MEMO_BYTES = 2048 cap. Non-custodial preserved (only transferFrom, holds no
+  funds, no owner/withdraw). Compiles clean (solc), bytecode 1293 bytes. Deploy via
+  scripts/deploy-payment-router-v2.js (npm run deploy:payment-router-v2) - mirrors the V1
+  script, also writes contracts/PaymentRouterV2.abi.json and overwrites ARC_PAYMENT_ROUTER_ADDRESS.
+  Memo is OPT-IN per invoice, OFF by default. Field picker on the create form (app.html
+  #memoOnchain / #memoEnabled / name="memoField"): safe fields preselected (number, total,
+  createdAt, dueDate, merchantName), sensitive ones off + amber-marked (clientName, items,
+  note - public forever), plus a "hash" option (SHA-256 commitment, hides content). Server
+  whitelist ONCHAIN_MEMO_FIELD_KEYS + normalizeMemoFields stores invoice.onchainMemoFields.
+  Shared pure helpers in NEW memo-util.js (browser global window.FundlineMemo + Node export;
+  loaded via <script src="/memo-util.js"> before app.js): normalizeMemoFields,
+  buildInvoiceMemoText (readable UTF-8 "Fundline | invoice X | 10.50 USDC | ... | commit:<hash>",
+  canonical field order, "" when nothing selected), canonicalInvoiceForHash, and
+  encodePayInvoiceWithMemo (hand-rolled ABI for the 4-arg fn, dynamic-bytes tail, offset 0x80).
+  app.js: collectMemoFields()/wireMemoToggle() on create; buildOnchainMemo()+computeInvoiceCommitHash()
+  (crypto.subtle SHA-256) at pay time; sendRouterPayment branches to encodePayInvoiceWithMemo
+  when memoText present else the plain 3-arg path (unchanged). test_memo_encoding.js (27 assertions:
+  ABI byte-for-byte vs ethers across empty/aligned/unaligned/unicode/max sizes, >2048 reject,
+  field-selection incl. sensitive-not-leaked, hash commitment). node --check + all tests pass.
+  CRITICAL DEPLOY ORDER (frontend calls payInvoiceWithMemo which V1 lacks -> would revert for
+  memo-enabled invoices): (1) user runs npm run deploy:payment-router-v2 with ARC_DEPLOYER_PRIVATE_KEY;
+  (2) update ARC_PAYMENT_ROUTER_ADDRESS in the cPanel env to the V2 address + restart (V2 still
+  serves the old 3-arg payInvoice so the not-yet-updated frontend keeps working); (3) THEN push
+  the frontend so payInvoiceWithMemo hits V2. Memo-off invoices are safe in any order. Consider
+  Arcscan-verifying V2 like V1 and updating onchain-reference.md with the V2 address once deployed.
+
 ## Open threads / TODOs
 
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
