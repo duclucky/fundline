@@ -16,6 +16,9 @@ const DEFAULT_PUBLIC_CONFIG = {
   nativeUsdcDecimals: ARC_NATIVE_USDC_DECIMALS,
   paymentRouterAddress: "0x5613D701D2e6A70643680eabBeEdc0e924b30848",
   onchainPaymentsEnabled: true,
+  batchRouterAddress: "",
+  batchPaymentsEnabled: false,
+  maxBatchRecipients: 256,
   walletConnectProjectId: "",
 };
 
@@ -819,6 +822,13 @@ function normalizePublicConfig(config) {
     : `0x${Math.trunc(chainId).toString(16)}`;
   const usdcTokenAddress = normalizeAddress(config.usdcTokenAddress) || DEFAULT_PUBLIC_CONFIG.usdcTokenAddress;
   const paymentRouterAddress = normalizeAddress(config.paymentRouterAddress) || DEFAULT_PUBLIC_CONFIG.paymentRouterAddress;
+  // No baked fallback for the batch router: the batch pay page only lights up when the
+  // server reports an address (i.e. cPanel env is set), which is also when server-side
+  // verify works, so the pay and verify sides are gated together (no half-enabled state).
+  const batchRouterAddress = normalizeAddress(config.batchRouterAddress) || "";
+  const maxBatchRecipients = Number.isFinite(Number(config.maxBatchRecipients)) && Number(config.maxBatchRecipients) > 0
+    ? Math.trunc(Number(config.maxBatchRecipients))
+    : DEFAULT_PUBLIC_CONFIG.maxBatchRecipients;
   const usdcDecimals = Number(config.usdcDecimals);
   const normalizedUsdcDecimals = Number.isFinite(usdcDecimals) ? Math.min(Math.max(Math.trunc(usdcDecimals), 0), 18) : DEFAULT_PUBLIC_CONFIG.usdcDecimals;
   const paymentTokenDecimals = normalizedUsdcDecimals;
@@ -837,6 +847,9 @@ function normalizePublicConfig(config) {
     nativeUsdcDecimals: normalizedNativeUsdcDecimals,
     paymentRouterAddress,
     onchainPaymentsEnabled: Boolean(paymentRouterAddress && usdcTokenAddress),
+    batchRouterAddress,
+    batchPaymentsEnabled: Boolean(batchRouterAddress && usdcTokenAddress),
+    maxBatchRecipients,
     walletConnectProjectId: String(config.walletConnectProjectId || "").trim(),
   };
 }

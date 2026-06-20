@@ -381,6 +381,39 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   (74924e6, local, not pushed) plus this rename are NOT pushed yet. Update onchain-reference.md
   already done (FundlineMemoRouter listed as ACTIVE, V1 marked LEGACY).
 
+- 2026-06-20: Bulk payout / payroll feature (FundlineBatchRouter) BUILT + DEPLOYED +
+  VERIFIED across 5 phases. One payer distributes USDC to many recipients in ONE tx
+  (payroll, speaker fees). Direction is 1->N (disburse), the OPPOSITE of an invoice (N->1)
+  - confirmed with the user. Contract: contracts/FundlineBatchRouter.sol, payBatch(bytes32,
+  address[],uint256[]) selector 0x4ae7161f + payBatchWithMemo(...,bytes[]) selector 0xb4199844
+  (per-recipient on-chain memo for payroll references; user insisted memo is needed). Atomic
+  (any failed transfer reverts the whole run), non-custodial (only transferFrom payer->each
+  recipient, no funds held, no owner/withdraw), caps MAX_BATCH=256 + MAX_MEMO_BYTES=256. Events
+  BatchPaid(batchId,payer,total,count) topic 0xcff8d316... + BatchItemPaid(batchId,payer,
+  recipient,amount,memo) topic 0x33dd8a08.... DEPLOYED + Arcscan-VERIFIED at
+  0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4 (deploy tx 0xd3d9fdb9..., block 47858591). Deploy:
+  npm run deploy:batch-router (scripts/deploy-batch-router.js, writes ARC_BATCH_ROUTER_ADDRESS).
+  batch-util.js (browser+Node) hand-rolls the dynamic-array ABI (encodePayBatch /
+  encodePayBatchWithMemo), verified byte-for-byte vs ethers in test_batch_router.js (15). Server
+  (server.js): data/batches.json, normalizeBatch/normalizeBatchItem (exact 6-dp totalUnits),
+  createBatchRecord, routes POST/GET /api/batches + GET /api/batches/:id (public, strips email)
+  + POST /api/batches/:id/verify, findBatchPaidInReceipt (matches BatchPaid by onchainBatchId +
+  total + count from the batch router address; events are unforgeable so it is a sound proof),
+  /api/config now returns batchRouterAddress/batchPaymentsEnabled/maxBatchRecipients, /batch/:id
+  -> app.html. test_batch_model.js (18). Frontend: a Single invoice / Bulk payout sub-tab in the
+  create view; Bulk = download CSV template, parse+validate CSV (wallet/amount, per-row errors,
+  running total), opt-in on-chain reference memo, POST -> /batch/:id link. PAY PAGE is a SEPARATE
+  route /batch/:id (renderBatchPayPage, NOT the invoice /pay/ page): wallet-login REQUIRED, NO QR,
+  NO manual pay/verify (user requirement); connect -> approve exact total -> ONE payBatch tx ->
+  auto-verify. isPublicPaymentRoute() = isPayRoute() || isBatchRoute() gates merchant-only behavior.
+  CRITICAL: normalizePublicConfig had to be extended to pass batchRouterAddress (it dropped unknown
+  fields); the client default batchRouterAddress is "" (NOT baked) on purpose so the pay page only
+  enables when the server reports an address - which is also when server verify works - avoiding a
+  half-state where payment goes through but cannot be verified. STILL PENDING for go-live: (1) push
+  all commits (Phase 1-5 are LOCAL, not pushed yet); (2) set ARC_BATCH_ROUTER_ADDRESS=
+  0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4 in the cPanel env + RESTART the Node app (else
+  /api/config returns no batch address, the pay page stays disabled, and verify cannot run).
+
 ## Open threads / TODOs
 
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
