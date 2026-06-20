@@ -1796,6 +1796,22 @@ h3 {
   word-break: break-word;
 }
 
+.proof-memo-hexlink {
+  display: inline-block;
+  margin-top: 2px;
+  color: var(--gold);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(212, 175, 55, 0.4);
+  transition: color 0.15s, text-decoration-color 0.15s;
+}
+
+.proof-memo-hexlink:hover {
+  color: var(--gold-bright);
+  text-decoration-color: var(--gold);
+}
+
 /* ====================================================
    RESPONSIVE — Tablet (640px – 1024px)
    ==================================================== */
