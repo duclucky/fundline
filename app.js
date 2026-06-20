@@ -2,6 +2,9 @@ const STORAGE_KEY = "arc-invoice-usdc-invoices-v1";
 const SETTINGS_KEY = "arc-invoice-usdc-settings-v1";
 const ARC_EXPLORER_URL = "https://testnet.arcscan.app";
 const ARC_USDC_DECIMALS = 6;
+// On Arc, USDC is ALSO the native gas token, where the native value uses 18
+// decimals (the ERC-20 interface uses 6). Used to build native payment QR codes.
+const ARC_NATIVE_USDC_DECIMALS = 18;
 const DEFAULT_PUBLIC_CONFIG = {
   networkName: "Arc Testnet",
   chainId: 5042002,
@@ -10,6 +13,7 @@ const DEFAULT_PUBLIC_CONFIG = {
   explorerBase: ARC_EXPLORER_URL,
   usdcTokenAddress: "0x3600000000000000000000000000000000000000",
   usdcDecimals: ARC_USDC_DECIMALS,
+  nativeUsdcDecimals: ARC_NATIVE_USDC_DECIMALS,
   paymentRouterAddress: "0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24",
   onchainPaymentsEnabled: true,
   walletConnectProjectId: "",
@@ -785,6 +789,10 @@ function normalizePublicConfig(config) {
   const usdcDecimals = Number(config.usdcDecimals);
   const normalizedUsdcDecimals = Number.isFinite(usdcDecimals) ? Math.min(Math.max(Math.trunc(usdcDecimals), 0), 18) : DEFAULT_PUBLIC_CONFIG.usdcDecimals;
   const paymentTokenDecimals = normalizedUsdcDecimals;
+  const nativeUsdcDecimals = Number(config.nativeUsdcDecimals);
+  const normalizedNativeUsdcDecimals = Number.isFinite(nativeUsdcDecimals)
+    ? Math.min(Math.max(Math.trunc(nativeUsdcDecimals), 0), 18)
+    : DEFAULT_PUBLIC_CONFIG.nativeUsdcDecimals;
   return {
     networkName: String(config.networkName || DEFAULT_PUBLIC_CONFIG.networkName),
     chainId,
@@ -793,6 +801,7 @@ function normalizePublicConfig(config) {
     explorerBase: String(config.explorerBase || DEFAULT_PUBLIC_CONFIG.explorerBase).replace(/\/$/, ""),
     usdcTokenAddress,
     usdcDecimals: paymentTokenDecimals,
+    nativeUsdcDecimals: normalizedNativeUsdcDecimals,
     paymentRouterAddress,
     onchainPaymentsEnabled: Boolean(paymentRouterAddress && usdcTokenAddress),
     walletConnectProjectId: String(config.walletConnectProjectId || "").trim(),
@@ -1324,15 +1333,19 @@ function renderPayPage(invoiceId) {
 
   const status = getInvoiceStatus(invoice);
   const payConfig = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-  // EIP-681 payment URI. A wallet or exchange app that supports it prefills the
-  // recipient, token and amount on scan (a direct USDC transfer, verified later
-  // by matching recipient + amount). The wallet must already have this network
-  // configured. Falls back to the pay link for paid invoices (nothing to pay).
-  const amountAtomic = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS).toString();
+  // EIP-681 NATIVE payment URI. On Arc, USDC IS the native gas token, so a plain
+  // native value transfer pays the invoice - and every wallet (incl. exchange
+  // apps) can scan a native send without importing a token contract (an ERC-20
+  // transfer URI made wallets like OKX demand the token be added first). The
+  // native value uses 18 decimals. The server verifier accepts this direct
+  // transfer (no PaymentRouter event) via its native-transfer fallback.
+  // Falls back to the pay link for paid invoices (nothing left to pay).
+  const nativeDecimals = payConfig.nativeUsdcDecimals || ARC_NATIVE_USDC_DECIMALS;
+  const nativeValue = parseTokenUnits(invoice.total, nativeDecimals).toString();
   const payUri =
     invoice.status === "paid"
       ? getInvoicePayLink(invoice)
-      : `ethereum:${payConfig.usdcTokenAddress}@${payConfig.chainId}/transfer?address=${invoice.merchantWallet}&uint256=${amountAtomic}`;
+      : `ethereum:${invoice.merchantWallet}@${payConfig.chainId}?value=${nativeValue}`;
   const qrCaption = invoice.status === "paid" ? "Payment link QR" : "Scan to pay";
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=8&data=${encodeURIComponent(payUri)}`;
   els.payPage.innerHTML = `

@@ -330,6 +330,9 @@ module.exports = {
   botInvoiceStatus,
   handleTelegramText,
   handleTelegramCallback,
+  findMatchingTokenTransfer,
+  findMatchingNativeTransaction,
+  amountToUnits,
   TELEGRAM_LINK_DB_PATH,
   TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
@@ -371,6 +374,7 @@ function handlePublicConfig(req, res) {
     explorerBase: ARCSCAN_EXPLORER_BASE,
     usdcTokenAddress: ARC_USDC_TOKEN_ADDRESS,
     usdcDecimals: ARC_USDC_DECIMALS,
+    nativeUsdcDecimals: ARC_NATIVE_USDC_DECIMALS,
     paymentRouterAddress: ARC_PAYMENT_ROUTER_ADDRESS,
     onchainPaymentsEnabled: Boolean(ARC_PAYMENT_ROUTER_ADDRESS && ARC_USDC_TOKEN_ADDRESS),
     gatewayWalletAddress: GATEWAY_WALLET_ADDRESS,
@@ -1702,9 +1706,7 @@ async function handleVerifyPayment(req, res) {
       }
       const pendingAttempt = updatePaymentAttempt(attempt.id, {
         status: "pending",
-        error: ARC_PAYMENT_ROUTER_ADDRESS && onchainInvoiceId
-          ? "No matching USDC Transfer with the invoice reference was found yet."
-          : "No matching USDC payment was found on Arcscan yet.",
+        error: "No matching USDC payment was found yet. If you just paid, wait a few seconds and verify again.",
       });
       sendJson(res, 200, {
         verified: false,
@@ -1790,20 +1792,38 @@ async function handleVerifyPayment(req, res) {
 }
 
 async function findArcPayment(criteria) {
+  // 1. Strict path first: prefer the PaymentRouter InvoicePaid binding (it carries
+  //    the onchainInvoiceId). Connect-wallet payments go through the router and
+  //    verify here; this path is unchanged.
   if (criteria.requireInvoiceReference) {
-    if (criteria.txHash) return findPaymentInRpcReceipt(criteria);
-    return findRecentReferencedPayment(criteria);
+    const strict = criteria.txHash
+      ? await findPaymentInRpcReceipt(criteria)
+      : await findRecentReferencedPayment(criteria);
+    if (strict) return strict;
+    // No router-bound match. Fall through to accept a direct USDC transfer made
+    // without the router (QR / manual payers who scan-to-pay). These are guarded
+    // by exact amount + recipient + recency + the (txHash) double-spend guard in
+    // the caller, but carry no onchainInvoiceId, so they are a weaker,
+    // unreferenced settlement signal by design.
   }
 
+  // 2. Direct transfer, txHash-scoped (preferred over recent-list scans because
+  //    a supplied hash binds the payment explicitly). Precedence: ERC-20 Transfer
+  //    (6 decimals) before native USDC value (18 decimals).
   if (criteria.txHash) {
-    const receiptMatch = await findPaymentInRpcReceipt(criteria);
+    const receiptMatch = await findPaymentInRpcReceipt({ ...criteria, requireInvoiceReference: false });
     if (receiptMatch) return receiptMatch;
-    const transferMatch = await findTokenTransferByTx(criteria);
-    if (transferMatch) return transferMatch;
+    const tokenByTx = await findTokenTransferByTx(criteria);
+    if (tokenByTx) return tokenByTx;
+    const nativeByTx = await findNativeTransferByTx(criteria);
+    if (nativeByTx) return nativeByTx;
   }
 
-  const transferMatch = await findRecentTokenTransfer(criteria);
-  if (transferMatch) return transferMatch;
+  // 3. Direct transfer, recent-list scan (last resort, when no txHash is given).
+  const recentToken = await findRecentTokenTransfer(criteria);
+  if (recentToken) return recentToken;
+  const recentNative = await findRecentNativeTransfer(criteria);
+  if (recentNative) return recentNative;
   return null;
 }
 
@@ -1912,7 +1932,11 @@ async function findRecentNativeTransfer(criteria) {
 
 function findMatchingTokenTransfer(transfers, criteria) {
   const transfer = transfers.find((item) => isMatchingTokenTransfer(item, criteria));
-  return transfer ? toTokenTransferMatch(transfer) : null;
+  if (!transfer) return null;
+  const match = toTokenTransferMatch(transfer);
+  // Never accept a match without a txHash: the (txHash) double-spend guard relies
+  // on it, so a hashless match could be reused across invoices.
+  return match.txHash ? match : null;
 }
 
 function isMatchingTokenTransfer(transfer, criteria) {
@@ -1925,12 +1949,24 @@ function isMatchingTokenTransfer(transfer, criteria) {
 
   const tokenAddress = normalizeAddress(transfer.token?.address || transfer.token?.address_hash || transfer.token?.contract_address || transfer.token?.hash);
   const symbol = String(transfer.token?.symbol || transfer.token?.name || "").toUpperCase();
-  if (ARC_USDC_TOKEN_ADDRESS && tokenAddress && !sameAddress(tokenAddress, ARC_USDC_TOKEN_ADDRESS) && symbol !== "USDC") return false;
-  if (!ARC_USDC_TOKEN_ADDRESS && symbol !== "USDC") return false;
+  // Require the canonical USDC contract when it is configured. Do NOT accept a
+  // transfer just because its token symbol string is "USDC" - a spoofed token can
+  // report any symbol. Only fall back to the symbol check when no canonical
+  // address is set (dev / self-host without ARC_USDC_TOKEN_ADDRESS).
+  if (ARC_USDC_TOKEN_ADDRESS) {
+    if (!sameAddress(tokenAddress, ARC_USDC_TOKEN_ADDRESS)) return false;
+  } else if (symbol !== "USDC") {
+    return false;
+  }
 
-  const decimals = Number(transfer.total?.decimals ?? transfer.token?.decimals ?? 6);
+  // For the canonical USDC, trust the fixed 6-decimal scale rather than the
+  // explorer-reported decimals (which a spoofed token could otherwise influence).
+  const reportedDecimals = Number(transfer.total?.decimals ?? transfer.token?.decimals ?? ARC_USDC_DECIMALS);
+  const decimals = ARC_USDC_TOKEN_ADDRESS
+    ? ARC_USDC_DECIMALS
+    : (Number.isFinite(reportedDecimals) ? reportedDecimals : ARC_USDC_DECIMALS);
   const rawValue = parseUnitsValue(transfer.total?.value ?? transfer.value);
-  const expected = amountToUnits(criteria.amount, Number.isFinite(decimals) ? decimals : 6);
+  const expected = amountToUnits(criteria.amount, decimals);
   return rawValue === expected;
 }
 
@@ -1962,10 +1998,15 @@ function findMatchingNativeTransaction(transactions, criteria) {
     if (String(transaction.status || "").toLowerCase() === "error") return false;
     const value = parseUnitsValue(transaction.value);
     const expected = amountToUnits(criteria.amount, ARC_NATIVE_USDC_DECIMALS);
-    return value >= expected;
+    // Exact match only. A larger, unrelated native transfer to the merchant must
+    // never be claimed as payment for a smaller invoice.
+    return value === expected;
   });
   if (!tx) return null;
   const txHash = normalizeTxHash(tx.hash || tx.transaction_hash);
+  // Never accept a match without a txHash: the (txHash) double-spend guard relies
+  // on it, so a hashless match could be reused across invoices.
+  if (!txHash) return null;
   return {
     source: "arcscan_native_transfer",
     txHash,
