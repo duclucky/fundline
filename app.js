@@ -235,7 +235,7 @@ function bindEvents() {
   els.walletGateConnect?.addEventListener("click", handleWalletGateButton);
   els.connectWalletSettings?.addEventListener("click", handleWalletButton);
   els.sendTelegramTest?.addEventListener("click", sendTelegramTestAlert);
-  els.exportCsv?.addEventListener("click", exportCsv);
+  els.exportCsv?.addEventListener("click", exportInvoicesXls);
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeWalletMenu();
@@ -2911,41 +2911,87 @@ async function sendPaymentNotification(invoice, options = {}) {
   }
 }
 
-function exportCsv() {
+// Status -> display label + cell colors for the export. "expired" is shown as
+// "Overdue" to match the dashboard wording.
+const INVOICE_EXPORT_STATUS = {
+  paid: { label: "Paid", bg: "#c6f6d5", color: "#1b7a44" },
+  open: { label: "Open", bg: "#fdeeb8", color: "#8a6a00" },
+  expired: { label: "Overdue", bg: "#ffd3d3", color: "#b3001b" },
+  verifying: { label: "Verifying", bg: "#cfe1ff", color: "#1c4fb8" },
+};
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+// Normalize any stored date string (ISO YYYY-MM-DD, US M/D/YYYY, or a full
+// timestamp) to a single DD/MM/YYYY form for the export.
+function formatExportDate(value) {
+  if (!value) return "";
+  const text = String(value).trim();
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
+  const us = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (us) return `${pad2(us[2])}/${pad2(us[1])}/${us[3]}`;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return text;
+  return `${pad2(date.getUTCDate())}/${pad2(date.getUTCMonth() + 1)}/${date.getUTCFullYear()}`;
+}
+
+// Paid-at timestamps to DD/MM/YYYY HH:MM UTC.
+function formatExportDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return `${pad2(date.getUTCDate())}/${pad2(date.getUTCMonth() + 1)}/${date.getUTCFullYear()} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())} UTC`;
+}
+
+// Export invoices as a styled spreadsheet. CSV cannot carry colors, so this builds
+// an HTML table that Excel and LibreOffice open as a formatted sheet: a gold header
+// row and status cells tinted by state (Paid green, Open amber, Overdue red).
+function exportInvoicesXls() {
   if (!state.invoices.length) {
     showToast("No invoices to export.");
     return;
   }
-  const headers = [
-    "number",
-    "client",
-    "email",
-    "status",
-    "due_date",
-    "total_usdc",
-    "payment_reference_id",
-    "paid_at",
-    "merchant_wallet",
-    "payer_wallet",
-    "tx_hash",
-    "verification_source",
+  const columns = [
+    { label: "Number", get: (i) => i.number },
+    { label: "Client", get: (i) => i.clientName },
+    { label: "Email", get: (i) => i.clientEmail },
+    { label: "Status", status: true },
+    { label: "Due Date", get: (i) => formatExportDate(i.dueDate) },
+    { label: "Total USDC", get: (i) => formatUsdc(i.total), align: "right" },
+    { label: "Payment Reference Id", get: (i) => i.onchainInvoiceId },
+    { label: "Paid At", get: (i) => formatExportDateTime(i.paidAt) },
+    { label: "Merchant Wallet", get: (i) => i.merchantWallet },
+    { label: "Payer Wallet", get: (i) => i.payerWallet },
+    { label: "Tx Hash", get: (i) => i.txHash },
+    { label: "Verification Source", get: (i) => i.verificationSource },
   ];
-  const rows = state.invoices.map((invoice) => [
-    invoice.number,
-    invoice.clientName,
-    invoice.clientEmail,
-    getInvoiceStatus(invoice),
-    invoice.dueDate,
-    formatUsdc(invoice.total),
-    invoice.onchainInvoiceId,
-    invoice.paidAt,
-    invoice.merchantWallet,
-    invoice.payerWallet,
-    invoice.txHash,
-    invoice.verificationSource,
-  ]);
-  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
-  downloadBlob(csv, "text/csv;charset=utf-8", `arc-invoices-${todaySlug()}.csv`);
+  const headStyle = "background-color:#d4af37;color:#1a1410;font-weight:700;padding:8px 11px;border:1px solid #b8860b;text-align:left;white-space:nowrap;";
+  const headHtml = columns.map((col) => `<th style="${headStyle}">${escapeHtml(col.label)}</th>`).join("");
+
+  const rowsHtml = state.invoices
+    .map((invoice, index) => {
+      const zebra = index % 2 ? "#f6f4ee" : "#ffffff";
+      const cells = columns
+        .map((col) => {
+          if (col.status) {
+            const key = getInvoiceStatus(invoice);
+            const style = INVOICE_EXPORT_STATUS[key] || { label: key, bg: "#eeeeee", color: "#333333" };
+            return `<td style="background-color:${style.bg};color:${style.color};font-weight:700;text-align:center;padding:6px 11px;border:1px solid #e3ddcb;">${escapeHtml(style.label)}</td>`;
+          }
+          const align = col.align === "right" ? "right" : "left";
+          return `<td style="background-color:${zebra};text-align:${align};padding:6px 11px;border:1px solid #e3ddcb;white-space:nowrap;">${escapeHtml(col.get(invoice))}</td>`;
+        })
+        .join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8" /></head><body><table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#1a1410;"><thead><tr>${headHtml}</tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
+
+  downloadBlob(`﻿${html}`, "application/vnd.ms-excel;charset=utf-8", `fundline-invoices-${todaySlug()}.xls`);
 }
 
 function downloadReceiptPdf(invoice) {
@@ -3459,10 +3505,6 @@ function todaySlug() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function csvCell(value) {
-  const text = String(value ?? "");
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
 
 function escapeHtml(value) {
   return String(value ?? "")
