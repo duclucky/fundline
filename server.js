@@ -2122,6 +2122,14 @@ function readJsonBody(req) {
   });
 }
 
+function formatPaidAt(isoString) {
+  if (!isoString) return "-";
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return isoString;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} - ${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} UTC`;
+}
+
 function buildPaymentMessage(invoice) {
   return [
     "Fundline payment received",
@@ -2129,7 +2137,7 @@ function buildPaymentMessage(invoice) {
     `Invoice: ${invoice.number}`,
     `Client: ${invoice.clientName || "-"}`,
     `Amount: ${invoice.total}`,
-    `Paid at: ${invoice.paidAt || "-"}`,
+    `Paid at: ${formatPaidAt(invoice.paidAt)}`,
     `Payer wallet: ${invoice.payerWallet || "-"}`,
     `Receiving wallet: ${invoice.merchantWallet || "-"}`,
     `Tx: ${invoice.txHash || "demo"}`,
