@@ -1109,6 +1109,23 @@ async function createInvoice(event) {
     return;
   }
 
+  // When the merchant opted to publish invoice details on-chain, require one final,
+  // explicit consent because the memo is public and permanent. Cancelling reverts the
+  // form to no-memo mode and does not create the invoice.
+  const memoFields = collectMemoFields();
+  if (memoFields.length > 0) {
+    const confirmed = await confirmMemoPublish(memoFields);
+    if (!confirmed) {
+      const toggle = document.querySelector("#memoEnabled");
+      if (toggle) {
+        toggle.checked = false;
+        toggle.dispatchEvent(new Event("change"));
+      }
+      showToast("On-chain memo turned off. Invoice not created. Press Create again to continue without a memo.");
+      return;
+    }
+  }
+
   const id = makeId();
   const invoice = {
     id,
@@ -1122,7 +1139,7 @@ async function createInvoice(event) {
     clientEmail: String(form.get("clientEmail") || "").trim(),
     dueDate: String(form.get("dueDate") || ""),
     note: String(form.get("note") || "").trim(),
-    onchainMemoFields: collectMemoFields(),
+    onchainMemoFields: memoFields,
     items,
     total,
     status: "open",
@@ -1148,6 +1165,7 @@ async function createInvoice(event) {
     saveSettings();
   }
   els.invoiceForm.reset();
+  document.querySelector("#memoFields")?.setAttribute("hidden", "");
   els.lineItems.innerHTML = "";
   seedLineItems();
   state.filter = "all";
@@ -1328,6 +1346,60 @@ function showInvoiceDialog(invoice) {
 
 function closeDialog() {
   els.dialog.close();
+}
+
+// Human labels for the on-chain memo fields, shown in the publish-confirmation dialog.
+const MEMO_FIELD_LABELS = {
+  number: "Invoice number",
+  total: "Total amount",
+  createdAt: "Issue date",
+  dueDate: "Due date",
+  merchantName: "Business name",
+  clientName: "Client name",
+  items: "Line item details",
+  note: "Invoice note",
+  hash: "Tamper-proof hash (content stays private)",
+};
+
+// Final consent gate before an invoice writes a public, permanent on-chain memo. Returns
+// a promise that resolves true (proceed and publish) or false (cancel, revert to no memo).
+function confirmMemoPublish(fields) {
+  return new Promise((resolve) => {
+    const dialog = document.querySelector("#memoConfirmDialog");
+    const body = document.querySelector("#memoConfirmBody");
+    if (!dialog || !body) {
+      resolve(true);
+      return;
+    }
+    const list = fields.map((key) => `<li>${escapeHtml(MEMO_FIELD_LABELS[key] || key)}</li>`).join("");
+    body.innerHTML = `
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">On-chain memo</p>
+          <h2>Publish these details on-chain?</h2>
+        </div>
+      </div>
+      <p class="memo-warning-text">These fields will be written permanently and publicly on the Arc blockchain when this invoice is paid from a connected wallet. Once recorded, they cannot be edited or removed by anyone, including you.</p>
+      <ul class="memo-warning-list">${list}</ul>
+      <div class="receipt-actions">
+        <button class="primary-action" type="button" data-memo-confirm>Agree and create</button>
+        <button class="ghost-action" type="button" data-memo-cancel>Cancel</button>
+      </div>
+    `;
+    const onCancel = (event) => {
+      event.preventDefault();
+      finish(false);
+    };
+    function finish(value) {
+      dialog.removeEventListener("cancel", onCancel);
+      dialog.close();
+      resolve(value);
+    }
+    body.querySelector("[data-memo-confirm]").addEventListener("click", () => finish(true), { once: true });
+    body.querySelector("[data-memo-cancel]").addEventListener("click", () => finish(false), { once: true });
+    dialog.addEventListener("cancel", onCancel);
+    dialog.showModal();
+  });
 }
 
 function renderPayPage(invoiceId) {
