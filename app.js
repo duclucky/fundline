@@ -1362,7 +1362,11 @@ function renderPayPage(invoiceId) {
           <div class="reference-grid">
             <article><span>Client</span><strong>${escapeHtml(invoice.clientName)}</strong></article>
             <article><span>Due date</span><strong>${escapeHtml(formatDate(invoice.dueDate))}</strong></article>
-            <article><span>Receiving wallet</span><strong>${escapeHtml(invoice.merchantWallet)}</strong></article>
+            <article>
+              <span>Receiving wallet</span>
+              <strong>${escapeHtml(invoice.merchantWallet)}</strong>
+              <button type="button" class="copy-inline-btn" id="copyMerchantWalletRef" title="Copy wallet address">Copy</button>
+            </article>
             <article><span>Payment reference ID</span><strong>${escapeHtml(invoice.onchainInvoiceId)}</strong></article>
           </div>
         </section>
@@ -1396,6 +1400,11 @@ function renderPayPage(invoiceId) {
   document.querySelector("#refreshPaymentSource")?.addEventListener("click", () => autoPickBestSource(invoice.id));
   document.querySelector("#paymentVerifyForm")?.addEventListener("submit", (event) => verifyPaymentAndMarkPaid(invoice.id, event));
   document.querySelector("#downloadReceipt")?.addEventListener("click", () => downloadReceiptPdf(invoice));
+  const copyWallet = () => {
+    navigator.clipboard.writeText(invoice.merchantWallet).then(() => showToast("Wallet address copied.")).catch(() => {});
+  };
+  document.querySelector("#copyMerchantWallet")?.addEventListener("click", copyWallet);
+  document.querySelector("#copyMerchantWalletRef")?.addEventListener("click", copyWallet);
   if (hasConnectedWallet() && invoice.status !== "paid") {
     window.setTimeout(() => autoPickBestSource(invoice.id), 0);
   }
@@ -1409,50 +1418,80 @@ function renderPaymentVerification(invoice) {
   const sourceOptions = getPaymentSourceOptions()
     .map((source) => `<option value="${escapeHtml(source.key)}">${escapeHtml(source.label)}</option>`)
     .join("");
-  return `
+
+  const walletHeading = isSelfPayment
+    ? "Use a different payer wallet"
+    : config.onchainPaymentsEnabled
+    ? (payerWallet ? "Choose USDC source" : "Connect wallet to pay")
+    : "Wallet payment unavailable";
+
+  const walletDesc = isSelfPayment
+    ? "The connected wallet is also the receiving wallet. A self-transfer does not settle an invoice."
+    : config.onchainPaymentsEnabled
+    ? (payerWallet
+        ? `Choose the network where your USDC is. Arc pays instantly with no bridge. Other supported testnets bridge via CCTP first. Need testnet USDC? <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Get some at faucet.circle.com</a>.`
+        : "Connect your wallet for automatic payment and instant on-chain verification. Supports direct Arc payments and cross-chain bridging from Base Sepolia and Ethereum Sepolia.")
+    : "Wallet payment is not configured on this server. Use manual transfer below.";
+
+  const walletBlock = `
     <div class="onchain-payment">
       <div>
         <p class="eyebrow">Wallet payment</p>
-        <h2>${isSelfPayment ? "Use a different payer wallet" : config.onchainPaymentsEnabled ? "Choose USDC source" : "PaymentRouter not configured"}</h2>
-        <p>${
-          isSelfPayment
-            ? "The connected wallet is also the receiving wallet. A self-transfer does not settle an invoice."
-            :
-          config.onchainPaymentsEnabled
-            ? `Choose where your USDC is. If Arc balance is enough, pay directly. If USDC is on another testnet, Fundline will bridge first, then pay. Need testnet USDC? <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Get some at faucet.circle.com</a>.`
-            : "Send USDC manually to the receiving wallet, then use verification below."
-        }</p>
+        <h2>${walletHeading}</h2>
+        <p>${walletDesc}</p>
       </div>
-      <div class="payment-source-box">
-        <label>
-          <span class="field-label">
-            Pay with
-            <span class="help-tip" tabindex="0" data-help="Choose the network where this payer wallet already has USDC. Arc pays directly; other supported testnets bridge first." aria-label="Pay source help">?</span>
-          </span>
-          <select id="paymentSourceChain" ${payDisabled ? "disabled" : ""}>${sourceOptions}</select>
-        </label>
-        <button class="ghost-action" id="refreshPaymentSource" type="button" ${payDisabled ? "disabled" : ""}>Check balance</button>
-      </div>
-      <div class="payment-source-status" id="paymentSourceStatus">${payerWallet ? "Checking selected USDC balance..." : "Connect wallet to check USDC balance."}</div>
+      ${payerWallet && !payDisabled ? `
+        <div class="payment-source-box">
+          <label>
+            <span class="field-label">
+              Pay with
+              <span class="help-tip" tabindex="0" data-help="Choose the network where this payer wallet already has USDC. Arc pays directly; other supported testnets bridge first." aria-label="Pay source help">?</span>
+            </span>
+            <select id="paymentSourceChain">${sourceOptions}</select>
+          </label>
+          <button class="ghost-action" id="refreshPaymentSource" type="button">Check balance</button>
+        </div>
+      ` : ""}
+      <div class="payment-source-status" id="paymentSourceStatus"></div>
       <p class="muted payment-source-scan" id="paymentSourceScan"></p>
-      <button class="primary-action" id="payWithWallet" type="button" data-action="connect" ${payDisabled ? "disabled" : ""}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
-        ${payerWallet ? "Checking balance..." : "Connect wallet"}
-      </button>
+      ${!payDisabled ? `
+        <button class="primary-action" id="payWithWallet" type="button" data-action="${payerWallet ? "checking" : "connect"}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
+          ${payerWallet ? "Checking balance..." : "Connect wallet"}
+        </button>
+      ` : ""}
       <div class="bridge-pay-progress" id="bridgePayProgress" hidden></div>
     </div>
+  `;
+
+  // Wallet connected: show only the wallet pay block, auto-verify handles the rest.
+  if (payerWallet) {
+    return walletBlock;
+  }
+
+  // No wallet: show connect block + OR divider + manual pay block.
+  return `
+    ${walletBlock}
+    <div class="or-divider">OR</div>
     <form class="payment-verify" id="paymentVerifyForm">
       <div>
-        <p class="eyebrow">Payment verification</p>
-        <h2>Verify on Arcscan</h2>
-        <p>After sending USDC, connect the payer wallet or enter the wallet that sent payment. The app checks Arcscan before marking this invoice paid.</p>
+        <p class="eyebrow">Manual payment</p>
+        <h2>Send USDC and verify</h2>
+        <p>Send exactly ${escapeHtml(formatUsdc(invoice.total))} USDC to the address below, then enter your wallet address to confirm the payment on-chain.</p>
+      </div>
+      <div class="field-copy-row">
+        <label>
+          <span class="field-label">Receiving wallet</span>
+          <input value="${escapeHtml(invoice.merchantWallet)}" readonly />
+        </label>
+        <button type="button" class="ghost-action copy-wallet-btn" id="copyMerchantWallet">Copy</button>
       </div>
       <label>
         <span class="field-label">
-          Payer wallet
-          <span class="help-tip" tabindex="0" data-help="Wallet address that sent the USDC payment. If you connect the payer wallet, this field can be filled automatically." aria-label="Payer wallet help">?</span>
+          Your wallet address
+          <span class="help-tip" tabindex="0" data-help="Wallet address that sent the USDC payment." aria-label="Payer wallet help">?</span>
         </span>
-        <input name="payerWallet" placeholder="0x wallet that paid this invoice" value="${escapeHtml(payerWallet)}" />
+        <input name="payerWallet" placeholder="0x wallet that sent the payment" />
       </label>
       <label>
         <span class="field-label">
