@@ -21,6 +21,7 @@ const API_KEY_DB_PATH = path.join(DATA_DIR, "api-keys.json");
 const EVENT_DB_PATH = path.join(DATA_DIR, "events.json");
 const TELEGRAM_LINK_DB_PATH = path.join(DATA_DIR, "telegram-links.json");
 const TELEGRAM_SESSION_DB_PATH = path.join(DATA_DIR, "telegram-sessions.json");
+const BATCH_DB_PATH = path.join(DATA_DIR, "batches.json");
 
 const AGENT_RATE_LIMIT_PER_MIN = Number(process.env.AGENT_RATE_LIMIT_PER_MIN || 60);
 const rateLimits = new Map();
@@ -63,9 +64,17 @@ const ARC_CHAIN_ID = Number(process.env.ARC_CHAIN_ID || 5042002);
 const ARC_RPC_URL = process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network";
 const ARC_NETWORK_NAME = process.env.ARC_NETWORK_NAME || "Arc Testnet";
 const ARC_PAYMENT_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_PAYMENT_ROUTER_ADDRESS || "");
+// FundlineBatchRouter: one-to-many USDC payout (payroll). Distinct from the single
+// invoice router above. payBatch / payBatchWithMemo emit BatchPaid + BatchItemPaid.
+const ARC_BATCH_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_BATCH_ROUTER_ADDRESS || "");
+const MAX_BATCH_RECIPIENTS = 256; // must match FundlineBatchRouter.MAX_BATCH
 const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
+// FundlineBatchRouter events: BatchPaid(batchId, payer, totalAmount, count) and
+// BatchItemPaid(batchId, payer, recipient, amount, memo).
+const BATCH_PAID_TOPIC = "0xcff8d31661efd2cc04997b3544dc298f6fef40780244911bb7ad631252dcc3ec";
+const BATCH_ITEM_PAID_TOPIC = "0x33dd8a0841850bc1070a0087eeff009a1e894ce117ef0c8664acc682a9b74ec4";
 // Fields a merchant may opt to embed in the on-chain payment memo (PaymentRouterV2
 // InvoiceMemo log). The picker on the create form is whitelisted to these keys so a
 // client cannot push arbitrary invoice attributes on-chain. "hash" adds a tamper-proof
@@ -168,6 +177,23 @@ const server = http.createServer((req, res) => {
   const invoiceMatch = url.pathname.match(/^\/api\/invoices\/([a-f0-9]{20})$/i);
   if (invoiceMatch) {
     handleInvoiceById(req, res, invoiceMatch[1]);
+    return;
+  }
+
+  if (url.pathname === "/api/batches") {
+    handleBatches(req, res, url);
+    return;
+  }
+
+  const batchVerifyMatch = url.pathname.match(/^\/api\/batches\/([a-f0-9]{20})\/verify$/i);
+  if (batchVerifyMatch) {
+    handleBatchVerify(req, res, batchVerifyMatch[1]);
+    return;
+  }
+
+  const batchMatch = url.pathname.match(/^\/api\/batches\/([a-f0-9]{20})$/i);
+  if (batchMatch) {
+    handleBatchById(req, res, batchMatch[1]);
     return;
   }
 
@@ -293,6 +319,7 @@ function resolveRequestPath(pathname) {
   if (pathname === "/docs") return "/docs.html";
   if (pathname === "/") return "/index.html";
   if (pathname === "/app" || pathname === "/app/" || pathname.startsWith("/pay/")) return "/app.html";
+  if (pathname.startsWith("/batch/")) return "/app.html";
   return pathname;
 }
 
@@ -338,10 +365,17 @@ module.exports = {
   findMatchingTokenTransfer,
   findMatchingNativeTransaction,
   amountToUnits,
+  normalizeBatch,
+  normalizeBatchItem,
+  createBatchRecord,
+  loadBatchDb,
+  saveBatchDb,
+  findBatchPaidInReceipt,
   TELEGRAM_LINK_DB_PATH,
   TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
   INVOICE_DB_PATH,
+  BATCH_DB_PATH,
 };
 
 function loadEnvFiles() {
@@ -382,6 +416,9 @@ function handlePublicConfig(req, res) {
     nativeUsdcDecimals: ARC_NATIVE_USDC_DECIMALS,
     paymentRouterAddress: ARC_PAYMENT_ROUTER_ADDRESS,
     onchainPaymentsEnabled: Boolean(ARC_PAYMENT_ROUTER_ADDRESS && ARC_USDC_TOKEN_ADDRESS),
+    batchRouterAddress: ARC_BATCH_ROUTER_ADDRESS,
+    batchPaymentsEnabled: Boolean(ARC_BATCH_ROUTER_ADDRESS && ARC_USDC_TOKEN_ADDRESS),
+    maxBatchRecipients: MAX_BATCH_RECIPIENTS,
     gatewayWalletAddress: GATEWAY_WALLET_ADDRESS,
     gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
     gatewayEnabled: Boolean(CIRCLE_GATEWAY_API_KEY),
@@ -731,6 +768,224 @@ async function handleAgentWebhookLogById(req, res, logId) {
   }
 
   sendJson(res, 200, { log: redactWebhookLog(log) });
+}
+
+// ---------------------------------------------------------------------------
+// Batch payouts (FundlineBatchRouter): one payer distributes USDC to many
+// recipients in a single transaction (payroll, speaker fees). A batch is built
+// from an uploaded CSV, gets a public /batch/:id link, and is verified by
+// reading the BatchPaid event from the batch router in the payment receipt.
+// ---------------------------------------------------------------------------
+
+function loadBatchDb() {
+  ensureDataDir();
+  if (!fs.existsSync(BATCH_DB_PATH)) return { batches: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(BATCH_DB_PATH, "utf8"));
+    return { batches: Array.isArray(parsed.batches) ? parsed.batches : [] };
+  } catch {
+    return { batches: [] };
+  }
+}
+
+function saveBatchDb(db) {
+  ensureDataDir();
+  fs.writeFileSync(BATCH_DB_PATH, `${JSON.stringify({ batches: db.batches || [] }, null, 2)}\n`);
+}
+
+function normalizeBatchItem(input) {
+  const recipientWallet = normalizeAddress(input.recipientWallet || input.wallet);
+  if (!recipientWallet) throw new Error("Each recipient needs a valid wallet address");
+  const amount = Number(String(input.amount ?? "").replace(/,/g, "").trim());
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error("Each recipient needs an amount greater than 0");
+  if (amount > 1e12) throw new Error("A recipient amount is too large");
+  return {
+    recipientName: String(input.recipientName || input.name || "").trim().slice(0, 120),
+    recipientWallet,
+    amount,
+    reference: String(input.reference || input.note || "").trim().slice(0, 256),
+    email: String(input.email || "").trim().slice(0, 180),
+  };
+}
+
+function normalizeBatch(input, options = {}) {
+  const requestedId = String(input.id || "").trim().toLowerCase();
+  const id = /^[a-f0-9]{20}$/.test(requestedId) ? requestedId : makeId();
+  const items = Array.isArray(input.items) ? input.items.map(normalizeBatchItem) : [];
+  if (items.length === 0) throw new Error("A batch needs at least one recipient");
+  if (items.length > MAX_BATCH_RECIPIENTS) throw new Error(`A batch can have at most ${MAX_BATCH_RECIPIENTS} recipients`);
+  const creatorWallet = normalizeAddress(input.creatorWallet);
+  if (!creatorWallet) throw new Error("creatorWallet is required");
+  const totalUnits = items.reduce((sum, item) => sum + amountToUnits(item.amount, ARC_USDC_DECIMALS), 0n);
+  const createdAt = options.allowExistingTimestamps && input.createdAt ? String(input.createdAt) : new Date().toISOString();
+  const status = ["open", "paid"].includes(input.status) ? input.status : "open";
+  return {
+    id,
+    onchainBatchId: normalizeBytes32(input.onchainBatchId) || "",
+    title: String(input.title || "").trim().slice(0, 120),
+    creatorWallet,
+    creatorName: String(input.creatorName || "").trim().slice(0, 120),
+    withMemo: Boolean(input.withMemo),
+    items,
+    count: items.length,
+    totalUnits: totalUnits.toString(),
+    total: Number(totalUnits) / 10 ** ARC_USDC_DECIMALS,
+    status,
+    createdAt,
+    paidAt: String(input.paidAt || ""),
+    payerWallet: normalizeAddress(input.payerWallet),
+    txHash: normalizeTxHash(input.txHash),
+    verifiedAt: String(input.verifiedAt || ""),
+    verificationSource: String(input.verificationSource || "").trim().slice(0, 80),
+  };
+}
+
+function createBatchRecord(input) {
+  if (!input.id) input.id = makeId();
+  if (!input.onchainBatchId) input.onchainBatchId = randomBytes32();
+  const batch = normalizeBatch(input);
+  const db = loadBatchDb();
+  if (db.batches.some((item) => item.id === batch.id)) {
+    const error = new Error("Batch ID already exists");
+    error.code = "DUPLICATE_ID";
+    throw error;
+  }
+  db.batches = [batch, ...db.batches];
+  saveBatchDb(db);
+  return batch;
+}
+
+// Public projection for the /batch/:id pay link: the payer needs names, wallets,
+// amounts, and references to know what they are paying. Drop recipient emails (the
+// merchant's private contact data, not needed to pay).
+function publicBatchView(batch) {
+  return {
+    ...batch,
+    items: batch.items.map((item) => ({
+      recipientName: item.recipientName,
+      recipientWallet: item.recipientWallet,
+      amount: item.amount,
+      reference: item.reference,
+    })),
+  };
+}
+
+async function handleBatches(req, res, url) {
+  if (req.method === "GET") {
+    const creatorWallet = normalizeAddress(url.searchParams.get("creatorWallet"));
+    const db = loadBatchDb();
+    const batches = creatorWallet ? db.batches.filter((batch) => sameAddress(batch.creatorWallet, creatorWallet)) : db.batches;
+    sendJson(res, 200, { batches });
+    return;
+  }
+
+  if (req.method === "POST") {
+    try {
+      const input = await readJsonBody(req);
+      const batch = createBatchRecord(input);
+      sendJson(res, 201, { batch });
+    } catch (error) {
+      if (error.code === "DUPLICATE_ID") {
+        sendJson(res, 409, { error: "Batch ID already exists" });
+        return;
+      }
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Could not create batch" } });
+    }
+    return;
+  }
+
+  sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+}
+
+function handleBatchById(req, res, id) {
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const db = loadBatchDb();
+  const batch = db.batches.find((item) => item.id === id);
+  if (!batch) {
+    sendJson(res, 404, { error: "Batch not found" });
+    return;
+  }
+  sendJson(res, 200, { batch: publicBatchView(batch) });
+}
+
+async function handleBatchVerify(req, res, id) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    const txHash = normalizeTxHash(body.txHash);
+    const payerWallet = normalizeAddress(body.payerWallet);
+    if (!txHash) {
+      sendJson(res, 400, { error: "A transaction hash is required" });
+      return;
+    }
+    const db = loadBatchDb();
+    const index = db.batches.findIndex((item) => item.id === id);
+    if (index < 0) {
+      sendJson(res, 404, { error: "Batch not found" });
+      return;
+    }
+    const batch = db.batches[index];
+    if (batch.status === "paid") {
+      sendJson(res, 200, { batch: publicBatchView(batch) });
+      return;
+    }
+    const match = await findBatchPaidInReceipt(batch, txHash, payerWallet);
+    if (!match) {
+      sendJson(res, 404, { error: "No matching batch payout was found yet. If you just paid, wait a few seconds and verify again." });
+      return;
+    }
+    const updated = {
+      ...batch,
+      status: "paid",
+      paidAt: new Date().toISOString(),
+      payerWallet: match.payer || payerWallet,
+      txHash,
+      verifiedAt: new Date().toISOString(),
+      verificationSource: "rpc_batch_paid_event",
+    };
+    db.batches[index] = updated;
+    saveBatchDb(db);
+    sendJson(res, 200, { batch: publicBatchView(updated) });
+  } catch (error) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Could not verify batch" } });
+  }
+}
+
+// Confirm a batch was settled: the payment receipt must carry a BatchPaid event from
+// the configured batch router, bound to this batch's onchainBatchId, with a total and
+// count that exactly match the stored recipients. Events can only be emitted by the
+// contract that ran the transfers, so this is a sound proof of the full payout.
+async function findBatchPaidInReceipt(batch, txHash, payerWallet) {
+  if (!ARC_BATCH_ROUTER_ADDRESS || !batch.onchainBatchId) return null;
+  try {
+    const receipt = await rpcRequest("eth_getTransactionReceipt", [txHash]);
+    if (!receipt || String(receipt.status || "").toLowerCase() !== "0x1") return null;
+    const logs = Array.isArray(receipt.logs) ? receipt.logs : [];
+    const expectedTotal = batch.items.reduce((sum, item) => sum + amountToUnits(item.amount, ARC_USDC_DECIMALS), 0n);
+    const expectedCount = BigInt(batch.items.length);
+    for (const log of logs.map(normalizeReceiptLog)) {
+      if (!sameAddress(log.address, ARC_BATCH_ROUTER_ADDRESS)) continue;
+      if (log.topics[0] !== BATCH_PAID_TOPIC) continue;
+      if (log.topics[1] !== batch.onchainBatchId) continue;
+      const payer = topicToAddress(log.topics[2]);
+      if (payerWallet && !sameAddress(payer, payerWallet)) continue;
+      const words = dataWords(log.data);
+      const total = words[0] ? BigInt(words[0]) : 0n;
+      const count = words[1] ? BigInt(words[1]) : 0n;
+      if (total === expectedTotal && count === expectedCount) {
+        return { payer, total: total.toString(), count: Number(count) };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function loadInvoiceDb() {
