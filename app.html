@@ -141,7 +141,11 @@
                 Connect wallet
               </button>
             </div>
-            <form class="invoice-form" id="invoiceForm">
+            <div class="create-mode-tabs" id="createModeTabs" role="tablist">
+              <button class="create-mode is-active" data-mode="single" type="button">Single invoice</button>
+              <button class="create-mode" data-mode="bulk" type="button">Bulk payout</button>
+            </div>
+            <form class="invoice-form" id="invoiceForm" data-mode-panel="single">
               <div class="form-grid">
                 <label class="form-full">
                   <span class="field-label">
@@ -229,6 +233,62 @@
                 </button>
               </div>
             </form>
+
+            <section class="bulk-payout" id="bulkPayout" data-mode-panel="bulk" hidden>
+              <div class="bulk-head">
+                <p class="eyebrow">Bulk payout</p>
+                <h2>Pay many recipients in one transaction</h2>
+                <p class="bulk-sub">For payroll, speaker fees, or refunds. Upload a CSV of recipients, then share one link. The payer settles everyone in a single transaction.</p>
+              </div>
+
+              <div class="bulk-steps">
+                <button class="ghost-action" id="downloadBatchTemplate" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M8 11l4 4 4-4M5 20h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  Download CSV template
+                </button>
+                <label class="bulk-upload-btn">
+                  <input type="file" id="batchFile" accept=".csv,text/csv" hidden />
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20V9M8 13l4-4 4 4M5 4h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  Upload filled CSV
+                </label>
+                <span class="bulk-file-name" id="batchFileName"></span>
+              </div>
+
+              <label class="bulk-title-field">
+                <span class="field-label">
+                  Batch name
+                  <span class="help-tip" tabindex="0" data-help="A label for your own records, for example Payroll March 2026. Optional." aria-label="Batch name help">?</span>
+                </span>
+                <input id="batchTitle" placeholder="Payroll March 2026" />
+              </label>
+
+              <div class="memo-onchain" id="batchMemoOnchain">
+                <label class="memo-toggle">
+                  <input type="checkbox" id="batchMemoEnabled" />
+                  <span class="field-label">
+                    Write each recipient's reference on-chain
+                    <span class="help-tip" tabindex="0" data-help="Records the Reference column for each recipient as a public, permanent memo on Arc (for example Salary March 2026). Off by default. Leave it off to keep references private." aria-label="On-chain reference help">?</span>
+                  </span>
+                </label>
+                <p class="memo-hint" id="batchMemoHint" hidden>References will be public and permanent on the Arc blockchain, readable by anyone.</p>
+              </div>
+
+              <div class="bulk-preview" id="batchPreview"></div>
+
+              <div class="form-footer">
+                <div>
+                  <span>Total payout</span>
+                  <strong id="batchTotal">0.00 USDC</strong>
+                  <span class="bulk-count" id="batchCount"></span>
+                </div>
+                <button class="primary-action" id="createBatchBtn" type="button" disabled>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  Create payout link
+                </button>
+              </div>
+
+              <div class="bulk-result" id="batchResult" hidden></div>
+            </section>
           </section>
 
           <section class="view" data-panel="settings" hidden>
@@ -321,6 +381,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="/memo-util.js"></script>
+    <script src="/batch-util.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

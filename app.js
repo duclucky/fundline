@@ -236,6 +236,7 @@ function bindEvents() {
   els.connectWalletSettings?.addEventListener("click", handleWalletButton);
   els.sendTelegramTest?.addEventListener("click", sendTelegramTestAlert);
   els.exportCsv?.addEventListener("click", exportInvoicesXls);
+  wireBulkPayout();
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeWalletMenu();
@@ -2999,6 +3000,237 @@ function exportInvoicesXls() {
   const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8" /></head><body><table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#1a1410;"><thead><tr>${headHtml}</tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
 
   downloadBlob(`﻿${html}`, "application/vnd.ms-excel;charset=utf-8", `fundline-invoices-${todaySlug()}.xls`);
+}
+
+// ---- Bulk payout (batch) ----
+// A company uploads a CSV of recipients, the server stores it as a batch, and the
+// returned /batch/:id link lets the payer settle everyone in one transaction (phase 4).
+
+let _batchItems = [];
+
+const BATCH_TEMPLATE_HEADERS = ["Recipient name", "Recipient wallet", "Amount (USDC)", "Reference", "Email"];
+const BATCH_TEMPLATE_ROWS = [
+  ["Alice Nguyen", "0x1111111111111111111111111111111111111111", "1500", "Salary March 2026", "alice@example.com"],
+  ["Bob Tran", "0x2222222222222222222222222222222222222222", "1200.50", "Salary March 2026", "bob@example.com"],
+  ["Carol Le", "0x3333333333333333333333333333333333333333", "800", "Contractor fee", "carol@example.com"],
+];
+
+function wireBulkPayout() {
+  const tabs = document.querySelector("#createModeTabs");
+  tabs?.addEventListener("click", (event) => {
+    const btn = event.target.closest(".create-mode");
+    if (btn) switchCreateMode(btn.dataset.mode);
+  });
+  document.querySelector("#downloadBatchTemplate")?.addEventListener("click", downloadBatchTemplate);
+  document.querySelector("#batchFile")?.addEventListener("change", handleBatchFile);
+  document.querySelector("#batchMemoEnabled")?.addEventListener("change", (event) => {
+    const hint = document.querySelector("#batchMemoHint");
+    if (hint) hint.hidden = !event.target.checked;
+  });
+  document.querySelector("#createBatchBtn")?.addEventListener("click", createBatch);
+}
+
+function switchCreateMode(mode) {
+  const target = mode === "bulk" ? "bulk" : "single";
+  document.querySelectorAll("#createModeTabs .create-mode").forEach((b) => b.classList.toggle("is-active", b.dataset.mode === target));
+  document.querySelectorAll("[data-mode-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.modePanel !== target;
+  });
+}
+
+function csvField(value) {
+  const text = String(value == null ? "" : value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function downloadBatchTemplate() {
+  const lines = [BATCH_TEMPLATE_HEADERS, ...BATCH_TEMPLATE_ROWS].map((row) => row.map(csvField).join(","));
+  downloadBlob(`﻿${lines.join("\r\n")}\r\n`, "text/csv;charset=utf-8", "fundline-payout-template.csv");
+}
+
+// Minimal RFC-4180-ish CSV parser: handles quoted fields, escaped quotes, and CRLF.
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+  const src = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  for (let i = 0; i < src.length; i += 1) {
+    const c = src[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (src[i + 1] === '"') { field += '"'; i += 1; } else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      row.push(field);
+      field = "";
+    } else if (c === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += c;
+    }
+  }
+  if (field.length || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows.filter((r) => r.some((cell) => String(cell).trim() !== ""));
+}
+
+function batchHeaderMap(headers) {
+  const map = {};
+  headers.forEach((header, index) => {
+    const key = String(header).toLowerCase().replace(/\(.*?\)/g, "").trim();
+    if (map.recipientName === undefined && /(recipient\s*name|^name$)/.test(key)) map.recipientName = index;
+    else if (map.recipientWallet === undefined && /(wallet|address)/.test(key)) map.recipientWallet = index;
+    else if (map.amount === undefined && /(amount|usdc)/.test(key)) map.amount = index;
+    else if (map.reference === undefined && /(reference|note|memo)/.test(key)) map.reference = index;
+    else if (map.email === undefined && /email/.test(key)) map.email = index;
+  });
+  return map;
+}
+
+function handleBatchFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const nameEl = document.querySelector("#batchFileName");
+  if (nameEl) nameEl.textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      renderBatchPreview(parseCsv(reader.result));
+    } catch (error) {
+      showToast("Could not read the CSV file.");
+    }
+  };
+  reader.readAsText(file);
+}
+
+function renderBatchPreview(rows) {
+  const preview = document.querySelector("#batchPreview");
+  const totalEl = document.querySelector("#batchTotal");
+  const countEl = document.querySelector("#batchCount");
+  const createBtn = document.querySelector("#createBatchBtn");
+  _batchItems = [];
+  if (createBtn) createBtn.disabled = true;
+  if (!preview) return;
+  if (!rows.length) {
+    preview.innerHTML = "";
+    return;
+  }
+  const header = batchHeaderMap(rows[0]);
+  if (header.recipientWallet === undefined || header.amount === undefined) {
+    preview.innerHTML = `<p class="bulk-error">The file needs at least a Recipient wallet and an Amount column. Use the template.</p>`;
+    return;
+  }
+  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  const maxRecipients = config.maxBatchRecipients || 256;
+  const items = [];
+  let invalid = 0;
+  let totalUnits = 0n;
+  const body = rows.slice(1).map((cells, index) => {
+    const wallet = String(cells[header.recipientWallet] || "").trim();
+    const amountRaw = String(cells[header.amount] || "").trim();
+    const amount = Number(amountRaw.replace(/,/g, ""));
+    const name = header.recipientName !== undefined ? String(cells[header.recipientName] || "").trim() : "";
+    const reference = header.reference !== undefined ? String(cells[header.reference] || "").trim() : "";
+    const email = header.email !== undefined ? String(cells[header.email] || "").trim() : "";
+    const walletOk = /^0x[0-9a-fA-F]{40}$/.test(wallet);
+    const amountOk = Number.isFinite(amount) && amount > 0;
+    if (walletOk && amountOk) {
+      items.push({ recipientName: name, recipientWallet: wallet, amount, reference, email });
+      totalUnits += parseTokenUnits(amount, ARC_USDC_DECIMALS);
+    } else {
+      invalid += 1;
+    }
+    const err = !walletOk ? "invalid wallet" : !amountOk ? "invalid amount" : "";
+    return `<tr class="${walletOk && amountOk ? "" : "bulk-row-bad"}">
+      <td>${index + 1}</td>
+      <td>${escapeHtml(name) || "-"}</td>
+      <td class="bulk-wallet">${walletOk ? escapeHtml(shortAddress(wallet)) : escapeHtml(wallet || "-")}</td>
+      <td class="bulk-amt">${amountOk ? formatUsdc(amount) : escapeHtml(amountRaw || "-")}</td>
+      <td>${escapeHtml(reference) || "-"}</td>
+      <td class="bulk-rowerr">${err}</td>
+    </tr>`;
+  }).join("");
+
+  const tooMany = items.length > maxRecipients;
+  preview.innerHTML = `
+    <div class="bulk-table-wrap">
+      <table class="bulk-table">
+        <thead><tr><th>#</th><th>Name</th><th>Wallet</th><th>Amount</th><th>Reference</th><th></th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    ${invalid ? `<p class="bulk-error">${invalid} row(s) have an invalid wallet or amount. Fix them and re-upload.</p>` : ""}
+    ${tooMany ? `<p class="bulk-error">${items.length} recipients exceed the ${maxRecipients} per-batch limit. Split into smaller files.</p>` : ""}
+  `;
+  if (totalEl) totalEl.textContent = `${formatUnits(totalUnits, ARC_USDC_DECIMALS)} USDC`;
+  if (countEl) countEl.textContent = items.length ? `${items.length} recipient${items.length > 1 ? "s" : ""}` : "";
+  _batchItems = items;
+  if (createBtn) createBtn.disabled = !(items.length >= 1 && invalid === 0 && !tooMany);
+}
+
+async function createBatch() {
+  if (!_batchItems.length) {
+    showToast("Upload a CSV with at least one valid recipient.");
+    return;
+  }
+  let creatorWallet = getConnectedWallet();
+  if (!creatorWallet) {
+    await connectWallet();
+    creatorWallet = getConnectedWallet();
+  }
+  if (!creatorWallet) return;
+  const withMemo = Boolean(document.querySelector("#batchMemoEnabled")?.checked);
+  const title = String(document.querySelector("#batchTitle")?.value || "").trim();
+  const createBtn = document.querySelector("#createBatchBtn");
+  if (createBtn) createBtn.disabled = true;
+  try {
+    const res = await fetch("/api/batches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        creatorWallet,
+        creatorName: state.settings.merchantName || "",
+        title,
+        withMemo,
+        items: _batchItems,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error?.message || data?.error || "Could not create the payout");
+    showBatchResult(data.batch);
+    showToast("Payout link created.");
+  } catch (error) {
+    showToast(error?.message || "Could not create the payout.");
+    if (createBtn) createBtn.disabled = false;
+  }
+}
+
+function showBatchResult(batch) {
+  const result = document.querySelector("#batchResult");
+  if (!result) return;
+  const link = `${window.location.origin}/batch/${batch.id}`;
+  result.hidden = false;
+  result.innerHTML = `
+    <p class="eyebrow">Payout link ready</p>
+    <p class="bulk-result-sub">Share this link with whoever funds the payout. They open it, connect a wallet, and pay all ${batch.count} recipient${batch.count > 1 ? "s" : ""} in one transaction.</p>
+    <div class="copy-row">
+      <input readonly value="${escapeHtml(link)}" />
+      <button class="ghost-action" type="button" data-copy-batch="${escapeHtml(link)}">Copy link</button>
+    </div>
+    <div class="receipt-actions">
+      <a class="primary-action" href="/batch/${escapeHtml(batch.id)}" target="_blank" rel="noreferrer">Open payout page</a>
+    </div>
+  `;
+  result.querySelector("[data-copy-batch]")?.addEventListener("click", (event) => copyText(event.currentTarget.dataset.copyBatch));
+  result.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function downloadReceiptPdf(invoice) {
