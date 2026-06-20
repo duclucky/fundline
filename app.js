@@ -29,6 +29,17 @@ const ERC20_DECIMALS_SELECTOR = "0x313ce567";
 const MAX_UINT256 = 2n ** 256n - 1n;
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
+// depositForBurnWithHook(uint256,uint32,bytes32,address,bytes32,uint256,uint32,bytes).
+// With the basic forwarding hook, Circle's relayer fetches the attestation and submits
+// the destination mint itself, paying the destination gas (deducted as forwardFee from
+// the burned amount). This removes the client mint step and the need for the payer to
+// hold any native gas on Arc to receive (USDC is the Arc gas token).
+const CCTP_DEPOSIT_FOR_BURN_WITH_HOOK_SELECTOR = "0x779b432d";
+// Basic forwarding hookData: bytes24 magic "cctp-forward", uint32 version 0, uint32 len 0.
+const CCTP_FORWARD_HOOK_DATA = "636374702d666f72776172640000000000000000000000000000000000000000";
+// ~0.02 USDC (6 decimals). Bridged on top of the invoice + fees so the payer nets enough
+// Arc USDC to cover the approve + payInvoice gas (USDC is the Arc gas token).
+const CCTP_PAY_GAS_BUFFER = 20000n;
 const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
 const CCTP_STANDARD_FINALITY_THRESHOLD = 2000;
 const CCTP_FAST_FINALITY_THRESHOLD = 1000;
@@ -2514,16 +2525,26 @@ async function bridgeAndPayInvoice(id, sourceKey) {
     setButtonBusy(button, "Checking source...");
     await ensureWalletNetwork(provider, source);
     const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
+    const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+    // Bridge a bit more than the invoice: the forwarder deducts protocol + forward fee from
+    // the burned amount, and the payer still needs a little Arc USDC for the approve +
+    // payInvoice gas. Bridging total + fees + gas buffer means the payer nets at least the
+    // invoice total (plus gas) on Arc, so even a fully empty Arc wallet can pay.
+    const feeQuote = await resolveCctpFee({ sourceDomain: source.domain, destinationDomain: CCTP_TESTNET_CHAINS.arcTestnet.domain, amountUnits, fast: true });
+    const bridgeUnits = amountUnits + feeQuote.protocolFee + feeQuote.forwardFee + CCTP_PAY_GAS_BUFFER;
     const balance = await readUsdcBalance(provider, source.usdc, payerWallet);
-    if (balance < amountUnits) {
-      throw new Error(`Insufficient USDC on ${source.shortName}.`);
+    if (balance < bridgeUnits) {
+      throw new Error(`Insufficient USDC on ${source.shortName}. Need ${formatUnits(bridgeUnits, ARC_USDC_DECIMALS)} USDC (invoice plus bridge fee).`);
     }
     setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
+
+    const arcBalanceBefore = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payerWallet).catch(() => 0n);
+    _activeBridgeContext.arcBalanceBefore = arcBalanceBefore;
 
     setProgressStep(progress, "bridge", "active", "Checking bridge allowance...");
     setButtonBusy(button, "Checking allowance...");
     const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, source.tokenMessenger);
-    if (allowance < amountUnits) {
+    if (allowance < bridgeUnits) {
       setProgressStep(progress, "bridge", "active", "Approving USDC bridge (one-time)...");
       setButtonBusy(button, "Approving bridge...");
       const approveTx = await sendUsdcApprove(provider, {
@@ -2541,26 +2562,22 @@ async function bridgeAndPayInvoice(id, sourceKey) {
       from: payerWallet,
       source,
       destination: CCTP_TESTNET_CHAINS.arcTestnet,
-      amount: amountUnits,
+      amount: bridgeUnits,
       recipient: payerWallet,
       fast: true,
       onFeeResolved: (feeInfo) => {
-        const modeLabel = feeInfo.mode === "fast" ? "Fast" : "Standard";
-        const feeDetail = feeInfo.mode === "fast" ? `fee ${feeInfo.feeText}` : feeInfo.feeText;
-        setProgressStep(progress, "bridge", "active", `Bridging via ${modeLabel} (${feeDetail})...`);
+        setProgressStep(progress, "bridge", "active", `Bridging via ${feeInfo.mode === "fast" ? "Fast" : "Standard"} (fee ${feeInfo.feeText})...`);
       }
     });
     _activeBridgeContext.burnTx = burnTx;
     await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
-    setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
-    const message = await fetchCctpAttestation(source.domain, burnTx);
-    _activeBridgeContext.cctpMessage = message;
 
-    setProgressStep(progress, "bridge", "active", "Minting USDC on Arc...");
-    setButtonBusy(button, "Minting on Arc...");
-    await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
-    const mintTx = await sendCctpMint(provider, { from: payerWallet, message: message.message, attestation: message.attestation });
-    await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
+    // Circle's forwarder fetches the attestation, mints on Arc, and pays the Arc gas. The
+    // payer does not submit a mint and needs no Arc gas to receive. Poll until it lands.
+    setProgressStep(progress, "bridge", "active", "Circle is delivering USDC to Arc (gasless)...");
+    setButtonBusy(button, "Receiving on Arc...");
+    await ensurePaymentNetwork(provider, config);
+    await waitForForwarderMint(config, payerWallet, arcBalanceBefore + amountUnits);
     setProgressStep(progress, "bridge", "done", "USDC received on Arc");
 
     setProgressStep(progress, "pay", "active", "Paying invoice on Arc...");
@@ -2612,49 +2629,47 @@ async function _retryBridgePay(id, sourceKey, fromStep) {
       if (balance < amountUnits) throw new Error(`Insufficient USDC on ${source.shortName}.`);
       setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
     }
-    if (["check", "bridge"].includes(fromStep) && !ctx.cctpMessage) {
+    const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+    if (["check", "bridge"].includes(fromStep) && !ctx.burnTx) {
+      // Not bridged yet: approve + burn (with forwarding hook), then wait for the forwarder.
+      const feeQuote = await resolveCctpFee({ sourceDomain: source.domain, destinationDomain: CCTP_TESTNET_CHAINS.arcTestnet.domain, amountUnits, fast: true });
+      const bridgeUnits = amountUnits + feeQuote.protocolFee + feeQuote.forwardFee + CCTP_PAY_GAS_BUFFER;
       setProgressStep(progress, "bridge", "active", "Checking bridge allowance...");
       setButtonBusy(button, "Checking allowance...");
       const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, source.tokenMessenger);
-      if (allowance < amountUnits) {
+      if (allowance < bridgeUnits) {
         setProgressStep(progress, "bridge", "active", "Approving USDC bridge (one-time)...");
         setButtonBusy(button, "Approving bridge...");
         const approveTx = await sendUsdcApprove(provider, { from: payerWallet, token: source.usdc, spender: source.tokenMessenger, amount: MAX_UINT256 });
         await waitForTransaction(provider, approveTx);
       }
+      ctx.arcBalanceBefore = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payerWallet).catch(() => 0n);
       setProgressStep(progress, "bridge", "active", `Moving USDC from ${source.shortName} to Arc...`);
       setButtonBusy(button, "Starting bridge...");
-      const burnTx = await sendCctpBurn(provider, { 
-        from: payerWallet, 
-        source, 
-        destination: CCTP_TESTNET_CHAINS.arcTestnet, 
-        amount: amountUnits, 
-        recipient: payerWallet, 
+      const burnTx = await sendCctpBurn(provider, {
+        from: payerWallet,
+        source,
+        destination: CCTP_TESTNET_CHAINS.arcTestnet,
+        amount: bridgeUnits,
+        recipient: payerWallet,
         fast: true,
         onFeeResolved: (feeInfo) => {
-          const modeLabel = feeInfo.mode === "fast" ? "Fast" : "Standard";
-          const feeDetail = feeInfo.mode === "fast" ? `fee ${feeInfo.feeText}` : feeInfo.feeText;
-          setProgressStep(progress, "bridge", "active", `Bridging via ${modeLabel} (${feeDetail})...`);
+          setProgressStep(progress, "bridge", "active", `Bridging via ${feeInfo.mode === "fast" ? "Fast" : "Standard"} (fee ${feeInfo.feeText})...`);
         }
       });
       ctx.burnTx = burnTx;
       await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
-      setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
-      const message = await fetchCctpAttestation(source.domain, burnTx);
-      ctx.cctpMessage = message;
-      setProgressStep(progress, "bridge", "active", "Minting USDC on Arc...");
-      setButtonBusy(button, "Minting on Arc...");
-      await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
-      const mintTx = await sendCctpMint(provider, { from: payerWallet, message: message.message, attestation: message.attestation });
-      await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
+      setProgressStep(progress, "bridge", "active", "Circle is delivering USDC to Arc (gasless)...");
+      setButtonBusy(button, "Receiving on Arc...");
+      await ensurePaymentNetwork(provider, config);
+      await waitForForwarderMint(config, payerWallet, (ctx.arcBalanceBefore || 0n) + amountUnits);
       setProgressStep(progress, "bridge", "done", "USDC received on Arc");
-    } else if (["check", "bridge"].includes(fromStep) && ctx.cctpMessage) {
-      // Already have attestation, just mint
-      setProgressStep(progress, "bridge", "active", "Minting USDC on Arc (retry)...");
-      setButtonBusy(button, "Minting on Arc...");
-      await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
-      const mintTx = await sendCctpMint(provider, { from: payerWallet, message: ctx.cctpMessage.message, attestation: ctx.cctpMessage.attestation });
-      await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
+    } else if (["check", "bridge"].includes(fromStep) && ctx.burnTx) {
+      // Burn already submitted: just wait for the forwarder to deliver on Arc (no re-burn).
+      setProgressStep(progress, "bridge", "active", "Circle is delivering USDC to Arc (gasless)...");
+      setButtonBusy(button, "Receiving on Arc...");
+      await ensurePaymentNetwork(provider, config);
+      await waitForForwarderMint(config, payerWallet, (ctx.arcBalanceBefore || 0n) + amountUnits);
       setProgressStep(progress, "bridge", "done", "USDC received on Arc");
     }
     if (["check", "bridge", "pay"].includes(fromStep)) {
@@ -2843,12 +2858,13 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, 
 
 async function resolveCctpFee({ sourceDomain, destinationDomain, amountUnits, fast }) {
   let mode = fast ? "fast" : "standard";
-  let maxFee = 0n;
+  let protocolFee = 0n;
+  let forwardFee = 0n;
   let minFinalityThreshold = fast ? CCTP_FAST_FINALITY_THRESHOLD : CCTP_STANDARD_FINALITY_THRESHOLD;
-  let feeText = fast ? "calculating..." : "free, slower (~13-19 min)";
 
   try {
-    const url = `${CCTP_IRIS_SANDBOX_BASE}/v2/burn/USDC/fees/${sourceDomain}/${destinationDomain}`;
+    // forward=true also returns the forwardFee tiers for the gasless destination mint.
+    const url = `${CCTP_IRIS_SANDBOX_BASE}/v2/burn/USDC/fees/${sourceDomain}/${destinationDomain}?forward=true`;
     const response = await fetch(url, { cache: "no-store" });
     const payload = await response.json();
     const tiers = Array.isArray(payload) ? payload : [];
@@ -2869,36 +2885,35 @@ async function resolveCctpFee({ sourceDomain, destinationDomain, amountUnits, fa
         minFinalityThreshold = Number(tier.finalityThreshold) || minFinalityThreshold;
         const bps = Number(tier.minimumFee) || 0;
         if (bps > 0) {
-          // bps might be a float like 1.3, so scale it up by 100 to make it an integer
+          // bps may be a float like 1.3; scale by 100 to integer math, divisor 10000*100.
           const bpsScaled = BigInt(Math.ceil(bps * 100));
-          // Divisor is now 10,000 * 100 = 1,000,000
-          let feeUnits = (amountUnits * bpsScaled + 999999n) / 1000000n;
-          maxFee = (feeUnits * 125n) / 100n;
-          feeText = formatUnits(maxFee, ARC_USDC_DECIMALS) + " USDC";
-        } else {
-          maxFee = 0n;
-          feeText = "free, slower (~13-19 min)";
+          const feeUnits = (amountUnits * bpsScaled + 999999n) / 1000000n;
+          protocolFee = (feeUnits * 125n) / 100n; // 25% headroom on the protocol fee
         }
+        // Forwarding (gasless destination mint) fee, a flat amount in base units.
+        const fwd = tier.forwardFee && typeof tier.forwardFee === "object" ? tier.forwardFee : null;
+        const fwdUnits = fwd ? Number(fwd.high ?? fwd.med ?? fwd.low ?? 0) : Number(tier.forwardFee || 0);
+        if (Number.isFinite(fwdUnits) && fwdUnits > 0) forwardFee = BigInt(Math.ceil(fwdUnits));
       }
     }
   } catch (error) {
     console.error("CCTP fee API failed:", error);
   }
 
-  if (fast && maxFee === 0n) {
+  if (fast && protocolFee === 0n && forwardFee === 0n) {
     mode = "standard";
     minFinalityThreshold = CCTP_STANDARD_FINALITY_THRESHOLD;
-    feeText = "free, slower (~13-19 min)";
   }
 
-  if (maxFee > 0n) {
-    const onePercent = amountUnits / 100n;
-    if (maxFee > onePercent) {
-      throw new Error("Bridge fee exceeds 1% of the transfer amount. Please retry later or pay directly on Arc.");
-    }
+  // Cap only the protocol (percentage) portion at 1%. The forwarding fee is a flat amount
+  // that can exceed 1% of a small invoice, which is expected, so it is excluded from this guard.
+  if (protocolFee > amountUnits / 100n) {
+    throw new Error("Bridge fee exceeds 1% of the transfer amount. Please retry later or pay directly on Arc.");
   }
 
-  return { maxFee, minFinalityThreshold, mode, feeText };
+  const maxFee = protocolFee + forwardFee;
+  const feeText = maxFee > 0n ? `${formatUnits(maxFee, ARC_USDC_DECIMALS)} USDC` : "free, slower (~13-19 min)";
+  return { maxFee, protocolFee, forwardFee, minFinalityThreshold, mode, feeText };
 }
 
 async function sendCctpBurn(provider, { from, source, destination, amount, recipient, fast = false, onFeeResolved }) {
@@ -2911,20 +2926,38 @@ async function sendCctpBurn(provider, { from, source, destination, amount, recip
 
   if (onFeeResolved) onFeeResolved(feeInfo);
 
+  // depositForBurnWithHook with the basic forwarding hook. destinationCaller MUST be zero
+  // (the forwarder does not support a set destinationCaller). The trailing dynamic bytes
+  // (hookData) sits after the 8-word head: offset 0x100, length 32, then the 32-byte hook.
   const data =
-    CCTP_DEPOSIT_FOR_BURN_SELECTOR +
+    CCTP_DEPOSIT_FOR_BURN_WITH_HOOK_SELECTOR +
     encodeUint256(amount) +
     encodeUint256(destination.domain) +
     encodeBytes32(addressToBytes32(recipient)) +
     encodeAddress(source.usdc) +
     encodeBytes32(ZERO_BYTES32) +
     encodeUint256(feeInfo.maxFee) +
-    encodeUint256(feeInfo.minFinalityThreshold);
-    
+    encodeUint256(feeInfo.minFinalityThreshold) +
+    encodeUint256(256) +
+    encodeUint256(32) +
+    CCTP_FORWARD_HOOK_DATA;
+
   return provider.request({
     method: "eth_sendTransaction",
     params: [{ from, to: source.tokenMessenger, data, value: "0x0" }],
   });
+}
+
+// Poll the payer's Arc USDC balance until Circle's forwarder has minted the bridged USDC
+// (balance reaches at least targetUnits). Replaces the client-submitted receiveMessage: the
+// forwarder pays the Arc gas, so the payer needs no Arc gas to receive.
+async function waitForForwarderMint(config, owner, targetUnits, { attempts = 80, intervalMs = 4000 } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const balance = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, owner).catch(() => 0n);
+    if (balance >= targetUnits) return balance;
+    await delay(intervalMs);
+  }
+  throw new Error("Circle forwarder has not delivered the USDC on Arc yet. Press Retry in a moment.");
 }
 
 async function fetchCctpAttestation(sourceDomain, txHash) {
