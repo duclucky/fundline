@@ -1762,6 +1762,40 @@ h3 {
   gap: 10px;
 }
 
+.proof-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.proof-grid .proof-panel {
+  max-width: none;
+  margin: 0;
+}
+
+.proof-title {
+  margin: -16px 0 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.proof-row-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.proof-memo-text {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+  word-break: break-word;
+}
+
 /* ====================================================
    RESPONSIVE — Tablet (640px – 1024px)
    ==================================================== */
@@ -1772,6 +1806,10 @@ h3 {
 
   .trust-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .proof-grid {
+    grid-template-columns: 1fr;
   }
 
   .how-grid-3 {
