@@ -22,6 +22,7 @@
       <nav class="docs-topnav" aria-label="Top navigation">
         <a href="#quick-start">Quick start</a>
         <a href="#payment-flow">Payment</a>
+        <a href="#payroll">Payroll</a>
         <a href="#settlement">Settlement</a>
         <a href="#agent-api">API</a>
         <a href="#contracts">Contracts</a>
@@ -43,9 +44,11 @@
         <p class="nav-label">// Product</p>
         <a class="side-link" href="#create-invoice">Create invoice</a>
         <a class="side-link" href="#payment-flow">Payment flow</a>
+        <a class="side-link" href="#memo">On-chain memo</a>
         <a class="side-link" href="#receipts">Receipts and export</a>
         <a class="side-link" href="#telegram">Telegram bot</a>
         <a class="side-link" href="#settlement">Cross-chain settlement</a>
+        <a class="side-link" href="#payroll">Bulk payout</a>
 
         <p class="nav-label">// Developers and agents</p>
         <a class="side-link" href="#agent-api">Agent API</a>
@@ -66,15 +69,17 @@
           <h1>Fundline Documentation</h1>
           <p class="lead">
             The operating guide for non-custodial USDC invoices on Arc. Fundline helps freelancers, service providers,
-            SaaS tools and agents create invoices, send payment links, verify on-chain payments, issue receipts and
-            trigger Telegram or webhook alerts when a customer pays.
+            SaaS tools and agents create invoices, send payment links, verify on-chain payments, pay a whole team in one
+            transaction, issue receipts and trigger Telegram or webhook alerts when a customer pays.
           </p>
           <div class="status-row" aria-label="Project status">
             <span><i></i>Arc Testnet</span>
             <span>Non-custodial</span>
-            <span>PaymentRouter live</span>
-            <span>CCTP pilot</span>
-            <span>Agent API ready</span>
+            <span>Routers verified</span>
+            <span>On-chain memo</span>
+            <span>Batch payroll</span>
+            <span>CCTP fast transfer</span>
+            <span>Agent API</span>
           </div>
           <div class="doc-cards">
             <a class="doc-card" href="#quick-start">
@@ -93,9 +98,13 @@
               <strong>Webhooks</strong>
               <span>Receive an <code>invoice.paid</code> event when a payment is verified.</span>
             </a>
+            <a class="doc-card" href="#payroll">
+              <strong>Bulk payout</strong>
+              <span>Pay many recipients (payroll, speaker fees) in a single transaction.</span>
+            </a>
             <a class="doc-card" href="#settlement">
               <strong>Settlement</strong>
-              <span>Prepare Sepolia or Base Sepolia USDC settlement into Arc Testnet.</span>
+              <span>Bring Sepolia or Base Sepolia USDC into Arc with CCTP fast transfer.</span>
             </a>
           </div>
         </section>
@@ -105,7 +114,7 @@
           <h2>How Fundline works</h2>
           <p>
             Fundline separates invoice creation, payment execution and payment verification. The app never holds
-            customer funds. PaymentRouter transfers USDC directly from the payer wallet to the merchant wallet.
+            customer funds. The settlement routers transfer USDC directly from the payer wallet to the recipient wallet.
           </p>
           <div class="surface-grid">
             <article>
@@ -120,8 +129,8 @@
             </article>
             <article>
               <span>Arc contracts</span>
-              <strong>USDC and PaymentRouter</strong>
-              <p>Approves exact USDC spend, calls <code>payInvoice</code>, emits a clear payment event.</p>
+              <strong>USDC and settlement routers</strong>
+              <p>Approve exact USDC spend, call <code>payInvoice</code> or <code>payBatch</code>, emit a clear payment event.</p>
             </article>
           </div>
           <table>
@@ -144,9 +153,9 @@
                 <td>User-controlled</td>
               </tr>
               <tr>
-                <td>PaymentRouter</td>
-                <td>Routes payment and emits <code>InvoicePaid</code></td>
-                <td>Does not hold funds</td>
+                <td>Settlement routers</td>
+                <td>Route payment and emit <code>InvoicePaid</code> or <code>BatchPaid</code></td>
+                <td>Do not hold funds</td>
               </tr>
               <tr>
                 <td>Server</td>
@@ -216,7 +225,7 @@
               </tr>
               <tr>
                 <td>Payment reference ID</td>
-                <td>Offchain bytes32 reference created with the invoice. It is written onchain only when PaymentRouter emits InvoicePaid.</td>
+                <td>Offchain bytes32 reference created with the invoice. It is written onchain when the settlement router emits InvoicePaid.</td>
               </tr>
             </tbody>
           </table>
@@ -226,27 +235,47 @@
           <p class="eyebrow">Payment</p>
           <h2>On-chain payment flow</h2>
           <p>
-            When PaymentRouter is configured, the public payment page shows a wallet payment button. The payer approves
-            the exact USDC amount, then calls <code>payInvoice(bytes32,address,uint256)</code>.
+            On the public payment page the payer approves the exact USDC amount, then calls the settlement router
+            (FundlineMemoRouter) with <code>payInvoice(bytes32,address,uint256)</code>. A repeat payer who already
+            approved enough allowance pays in a single transaction.
           </p>
           <div class="flow">
             <span>Payer opens link</span>
             <span>Approve exact USDC</span>
             <span>Pay invoice</span>
-            <span>Verify on Arcscan</span>
+            <span>Verify on Arc</span>
             <span>Server marks paid</span>
           </div>
           <div class="code-card">
-            <div class="code-head"><span>PaymentRouter call</span><button data-copy="#pay-router-call" type="button">Copy</button></div>
+            <div class="code-head"><span>Router call</span><button data-copy="#pay-router-call" type="button">Copy</button></div>
             <pre id="pay-router-call"><code>payInvoice(bytes32 invoiceId, address merchant, uint256 amount)</code></pre>
           </div>
           <p>
-            If PaymentRouter is not configured, the payment page keeps the wallet payment button disabled and still
-            supports manual USDC transfer plus Arcscan verification.
+            A payer who does not connect a wallet can still send USDC directly and verify the transfer. On Arc, where
+            USDC is the gas token, the payment-page QR uses an EIP-681 native transfer URI so exchange and mobile wallets
+            can scan and pay without importing a token contract.
           </p>
           <div class="note">
             <strong>Verification rule</strong>
-            <span>When PaymentRouter is configured, Fundline only marks an invoice paid after finding both the router invoice reference and the matching USDC transfer for the exact payer, merchant and amount.</span>
+            <span>Fundline never trusts the client. The server reconciles on-chain and only marks an invoice paid after it confirms a matching payment for the exact recipient and amount, and that the same transaction cannot settle two invoices. The detailed anti-fraud checks are kept private.</span>
+          </div>
+        </section>
+
+        <section class="doc-section" id="memo">
+          <p class="eyebrow">On-chain memo</p>
+          <h2>Optional on-chain invoice memo</h2>
+          <p>
+            FundlineMemoRouter can record selected invoice details on the payment transaction itself as a public,
+            permanent memo, emitted in an <code>InvoiceMemo</code> event. It is opt-in per invoice: the merchant chooses
+            which fields to publish, with a clear warning for sensitive fields such as the client name.
+          </p>
+          <p>
+            For verifiable records without revealing content, the memo can instead carry a SHA-256 commitment of the
+            invoice. The memo is a log only, never stored in contract state, and capped in size.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>Memo call</span><button data-copy="#memo-call" type="button">Copy</button></div>
+            <pre id="memo-call"><code>payInvoiceWithMemo(bytes32 invoiceId, address merchant, uint256 amount, bytes memo)</code></pre>
           </div>
         </section>
 
@@ -261,11 +290,23 @@
         </section>
 
         <section class="doc-section" id="telegram">
-          <p class="eyebrow">Alerts</p>
-          <h2>Telegram payment alerts</h2>
+          <p class="eyebrow">Telegram</p>
+          <h2>Run invoicing from Telegram</h2>
           <p>
-            Merchants can add a Telegram chat ID in Settings. After a payment is verified, Fundline sends a message
-            with invoice number, amount, payer wallet, receiving wallet and transaction link.
+            Telegram is a first-class surface, not only an alert channel. A merchant can create an invoice directly inside
+            a chat through a guided flow (client, amount, due date, confirm), then share the payment link. The bot uses
+            long polling, so no public webhook endpoint is required.
+          </p>
+          <p>
+            The link between a Telegram chat and a merchant wallet is a confirmed one-to-one binding. It is created as
+            pending from the signature-verified settings write, and only becomes active when that same chat sends
+            <code>/start</code>. This stops anyone from pasting someone else's chat ID to capture their alerts. Invoices
+            created from the bot always use the linked wallet as the receiving wallet.
+          </p>
+          <p>
+            When a payment is verified, Fundline sends an instant message with the invoice number, amount, payer wallet,
+            receiving wallet and transaction link. Alerts are dispatched server-side, so they do not depend on the
+            merchant having a browser open.
           </p>
           <div class="code-card">
             <div class="code-head"><span>Telegram env</span><button data-copy="#telegram-env" type="button">Copy</button></div>
@@ -316,12 +357,44 @@ MessageTransmitterV2=0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275</code></pre>
             The payment page lets payers choose the network where they already hold USDC. Arc USDC pays directly. If
             the payer chooses Base Sepolia or Ethereum Sepolia and the balance is sufficient, Fundline starts a
             bridge-and-pay flow: approve TokenMessengerV2, burn source USDC, fetch Circle attestation, mint on Arc,
-            then pay the invoice through PaymentRouter.
+            then pay the invoice through the settlement router.
           </p>
           <p>
             Circle Wallets should be layered in after this pilot so non-crypto users can access an embedded wallet
             before paying or receiving USDC.
           </p>
+        </section>
+
+        <section class="doc-section" id="payroll">
+          <p class="eyebrow">Bulk payout</p>
+          <h2>Payroll and batch payouts</h2>
+          <p>
+            FundlineBatchRouter settles a one-to-many payout in a single transaction: payroll, speaker fees, or refunds.
+            The merchant uploads a CSV of recipients (name, wallet, amount, optional reference), Fundline mints one payout
+            link, and the payer settles everyone at once. The payer approves the total once, then a single call
+            distributes USDC from the payer directly to each recipient.
+          </p>
+          <p>
+            A batch is atomic: if any single transfer fails, the whole transaction reverts, so a payroll run can never be
+            left half paid. Like the invoice router, it is non-custodial and holds no balance. An optional per-recipient
+            memo can record each reference (for example a payslip note) on-chain.
+          </p>
+          <div class="flow">
+            <span>Upload CSV</span>
+            <span>Review recipients and total</span>
+            <span>Connect wallet</span>
+            <span>Approve total</span>
+            <span>Pay all in one transaction</span>
+          </div>
+          <div class="code-card">
+            <div class="code-head"><span>BatchRouter calls</span><button data-copy="#batch-call" type="button">Copy</button></div>
+            <pre id="batch-call"><code>payBatch(bytes32 batchId, address[] recipients, uint256[] amounts)
+payBatchWithMemo(bytes32 batchId, address[] recipients, uint256[] amounts, bytes[] memos)</code></pre>
+          </div>
+          <div class="note">
+            <strong>Payer wallet required</strong>
+            <span>The batch payout page is wallet-only by design. There is no QR and no manual transfer, because the payer is a business treasury settling many recipients in one signed transaction.</span>
+          </div>
         </section>
 
         <section class="doc-section" id="agent-api">
@@ -511,31 +584,33 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
 
         <section class="doc-section" id="contracts">
           <p class="eyebrow">Contracts</p>
-          <h2>PaymentRouter</h2>
+          <h2>Settlement contracts</h2>
           <p>
-            PaymentRouter was deployed to Arc Testnet to enable direct USDC invoice payments from payer wallet to
-            merchant wallet.
+            Every settlement contract is non-custodial: it only moves USDC with <code>transferFrom(payer, recipient)</code>
+            and emits events. It holds no balance and has no owner, admin, or withdraw path. Source is verified on Arcscan.
           </p>
           <table>
+            <thead>
+              <tr><th>Contract</th><th>Address</th><th>Role</th></tr>
+            </thead>
             <tbody>
               <tr>
-                <th>Contract</th>
-                <td><code>0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</code></td>
+                <td>FundlineMemoRouter</td>
+                <td><a href="https://testnet.arcscan.app/address/0x5613D701D2e6A70643680eabBeEdc0e924b30848" target="_blank" rel="noreferrer"><code>0x5613D701D2e6A70643680eabBeEdc0e924b30848</code></a></td>
+                <td>Single invoice settlement, optional on-chain memo</td>
               </tr>
               <tr>
-                <th>Deploy tx</th>
-                <td><code>0x56d6f6d33bffb02c862239bdcce8f7c2c5129786396bda7efdbf248e89ddb92d</code></td>
-              </tr>
-              <tr>
-                <th>Block</th>
-                <td><code>46561912</code></td>
-              </tr>
-              <tr>
-                <th>Source</th>
-                <td><code>contracts/PaymentRouter.sol</code></td>
+                <td>FundlineBatchRouter</td>
+                <td><a href="https://testnet.arcscan.app/address/0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4" target="_blank" rel="noreferrer"><code>0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4</code></a></td>
+                <td>One-to-many payout (payroll)</td>
               </tr>
             </tbody>
           </table>
+          <p>
+            The original PaymentRouter (<code>0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24</code>) is superseded by
+            FundlineMemoRouter, which keeps the same <code>payInvoice</code> entry point and the same
+            <code>InvoicePaid</code> event, so existing integrations keep working.
+          </p>
         </section>
 
         <section class="doc-section" id="configuration">
@@ -552,9 +627,11 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
           <p class="eyebrow">Security</p>
           <h2>Security baseline</h2>
           <ul class="checks">
-            <li>PaymentRouter is non-custodial and does not hold USDC.</li>
-            <li>The payer approves only the invoice amount required by the payment page.</li>
-            <li>Paid status is set only after Arcscan returns a matching payment.</li>
+            <li>The settlement routers are non-custodial and do not hold USDC.</li>
+            <li>A batch payout is atomic: it pays everyone or reverts, never half a payroll.</li>
+            <li>The payer approves only the amount required by the payment page.</li>
+            <li>Paid status is set only after the server confirms a matching on-chain payment.</li>
+            <li>A single transaction can never settle two invoices.</li>
             <li>Telegram bot token, API key and deployer private key stay in server-side environment files.</li>
             <li>Webhook signatures should be verified by production receivers before trusting payloads.</li>
           </ul>
@@ -565,11 +642,15 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
           <h2>Common questions</h2>
           <details open>
             <summary>Does Fundline hold customer money?</summary>
-            <p>No. PaymentRouter transfers USDC from payer wallet directly to merchant wallet.</p>
+            <p>No. The settlement routers transfer USDC from the payer wallet directly to the recipient wallet. They hold no balance and have no withdraw path.</p>
           </details>
           <details>
-            <summary>Can a payer pay without connecting wallet?</summary>
-            <p>Yes. They can send USDC manually and then provide payer wallet plus optional transaction hash for verification.</p>
+            <summary>Can a payer pay an invoice without connecting a wallet?</summary>
+            <p>Yes, for single invoices. They can send USDC directly (including by scanning the payment-page QR) and then verify the transfer. Batch payouts are wallet-only.</p>
+          </details>
+          <details>
+            <summary>How does a batch payout pay everyone at once?</summary>
+            <p>The payer approves the total once, then one transaction through FundlineBatchRouter distributes USDC from the payer to every recipient. It is atomic, so a failed transfer reverts the whole run.</p>
           </details>
           <details>
             <summary>Is the local demo storage production ready?</summary>
@@ -577,7 +658,7 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
           </details>
           <details>
             <summary>What should be built next?</summary>
-            <p>CCTP/Bridge Kit execution, Circle Wallet onboarding, direct PaymentRouter event indexing, hosted database, invoice email delivery, and a hosted admin UI for webhook delivery logs.</p>
+            <p>A non-custodial escrow for milestone and agent-job payments, Circle Wallet onboarding for non-crypto users, a hosted database, invoice email delivery, and a hosted admin UI for webhook delivery logs.</p>
           </details>
         </section>
       </main>
@@ -590,9 +671,11 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
         <a href="#wallet-setup">Wallet setup</a>
         <a href="#create-invoice">Create invoice</a>
         <a href="#payment-flow">Payment flow</a>
+        <a href="#memo">On-chain memo</a>
         <a href="#receipts">Receipts</a>
         <a href="#telegram">Telegram</a>
         <a href="#settlement">Settlement</a>
+        <a href="#payroll">Bulk payout</a>
         <a href="#agent-api">Agent API</a>
         <a href="#webhooks">Webhooks</a>
         <a href="#webhook-logs">Webhook logs</a>
