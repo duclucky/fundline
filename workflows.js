@@ -222,7 +222,8 @@ function render() {
   const route = getRoute();
   const root = document.getElementById("wfRoot");
   if (!root) return;
-  document.getElementById("wfLoading").hidden = true;
+  const loadingEl = document.getElementById("wfLoading");
+  if (loadingEl) loadingEl.hidden = true;
 
   setSidebarActive(route);
 
