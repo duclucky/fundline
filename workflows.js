@@ -420,60 +420,98 @@ function renderTabOverview(wf) {
   </div>`;
 }
 
-function renderTabSteps(wf) {
-  const nodes = wf.steps.map((s, i) => `
-    <div class="wf-graph-node-wrap">
-      ${i > 0 ? '<div class="wf-graph-connector"></div>' : ""}
-      <div class="wf-graph-node">
-        <div class="wf-graph-badge">${i + 1}</div>
-        <div class="wf-graph-node-body">
-          <div class="wf-graph-node-name">${esc(s.name)}</div>
-          <span class="wf-graph-model-tag">${esc(s.model)}</span>
-          <div class="wf-graph-node-purpose">${esc(s.purpose)}</div>
-        </div>
+function renderWfgNode(node) {
+  if (node.type === "input") {
+    return `<div class="wfg-node wfg-node-input">
+      <div class="wfg-node-badge wfg-badge-io">INPUT</div>
+      <div class="wfg-node-ico">
+        <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20"><circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c0-3.87 3.13-7 7-7s7 3.13 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </div>
-    </div>`).join("");
+      <div class="wfg-node-name">${esc(node.title)}</div>
+      <div class="wfg-node-purpose">${esc(node.purpose)}</div>
+    </div>`;
+  }
+  if (node.type === "output") {
+    return `<div class="wfg-node wfg-node-output">
+      <div class="wfg-node-badge wfg-badge-io">OUTPUT</div>
+      <div class="wfg-node-ico wfg-ico-out">
+        <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20"><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      </div>
+      <div class="wfg-node-name">${esc(node.title)}</div>
+      <div class="wfg-node-purpose">${esc(node.purpose)}</div>
+    </div>`;
+  }
+  return `<div class="wfg-node wfg-node-ai">
+    <div class="wfg-node-badge">STEP ${String(node.stepNum).padStart(2, "0")}</div>
+    <div class="wfg-node-ico">
+      <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20"><rect x="3" y="8" width="18" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 8V6a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="13.5" r="1" fill="currentColor"/><circle cx="15" cy="13.5" r="1" fill="currentColor"/></svg>
+    </div>
+    <div class="wfg-node-name">${esc(node.name)}</div>
+    <div class="wfg-node-model">${esc(node.model)}</div>
+    <div class="wfg-node-purpose">${esc(node.purpose)}</div>
+    ${node.tokens ? `<div class="wfg-node-tokens">${esc(node.tokens)} tokens</div>` : ""}
+  </div>`;
+}
 
-  const steps = wf.steps.map((s, i) => `
-    <div class="wf-step-item">
-      <div class="wf-step-num">Step ${i + 1}</div>
-      <div class="wf-step-name">${esc(s.name)}</div>
-      <div class="wf-step-row"><span class="wf-step-key">Model</span><span class="wf-graph-model-tag">${esc(s.model)}</span></div>
-      <div class="wf-step-row"><span class="wf-step-key">Purpose</span><span class="wf-muted">${esc(s.purpose)}</span></div>
-      <div class="wf-step-row"><span class="wf-step-key">Est. tokens</span><span class="wf-muted">${esc(s.tokens)}</span></div>
-    </div>`).join("");
+function renderTabSteps(wf) {
+  const pricing = wf.pricing || [];
+
+  const allNodes = [
+    { type: "input", title: "User Input", purpose: wf.inputHint || "Your prompt or instructions" },
+    ...wf.steps.map((s, i) => ({ type: "ai", stepNum: i + 1, name: s.name, model: s.model, purpose: s.purpose, tokens: s.tokens, cost: pricing[i] ? pricing[i].cost : null })),
+    { type: "output", title: "Final Output", purpose: wf.outputHint || "Ready to use result" },
+  ];
+
+  const flowHtml = allNodes.map((node, i) => {
+    const conn = i < allNodes.length - 1 ? '<div class="wfg-conn" aria-hidden="true"></div>' : "";
+    return renderWfgNode(node) + conn;
+  }).join("");
+
+  const summaryRows = [
+    { label: "Input", name: "User Input", model: null, purpose: wf.inputHint, cost: null },
+    ...wf.steps.map((s, i) => ({
+      label: "Step " + String(i + 1).padStart(2, "0"),
+      name: s.name,
+      model: s.model,
+      purpose: s.purpose,
+      cost: pricing[i] ? pricing[i].cost : null,
+    })),
+    { label: "Output", name: "Final Output", model: null, purpose: wf.outputHint, cost: null },
+  ];
+
+  const summaryHtml = summaryRows.map((r) => `
+    <tr>
+      <td><span class="wfg-row-label">${esc(r.label)}</span><span class="wfg-row-name">${esc(r.name)}</span></td>
+      <td>${r.model ? `<span class="wf-graph-model-tag">${esc(r.model)}</span>` : '<span class="wf-muted">—</span>'}</td>
+      <td class="wf-muted" style="font-size:12px;line-height:1.5">${esc(r.purpose)}</td>
+      <td class="wf-num">${r.cost ? `<span class="wfg-cost">~$${esc(r.cost)}</span>` : '<span class="wf-muted">—</span>'}</td>
+    </tr>`).join("");
 
   return `<div class="wf-tab-panel" data-panel="Workflow Steps">
-    <div class="wf-steps-split">
-      <div class="wf-graph-scroll">
-        <div class="wf-graph">
-          <div class="wf-graph-node-wrap">
-            <div class="wf-graph-node wf-graph-endpoint">
-              <div class="wf-graph-badge wf-graph-badge-io">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3 9H3l9-13z M12 22v-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </div>
-              <div class="wf-graph-node-body">
-                <div class="wf-graph-node-name">User Input</div>
-                <div class="wf-graph-node-purpose wf-muted">Your prompt or instructions</div>
-              </div>
-            </div>
-          </div>
-          ${nodes}
-          <div class="wf-graph-node-wrap">
-            <div class="wf-graph-connector"></div>
-            <div class="wf-graph-node wf-graph-endpoint wf-graph-endpoint-out">
-              <div class="wf-graph-badge wf-graph-badge-io">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22l-3-9h18L12 22z M12 2v8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              </div>
-              <div class="wf-graph-node-body">
-                <div class="wf-graph-node-name">Final Output</div>
-                <div class="wf-graph-node-purpose wf-muted">Ready to use result</div>
-              </div>
-            </div>
-          </div>
+    <div class="wfg-canvas">
+      <div class="wfg-canvas-head">
+        <div>
+          <div class="wfg-canvas-title">Workflow Structure</div>
+          <div class="wfg-canvas-sub">Transparent execution steps, models, and estimated cost.</div>
+        </div>
+        <div class="wfg-chips">
+          <span class="wfg-chip">${allNodes.length} nodes</span>
+          <span class="wfg-chip">${wf.modelCount} AI models</span>
+          <span class="wfg-chip">${esc(wf.runtime)}</span>
         </div>
       </div>
-      <div class="wf-step-list">${steps}</div>
+      <div class="wfg-flow-wrap">
+        <div class="wfg-flow">${flowHtml}</div>
+      </div>
+      <div class="wfg-summary">
+        <div class="wfg-summary-hd">Execution Summary</div>
+        <div class="wf-table-wrap">
+          <table class="wfg-sum-table">
+            <thead><tr><th>Step</th><th>Model</th><th>Purpose</th><th class="wf-num">Est. cost</th></tr></thead>
+            <tbody>${summaryHtml}</tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>`;
 }
