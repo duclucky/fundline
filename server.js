@@ -320,6 +320,7 @@ function resolveRequestPath(pathname) {
   if (pathname === "/") return "/index.html";
   if (pathname === "/app" || pathname === "/app/" || pathname.startsWith("/pay/")) return "/app.html";
   if (pathname.startsWith("/batch/")) return "/app.html";
+  if (pathname === "/workflows" || pathname === "/workflows/" || pathname.startsWith("/workflows/")) return "/workflows.html";
   return pathname;
 }
 
