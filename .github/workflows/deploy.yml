@@ -28,6 +28,11 @@ jobs:
           node --check app.js
           node --check server.js
 
+      - name: Touch Passenger restart file
+        run: |
+          mkdir -p tmp
+          date -u > tmp/restart.txt
+
       - name: Deploy to cPanel via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
