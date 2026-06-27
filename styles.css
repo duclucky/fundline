@@ -193,6 +193,12 @@ a {
   gap: 0;
 }
 
+.nav-group + .nav-group {
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .nav-group-toggle {
   display: grid;
   grid-template-columns: 26px minmax(0, 1fr) 18px;
@@ -211,6 +217,10 @@ a {
   text-align: left;
   cursor: pointer;
   transition: color 0.15s;
+}
+
+.nav-group-soon > .nav-group-toggle {
+  grid-template-columns: 26px minmax(0, 1fr) auto 18px;
 }
 
 .nav-group-toggle:hover {
@@ -234,6 +244,10 @@ a {
   transform: rotate(180deg);
 }
 
+.nav-group:has(.nav-item.is-active) > .nav-group-toggle {
+  color: var(--gold);
+}
+
 .nav-group-children {
   display: grid;
   gap: 4px;
@@ -241,13 +255,13 @@ a {
   overflow: hidden;
   max-height: 0;
   opacity: 0;
-  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+  transition: max-height 0.28s ease, opacity 0.2s ease, padding 0.28s ease;
   padding-top: 0;
   padding-bottom: 0;
 }
 
 .nav-group.is-open .nav-group-children {
-  max-height: 240px;
+  max-height: 280px;
   opacity: 1;
   padding-top: 4px;
   padding-bottom: 2px;

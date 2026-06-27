@@ -152,11 +152,13 @@ function bindEvents() {
     });
   });
 
-  document.querySelector(".nav-group-toggle")?.addEventListener("click", () => {
-    const group = document.querySelector(".nav-group");
-    if (!group) return;
-    const open = group.classList.toggle("is-open");
-    group.querySelector(".nav-group-toggle")?.setAttribute("aria-expanded", open ? "true" : "false");
+  document.querySelectorAll(".nav-group-toggle").forEach((toggle) => {
+    toggle.addEventListener("click", () => {
+      const group = toggle.closest(".nav-group");
+      if (!group) return;
+      const open = group.classList.toggle("is-open");
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    });
   });
 
   els.filters.forEach((button) => {
