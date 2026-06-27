@@ -2,9 +2,6 @@ const STORAGE_KEY = "arc-invoice-usdc-invoices-v1";
 const SETTINGS_KEY = "arc-invoice-usdc-settings-v1";
 const ARC_EXPLORER_URL = "https://testnet.arcscan.app";
 const ARC_USDC_DECIMALS = 6;
-// On Arc, USDC is ALSO the native gas token, where the native value uses 18
-// decimals (the ERC-20 interface uses 6). Used to build native payment QR codes.
-const ARC_NATIVE_USDC_DECIMALS = 18;
 const DEFAULT_PUBLIC_CONFIG = {
   networkName: "Arc Testnet",
   chainId: 5042002,
@@ -13,42 +10,25 @@ const DEFAULT_PUBLIC_CONFIG = {
   explorerBase: ARC_EXPLORER_URL,
   usdcTokenAddress: "0x3600000000000000000000000000000000000000",
   usdcDecimals: ARC_USDC_DECIMALS,
-  nativeUsdcDecimals: ARC_NATIVE_USDC_DECIMALS,
-  paymentRouterAddress: "0x5613D701D2e6A70643680eabBeEdc0e924b30848",
+  paymentRouterAddress: "0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24",
   onchainPaymentsEnabled: true,
-  batchRouterAddress: "",
-  batchPaymentsEnabled: false,
-  maxBatchRecipients: 256,
-  walletConnectProjectId: "",
 };
 
 const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
 const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
 const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
 const ERC20_DECIMALS_SELECTOR = "0x313ce567";
-const MAX_UINT256 = 2n ** 256n - 1n;
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
-// depositForBurnWithHook(uint256,uint32,bytes32,address,bytes32,uint256,uint32,bytes).
-// With the basic forwarding hook, Circle's relayer fetches the attestation and submits
-// the destination mint itself, paying the destination gas (deducted as forwardFee from
-// the burned amount). This removes the client mint step and the need for the payer to
-// hold any native gas on Arc to receive (USDC is the Arc gas token).
-const CCTP_DEPOSIT_FOR_BURN_WITH_HOOK_SELECTOR = "0x779b432d";
-// Basic forwarding hookData: bytes24 magic "cctp-forward", uint32 version 0, uint32 len 0.
-const CCTP_FORWARD_HOOK_DATA = "636374702d666f72776172640000000000000000000000000000000000000000";
-// ~0.02 USDC (6 decimals). Bridged on top of the invoice + fees so the payer nets enough
-// Arc USDC to cover the approve + payInvoice gas (USDC is the Arc gas token).
-const CCTP_PAY_GAS_BUFFER = 20000n;
 const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
 const CCTP_STANDARD_FINALITY_THRESHOLD = 2000;
 const CCTP_FAST_FINALITY_THRESHOLD = 1000;
 const ZERO_BYTES32 = `0x${"0".repeat(64)}`;
 const CCTP_IRIS_SANDBOX_BASE = "https://iris-api-sandbox.circle.com";
 
-// One table per chain: all CCTP constants in one place.
-// To cut over to mainnet, add a CCTP_MAINNET_CHAINS table and swap the reference.
-// preference: lower = more preferred for auto-suggest (Arc first, no bridge).
+const CCTP_TOKEN_MESSENGER_V2 = "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA";
+const CCTP_MESSAGE_TRANSMITTER_V2 = "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275";
+
 const CCTP_TESTNET_CHAINS = {
   arcTestnet: {
     key: "arcTestnet",
@@ -58,27 +38,9 @@ const CCTP_TESTNET_CHAINS = {
     chainIdHex: "0x4cef52",
     domain: 26,
     usdc: "0x3600000000000000000000000000000000000000",
-    tokenMessenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
-    messageTransmitter: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
     explorer: ARC_EXPLORER_URL,
     rpcUrls: ["https://rpc.testnet.arc.network"],
     nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
-    preference: 0,
-  },
-  baseSepolia: {
-    key: "baseSepolia",
-    name: "Base Sepolia",
-    shortName: "Base Sepolia",
-    chainId: 84532,
-    chainIdHex: "0x14a34",
-    domain: 6,
-    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-    tokenMessenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
-    messageTransmitter: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
-    explorer: "https://sepolia.basescan.org",
-    rpcUrls: ["https://sepolia.base.org"],
-    nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
-    preference: 1,
   },
   ethereumSepolia: {
     key: "ethereumSepolia",
@@ -88,52 +50,34 @@ const CCTP_TESTNET_CHAINS = {
     chainIdHex: "0xaa36a7",
     domain: 0,
     usdc: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
-    tokenMessenger: "0x8FE6B999Dc680CcFDD5Bf7EB0974218be2542DAA",
-    messageTransmitter: "0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275",
     explorer: "https://sepolia.etherscan.io",
     rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"],
     nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
-    preference: 2,
+  },
+  baseSepolia: {
+    key: "baseSepolia",
+    name: "Base Sepolia",
+    shortName: "Base Sepolia",
+    chainId: 84532,
+    chainIdHex: "0x14a34",
+    domain: 6,
+    usdc: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    explorer: "https://sepolia.basescan.org",
+    rpcUrls: ["https://sepolia.base.org"],
+    nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
   },
 };
-
-const WALLET_SESSION_KEY = "arc-invoice-usdc-wallet-session";
-
-function loadWalletState() {
-  try {
-    const parsed = JSON.parse(sessionStorage.getItem(WALLET_SESSION_KEY) || "null");
-    if (parsed && parsed.address) {
-      return {
-        connected: true,
-        address: String(parsed.address),
-        balance: parsed.balance || "",
-        authAt: parsed.authAt || "",
-      };
-    }
-  } catch {}
-  return {
-    connected: false,
-    address: "",
-    balance: "",
-    authAt: "",
-  };
-}
-
-function saveWalletState() {
-  if (state.wallet.connected) {
-    sessionStorage.setItem(WALLET_SESSION_KEY, JSON.stringify(state.wallet));
-  } else {
-    sessionStorage.removeItem(WALLET_SESSION_KEY);
-  }
-}
 
 const state = {
   invoices: loadInvoices(),
   settings: loadSettings(),
   publicConfig: { ...DEFAULT_PUBLIC_CONFIG },
-  wallet: loadWalletState(),
-  provider: null,
-  walletKind: "",
+  wallet: {
+    connected: false,
+    address: "",
+    balance: "",
+    authAt: "",
+  },
   walletMenuOpen: false,
   walletConnecting: false,
   invoiceSyncStatus: "idle",
@@ -184,43 +128,16 @@ const els = {
 
 let toastTimer = null;
 let _activeBridgeContext = null; // holds state for retry across both pay paths
-// EIP-6963 wallets announce during init(), which runs below, so this must be
-// initialized before init() to avoid a temporal-dead-zone reference.
-const discoveredWallets = [];
 
 init();
 
-// Older builds kept the login session and cached invoices in localStorage, which
-// survived a browser restart. Auth and cached state now live in sessionStorage so they
-// clear when the browser profile closes. Drop any stale localStorage copies once so a
-// previous session can never resurface.
-function purgeLegacyAuthStorage() {
-  [
-    "arc-invoice-usdc-wallet-session",
-    "arc-invoice-usdc-invoices-v1",
-    "arc-invoice-usdc-settings-v1",
-    "fundline_dashboard_session",
-  ].forEach((key) => {
-    try {
-      localStorage.removeItem(key);
-    } catch {}
-  });
-}
-
 async function init() {
-  purgeLegacyAuthStorage();
   bindEvents();
   await loadPublicConfig();
   if (isPayRoute()) {
     await loadPayInvoice(getPayInvoiceId());
     renderWalletState();
     renderPayPage(getPayInvoiceId());
-    return;
-  }
-  if (isBatchRoute()) {
-    await loadBatch(getBatchId());
-    renderWalletState();
-    renderBatchPayPage(getBatchId());
     return;
   }
   await syncInvoicesFromServer();
@@ -235,6 +152,13 @@ function bindEvents() {
     });
   });
 
+  document.querySelector(".nav-group-toggle")?.addEventListener("click", () => {
+    const group = document.querySelector(".nav-group");
+    if (!group) return;
+    const open = group.classList.toggle("is-open");
+    group.querySelector(".nav-group-toggle")?.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+
   els.filters.forEach((button) => {
     button.addEventListener("click", () => {
       state.filter = button.dataset.filter || "all";
@@ -246,17 +170,15 @@ function bindEvents() {
   els.lineItems?.addEventListener("input", updateInvoiceTotal);
   els.lineItems?.addEventListener("click", handleLineItemAction);
   els.invoiceForm?.addEventListener("submit", createInvoice);
-  wireMemoToggle();
   els.invoiceList?.addEventListener("click", handleInvoiceAction);
   els.settingsForm?.addEventListener("submit", saveSettingsFromForm);
   els.walletButton?.addEventListener("click", handleWalletButton);
   els.walletRefreshBalance?.addEventListener("click", refreshWalletBalance);
   els.walletDisconnect?.addEventListener("click", disconnectWallet);
-  els.walletGateConnect?.addEventListener("click", handleWalletGateButton);
+  els.walletGateConnect?.addEventListener("click", connectWallet);
   els.connectWalletSettings?.addEventListener("click", handleWalletButton);
   els.sendTelegramTest?.addEventListener("click", sendTelegramTestAlert);
-  els.exportCsv?.addEventListener("click", exportInvoicesXls);
-  wireBulkPayout();
+  els.exportCsv?.addEventListener("click", exportCsv);
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeWalletMenu();
@@ -264,10 +186,7 @@ function bindEvents() {
   els.dialog?.addEventListener("click", (event) => {
     if (event.target === els.dialog) closeDialog();
   });
-  // Default to the injected wallet so a restored session keeps reacting to
-  // account changes; the picker swaps this when the user chooses another wallet.
-  if (window.ethereum) setActiveProvider(window.ethereum, "injected");
-  initWalletDiscovery();
+  window.ethereum?.on?.("accountsChanged", handleAccountsChanged);
 }
 
 function isPayRoute() {
@@ -279,20 +198,6 @@ function getPayInvoiceId() {
     return window.location.pathname.split("/pay/")[1]?.split("/")[0] || "";
   }
   return new URLSearchParams(window.location.search).get("pay") || "";
-}
-
-function isBatchRoute() {
-  return window.location.pathname.startsWith("/batch/");
-}
-
-function getBatchId() {
-  return isBatchRoute() ? window.location.pathname.split("/batch/")[1]?.split("/")[0] || "" : "";
-}
-
-// Both the invoice pay page and the batch payout page are public, payer-facing routes
-// where the connected wallet is the payer, not the merchant receiving/owning wallet.
-function isPublicPaymentRoute() {
-  return isPayRoute() || isBatchRoute();
 }
 
 function setView(view) {
@@ -333,21 +238,6 @@ function renderApp() {
   updateInvoiceTotal();
 }
 
-const WALLET_GATE_CONNECT_HTML =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM16 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>Connect wallet';
-const WALLET_GATE_TELEGRAM_HTML =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /><path d="M13.73 21a2 2 0 0 1-3.46 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>Set up Telegram bot';
-
-// The wallet-gate button doubles as the connect action and, once signed in, a shortcut
-// into settings to configure the Telegram bot (optional, not required to invoice).
-function handleWalletGateButton() {
-  if (hasConnectedWallet()) {
-    setView("settings");
-    return;
-  }
-  connectWallet();
-}
-
 function renderWalletState() {
   const connected = hasConnectedWallet();
   const address = getConnectedWallet();
@@ -368,22 +258,12 @@ function renderWalletState() {
   }
 
   if (els.walletGate) {
-    const telegramReady = connected && Boolean(state.settings && state.settings.telegramChatId);
     els.walletGate.classList.toggle("is-connected", connected);
     els.walletGateTitle.textContent = connected ? "Wallet connected" : "Connect wallet before creating invoice";
-    if (!connected) {
-      els.walletGateText.textContent = "The connected wallet becomes your USDC receiving wallet for this invoice.";
-    } else if (telegramReady) {
-      els.walletGateText.textContent = `${shortAddress(address)} will receive USDC for newly created invoices. Telegram alerts are on, so you will be notified the moment an invoice is paid.`;
-    } else {
-      els.walletGateText.textContent = `${shortAddress(address)} will receive USDC for newly created invoices. Set up Telegram bot to get notified the moment an invoice is paid.`;
-    }
-    if (els.walletGateConnect) {
-      // Once Telegram is configured the shortcut button has nothing left to do, so hide it.
-      els.walletGateConnect.hidden = telegramReady;
-      els.walletGateConnect.innerHTML = connected ? WALLET_GATE_TELEGRAM_HTML : WALLET_GATE_CONNECT_HTML;
-      els.walletGateConnect.setAttribute("title", connected ? "Set up Telegram bot in settings" : "Connect wallet");
-    }
+    els.walletGateText.textContent = connected
+      ? `${shortAddress(address)} will receive USDC for newly created invoices.`
+      : "The connected wallet becomes your USDC receiving wallet for this invoice.";
+    els.walletGateConnect.hidden = connected;
   }
 
   if (els.createInvoiceButton) {
@@ -393,12 +273,7 @@ function renderWalletState() {
 
   if (els.settingsForm) {
     els.settingsForm.elements.merchantWallet.value = connected ? address : "";
-    if (els.connectWalletSettings) {
-      /* Once connected, the navbar wallet menu owns wallet management.
-         Hide this button so it is not a dead control here. */
-      els.connectWalletSettings.hidden = connected;
-      els.connectWalletSettings.textContent = "Connect wallet";
-    }
+    if (els.connectWalletSettings) els.connectWalletSettings.textContent = connected ? "Wallet details" : "Connect wallet";
   }
 
   if (els.walletSettingsNote) {
@@ -426,11 +301,6 @@ function refreshCurrentView() {
     renderPayPage(getPayInvoiceId());
     return;
   }
-  if (isBatchRoute()) {
-    renderWalletState();
-    renderBatchPayPage(getBatchId());
-    return;
-  }
   renderApp();
 }
 
@@ -443,89 +313,12 @@ function handleWalletButton() {
   connectWallet();
 }
 
-// The active EIP-1193 provider for all on-chain calls. Falls back to the
-// injected window.ethereum when no specific wallet was picked (e.g. after a
-// page reload restores a session). A wallet chosen in the picker is stored here.
-function getProvider() {
-  return state.provider || window.ethereum || null;
-}
-
-// Adopt a provider and route its account-change events. Tears down the previous
-// provider's listener first so switching wallets does not stack handlers.
-function setActiveProvider(provider, kind) {
-  if (!provider) return;
-  if (state.provider && state.provider !== provider && typeof state.provider.removeListener === "function") {
-    try { state.provider.removeListener("accountsChanged", handleAccountsChanged); } catch (_) {}
-  }
-  state.provider = provider;
-  state.walletKind = kind || "injected";
-  provider.on?.("accountsChanged", handleAccountsChanged);
-}
-
-// Wallets discovered via EIP-6963 (the multi-injected-provider standard). Each
-// installed wallet announces itself, so the user can pick instead of being
-// locked to whichever extension won the window.ethereum race. The
-// discoveredWallets array is declared near the top (before init()).
-function initWalletDiscovery() {
-  window.addEventListener("eip6963:announceProvider", (event) => {
-    const detail = event.detail;
-    if (!detail || !detail.info || !detail.provider) return;
-    const key = detail.info.rdns || detail.info.uuid || detail.info.name;
-    if (discoveredWallets.some((w) => (w.info.rdns || w.info.uuid || w.info.name) === key)) return;
-    discoveredWallets.push({ info: detail.info, provider: detail.provider });
-  });
-  window.dispatchEvent(new Event("eip6963:requestProvider"));
-}
-
-function walletConnectAvailable() {
-  return Boolean(state.publicConfig.walletConnectProjectId);
-}
-
-// Build the connect choices: every installed wallet (EIP-6963) plus, when a
-// Reown project id is configured, a WalletConnect option for scanning from a
-// mobile wallet that is not installed in this browser.
-function buildWalletOptions() {
-  const options = discoveredWallets.map((w) => ({ kind: "injected", name: w.info.name || "Wallet", icon: w.info.icon || "", provider: w.provider }));
-  if (walletConnectAvailable()) {
-    options.push({ kind: "walletconnect", name: "WalletConnect (scan with mobile)", icon: "" });
-  }
-  return options;
-}
-
 async function connectWallet() {
-  if (state.walletConnecting) return;
-  const options = buildWalletOptions();
-  if (options.length > 1 && els.dialog && els.dialogBody) {
-    openWalletPicker(options);
-    return;
-  }
-  if (options.length === 1) {
-    await connectWithOption(options[0]);
-    return;
-  }
-  // Nothing discovered and no WalletConnect: fall back to the injected provider.
-  if (!window.ethereum?.request) {
-    showToast("No wallet found. Install a wallet extension, or set up WalletConnect to scan from a mobile wallet.");
-    return;
-  }
-  await connectWithProvider(window.ethereum, "");
-}
-
-async function connectWithOption(option) {
-  if (!option) return;
-  if (option.kind === "walletconnect") {
-    await connectWithWalletConnect();
-    return;
-  }
-  await connectWithProvider(option.provider, option.name);
-}
-
-async function connectWithProvider(provider, name) {
+  const provider = window.ethereum;
   if (!provider?.request) {
-    showToast("That wallet is unavailable.");
+    showToast("No wallet extension found. Install or open OKX Wallet, MetaMask, or another EVM wallet.");
     return;
   }
-  setActiveProvider(provider, "injected");
   state.walletConnecting = true;
   renderWalletState();
   try {
@@ -538,144 +331,14 @@ async function connectWithProvider(provider, name) {
     const authAt = await requireWalletSignature(provider, address);
     setConnectedWallet(address, { authAt, silent: true });
     await refreshWalletBalance();
-    if (!isPublicPaymentRoute()) await syncInvoicesFromServer();
+    if (!isPayRoute()) await syncInvoicesFromServer();
     refreshCurrentView();
-    showToast(name ? `Connected with ${name}.` : "Wallet connected.");
+    showToast("Wallet connected.");
   } catch (error) {
     showToast(error?.message || "Wallet connection rejected.");
   } finally {
     state.walletConnecting = false;
     renderWalletState();
-  }
-}
-
-function openWalletPicker(options) {
-  const rows = options
-    .map((option, index) => {
-      const icon = /^(data:|https:)/.test(option.icon || "") ? option.icon : "";
-      const iconHtml = icon ? `<img class="wallet-option-icon" src="${escapeHtml(icon)}" alt="" />` : "";
-      return `<button class="wallet-option" type="button" data-wallet-index="${index}">${iconHtml}<span>${escapeHtml(option.name || "Wallet")}</span></button>`;
-    })
-    .join("");
-  els.dialogBody.innerHTML = `
-    <div class="dialog-head">
-      <div>
-        <p class="eyebrow">Connect</p>
-        <h2>Choose a wallet</h2>
-      </div>
-      <button class="icon-button" data-dialog-close type="button" aria-label="Close">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
-      </button>
-    </div>
-    <div class="wallet-options">${rows}</div>
-  `;
-  els.dialogBody.querySelector("[data-dialog-close]")?.addEventListener("click", closeDialog);
-  els.dialogBody.querySelectorAll("[data-wallet-index]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const chosen = options[Number(button.dataset.walletIndex)];
-      if (chosen && chosen.kind !== "walletconnect") closeDialog();
-      await connectWithOption(chosen);
-    });
-  });
-  els.dialog.showModal();
-}
-
-// ----- WalletConnect (scan a QR with a mobile wallet) -----
-// Buildless: the provider and QR generator are lazy-imported from a CDN only
-// when the user picks WalletConnect, so the rest of the app pulls nothing extra.
-let _wcProvider = null;
-
-async function getWalletConnectProvider(projectId) {
-  if (_wcProvider) return _wcProvider;
-  const mod = await import("https://esm.sh/@walletconnect/ethereum-provider@2.23.9");
-  const EthereumProvider = mod.EthereumProvider || (mod.default && mod.default.EthereumProvider) || mod.default;
-  const config = state.publicConfig;
-  _wcProvider = await EthereumProvider.init({
-    projectId,
-    showQrModal: false, // we render our own QR in the dialog
-    optionalChains: [config.chainId, 1, 8453, 11155111, 84532],
-    rpcMap: { [config.chainId]: config.rpcUrl },
-    optionalMethods: ["eth_sendTransaction", "personal_sign", "eth_signTypedData_v4", "wallet_switchEthereumChain", "wallet_addEthereumChain"],
-    metadata: {
-      name: "Fundline",
-      description: "USDC invoices on Arc",
-      url: window.location.origin,
-      icons: [`${window.location.origin}/assets/fundline-logo.png`],
-    },
-  });
-  _wcProvider.on("accountsChanged", handleAccountsChanged);
-  _wcProvider.on("disconnect", () => {
-    if (state.walletKind === "walletconnect") disconnectWallet({ silent: false });
-  });
-  return _wcProvider;
-}
-
-async function connectWithWalletConnect() {
-  const projectId = state.publicConfig.walletConnectProjectId;
-  if (!projectId) {
-    showToast("WalletConnect is not configured.");
-    return;
-  }
-  state.walletConnecting = true;
-  renderWalletState();
-  try {
-    const provider = await getWalletConnectProvider(projectId);
-    const onUri = (uri) => showWalletConnectQr(uri);
-    provider.on("display_uri", onUri);
-    try {
-      await provider.enable(); // resolves once the mobile wallet approves the session
-    } finally {
-      provider.removeListener?.("display_uri", onUri);
-    }
-    const address = normalizeAddress((provider.accounts && provider.accounts[0]) || "");
-    if (!address) {
-      showToast("WalletConnect did not return an address.");
-      return;
-    }
-    setActiveProvider(provider, "walletconnect");
-    closeDialog();
-    const authAt = await requireWalletSignature(provider, address);
-    setConnectedWallet(address, { authAt, silent: true });
-    await refreshWalletBalance();
-    if (!isPublicPaymentRoute()) await syncInvoicesFromServer();
-    refreshCurrentView();
-    showToast("Wallet connected.");
-  } catch (error) {
-    showToast(error?.message || "WalletConnect connection cancelled.");
-  } finally {
-    closeDialog(); // close the QR dialog whether the session was approved or cancelled
-    state.walletConnecting = false;
-    renderWalletState();
-  }
-}
-
-async function showWalletConnectQr(uri) {
-  if (!els.dialog || !els.dialogBody) return;
-  els.dialogBody.innerHTML = `
-    <div class="dialog-head">
-      <div>
-        <p class="eyebrow">Connect</p>
-        <h2>Scan with your wallet</h2>
-      </div>
-      <button class="icon-button" data-dialog-close type="button" aria-label="Close">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
-      </button>
-    </div>
-    <div class="wc-qr"><canvas id="wcQrCanvas"></canvas></div>
-    <p class="muted wc-hint">Open your mobile wallet, choose WalletConnect or Scan, and scan this code.</p>
-    <div class="copy-row">
-      <input readonly value="${escapeHtml(uri)}" />
-      <button class="ghost-action" data-copy-wc="${escapeHtml(uri)}" type="button">Copy link</button>
-    </div>
-  `;
-  els.dialogBody.querySelector("[data-dialog-close]")?.addEventListener("click", closeDialog);
-  els.dialogBody.querySelector("[data-copy-wc]")?.addEventListener("click", (event) => copyText(event.currentTarget.dataset.copyWc));
-  if (!els.dialog.open) els.dialog.showModal();
-  try {
-    const qrcode = (await import("https://esm.sh/qrcode@1.5.4")).default;
-    await qrcode.toCanvas(document.getElementById("wcQrCanvas"), uri, { width: 240, margin: 1 });
-  } catch (_) {
-    // If the QR generator fails to load, the copyable link above is the fallback.
   }
 }
 
@@ -709,7 +372,7 @@ async function requireWalletSignature(provider, address) {
 
 async function refreshWalletBalance(event) {
   event?.preventDefault();
-  const provider = getProvider();
+  const provider = window.ethereum;
   const address = getConnectedWallet();
   if (!provider?.request || !address) return;
   state.wallet.balance = "Checking...";
@@ -723,31 +386,20 @@ async function refreshWalletBalance(event) {
   } catch {
     state.wallet.balance = "Unavailable";
   }
-  saveWalletState();
   renderWalletState();
 }
 
 function disconnectWallet(options = {}) {
-  // End a WalletConnect session if it is the active wallet. Clear walletKind
-  // first so the provider's own "disconnect" event does not recurse back here.
-  const wcProvider = state.walletKind === "walletconnect" ? state.provider : null;
-  state.provider = null;
-  state.walletKind = "";
   state.wallet = { connected: false, address: "", balance: "", authAt: "" };
-  saveWalletState();
   state.walletMenuOpen = false;
-  if (!isPublicPaymentRoute()) {
+  if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: "" };
     saveSettings();
   }
-
+  
   state.invoices = [];
   saveInvoices();
-
-  if (wcProvider && typeof wcProvider.disconnect === "function") {
-    wcProvider.disconnect().catch(() => {});
-  }
-
+  
   refreshCurrentView();
   if (!options.silent) showToast("Wallet disconnected.");
 }
@@ -756,13 +408,12 @@ function setConnectedWallet(address, options = {}) {
   const normalized = normalizeAddress(address);
   if (!normalized) return;
   state.wallet = { connected: true, address: normalized, balance: state.wallet.balance || "", authAt: options.authAt || new Date().toISOString() };
-  saveWalletState();
-  if (!isPublicPaymentRoute()) {
+  if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: normalized };
     saveSettings();
   }
   refreshCurrentView();
-  if (!options.silent) showToast(isPublicPaymentRoute() ? "Payer wallet connected." : "Receiving wallet set from connected wallet.");
+  if (!options.silent) showToast(isPayRoute() ? "Payer wallet connected." : "Receiving wallet set from connected wallet.");
 }
 
 function handleAccountsChanged(accounts) {
@@ -833,20 +484,9 @@ function normalizePublicConfig(config) {
     : `0x${Math.trunc(chainId).toString(16)}`;
   const usdcTokenAddress = normalizeAddress(config.usdcTokenAddress) || DEFAULT_PUBLIC_CONFIG.usdcTokenAddress;
   const paymentRouterAddress = normalizeAddress(config.paymentRouterAddress) || DEFAULT_PUBLIC_CONFIG.paymentRouterAddress;
-  // No baked fallback for the batch router: the batch pay page only lights up when the
-  // server reports an address (i.e. cPanel env is set), which is also when server-side
-  // verify works, so the pay and verify sides are gated together (no half-enabled state).
-  const batchRouterAddress = normalizeAddress(config.batchRouterAddress) || "";
-  const maxBatchRecipients = Number.isFinite(Number(config.maxBatchRecipients)) && Number(config.maxBatchRecipients) > 0
-    ? Math.trunc(Number(config.maxBatchRecipients))
-    : DEFAULT_PUBLIC_CONFIG.maxBatchRecipients;
   const usdcDecimals = Number(config.usdcDecimals);
   const normalizedUsdcDecimals = Number.isFinite(usdcDecimals) ? Math.min(Math.max(Math.trunc(usdcDecimals), 0), 18) : DEFAULT_PUBLIC_CONFIG.usdcDecimals;
   const paymentTokenDecimals = normalizedUsdcDecimals;
-  const nativeUsdcDecimals = Number(config.nativeUsdcDecimals);
-  const normalizedNativeUsdcDecimals = Number.isFinite(nativeUsdcDecimals)
-    ? Math.min(Math.max(Math.trunc(nativeUsdcDecimals), 0), 18)
-    : DEFAULT_PUBLIC_CONFIG.nativeUsdcDecimals;
   return {
     networkName: String(config.networkName || DEFAULT_PUBLIC_CONFIG.networkName),
     chainId,
@@ -855,26 +495,9 @@ function normalizePublicConfig(config) {
     explorerBase: String(config.explorerBase || DEFAULT_PUBLIC_CONFIG.explorerBase).replace(/\/$/, ""),
     usdcTokenAddress,
     usdcDecimals: paymentTokenDecimals,
-    nativeUsdcDecimals: normalizedNativeUsdcDecimals,
     paymentRouterAddress,
     onchainPaymentsEnabled: Boolean(paymentRouterAddress && usdcTokenAddress),
-    batchRouterAddress,
-    batchPaymentsEnabled: Boolean(batchRouterAddress && usdcTokenAddress),
-    maxBatchRecipients,
-    walletConnectProjectId: String(config.walletConnectProjectId || "").trim(),
   };
-}
-
-async function fetchSellerName(wallet) {
-  if (!wallet) return "";
-  try {
-    const response = await fetch(`/api/sellers/${wallet}`);
-    if (!response.ok) return "";
-    const data = await response.json().catch(() => ({}));
-    return String(data.displayName || "").trim();
-  } catch {
-    return "";
-  }
 }
 
 async function syncInvoicesFromServer() {
@@ -897,12 +520,6 @@ async function syncInvoicesFromServer() {
     state.invoiceSyncStatus = "ready";
   } catch {
     state.invoiceSyncStatus = "offline-cache";
-  }
-  // The server owns the persisted business name; mirror it into local state.
-  const serverName = await fetchSellerName(merchantWallet);
-  if (serverName && serverName !== state.settings.merchantName) {
-    state.settings = { ...state.settings, merchantName: serverName };
-    saveSettings();
   }
 }
 
@@ -981,7 +598,6 @@ function getFilteredInvoices() {
     .filter((invoice) => {
       if (state.filter === "paid") return invoice.status === "paid";
       if (state.filter === "open") return getInvoiceStatus(invoice) === "open";
-      if (state.filter === "overdue") return getInvoiceStatus(invoice) === "expired";
       return true;
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1015,16 +631,6 @@ function renderInvoiceRow(invoice) {
 }
 
 function renderSettings() {
-  // Merchant name is one shared value; mirror it into the create-invoice form too.
-  // Once a name exists it is locked here and can only be changed in settings.
-  if (els.invoiceForm?.elements.merchantName) {
-    const nameField = els.invoiceForm.elements.merchantName;
-    const locked = Boolean(state.settings.merchantName);
-    nameField.value = state.settings.merchantName || "";
-    nameField.readOnly = locked;
-    nameField.title = locked ? "Set once. Change your business name in Settings." : "";
-    nameField.placeholder = locked ? "" : "Your studio or name";
-  }
   if (!els.settingsForm) return;
   els.settingsForm.elements.merchantName.value = state.settings.merchantName || "";
   els.settingsForm.elements.merchantWallet.value = getConnectedWallet() || "";
@@ -1047,28 +653,6 @@ function setDefaultDueDate() {
   const date = new Date();
   date.setDate(date.getDate() + 7);
   dueDate.value = date.toISOString().slice(0, 10);
-}
-
-// Show/hide the on-chain memo field list when the master toggle flips. The memo is
-// off by default, so the field list starts hidden.
-function wireMemoToggle() {
-  const toggle = document.querySelector("#memoEnabled");
-  const fields = document.querySelector("#memoFields");
-  if (!toggle || !fields) return;
-  const sync = () => {
-    fields.hidden = !toggle.checked;
-  };
-  toggle.addEventListener("change", sync);
-  sync();
-}
-
-// Collect the merchant's on-chain memo selection from the create form. Returns [] when
-// the master toggle is off (no memo attached). Filtered to the canonical whitelist.
-function collectMemoFields() {
-  const toggle = document.querySelector("#memoEnabled");
-  if (!toggle || !toggle.checked) return [];
-  const checked = Array.from(document.querySelectorAll("input[name='memoField']:checked")).map((el) => el.value);
-  return window.FundlineMemo ? window.FundlineMemo.normalizeMemoFields(checked) : checked;
 }
 
 function addLineItem(item = {}) {
@@ -1145,6 +729,13 @@ async function createInvoice(event) {
     return;
   }
 
+  const settingsError = validateSettings();
+  if (settingsError) {
+    showToast(settingsError);
+    setView("settings");
+    return;
+  }
+
   const items = collectLineItems();
   if (!items.length) {
     showToast("Add at least one valid line item.");
@@ -1152,34 +743,10 @@ async function createInvoice(event) {
   }
 
   const form = new FormData(els.invoiceForm);
-  // Merchant name is a single value: read it from this form, fall back to saved settings,
-  // and persist it so settings and future invoices stay in sync.
-  const merchantName = String(form.get("merchantName") || "").trim() || state.settings.merchantName || "";
-  if (merchantName && merchantName !== state.settings.merchantName) {
-    state.settings = { ...state.settings, merchantName };
-    saveSettings();
-  }
   const total = roundMoney(items.reduce((sum, item) => sum + item.total, 0));
   if (total <= 0) {
     showToast("Invoice total must be greater than 0.");
     return;
-  }
-
-  // When the merchant opted to publish invoice details on-chain, require one final,
-  // explicit consent because the memo is public and permanent. Cancelling reverts the
-  // form to no-memo mode and does not create the invoice.
-  const memoFields = collectMemoFields();
-  if (memoFields.length > 0) {
-    const confirmed = await confirmMemoPublish(memoFields);
-    if (!confirmed) {
-      const toggle = document.querySelector("#memoEnabled");
-      if (toggle) {
-        toggle.checked = false;
-        toggle.dispatchEvent(new Event("change"));
-      }
-      showToast("On-chain memo turned off. Invoice not created. Press Create again to continue without a memo.");
-      return;
-    }
   }
 
   const id = makeId();
@@ -1188,14 +755,13 @@ async function createInvoice(event) {
     number: nextInvoiceNumber(),
     // Offchain reference that PaymentRouter emits later in InvoicePaid.
     onchainInvoiceId: randomBytes32(),
-    merchantName: merchantName || "Fundline merchant",
+    merchantName: state.settings.merchantName || "Fundline merchant",
     merchantWallet: getConnectedWallet(),
     telegramChatId: state.settings.telegramChatId || "",
     clientName: String(form.get("clientName") || "").trim(),
     clientEmail: String(form.get("clientEmail") || "").trim(),
     dueDate: String(form.get("dueDate") || ""),
     note: String(form.get("note") || "").trim(),
-    onchainMemoFields: memoFields,
     items,
     total,
     status: "open",
@@ -1215,19 +781,19 @@ async function createInvoice(event) {
 
   upsertInvoice(savedInvoice);
   saveInvoices();
-  // Adopt the server's authoritative merchant name (it may have been set on first invoice).
-  if (savedInvoice.merchantName && savedInvoice.merchantName !== "Fundline merchant" && savedInvoice.merchantName !== state.settings.merchantName) {
-    state.settings = { ...state.settings, merchantName: savedInvoice.merchantName };
-    saveSettings();
-  }
   els.invoiceForm.reset();
-  document.querySelector("#memoFields")?.setAttribute("hidden", "");
   els.lineItems.innerHTML = "";
   seedLineItems();
   state.filter = "all";
   setView("dashboard");
   showInvoiceDialog(savedInvoice);
   showToast("Invoice created.");
+}
+
+function validateSettings() {
+  if (!state.settings.merchantName?.trim()) return "Add your merchant display name first.";
+  if (!hasConnectedWallet()) return "Connect wallet before creating invoice.";
+  return "";
 }
 
 const SELLER_SESSION_KEY = "fundline_dashboard_session";
@@ -1237,7 +803,7 @@ async function getSellerSession(connected, forceNew = false) {
   if (!forceNew) {
     let stored = null;
     try {
-      stored = JSON.parse(sessionStorage.getItem(SELLER_SESSION_KEY) || "null");
+      stored = JSON.parse(localStorage.getItem(SELLER_SESSION_KEY) || "null");
     } catch {
       stored = null;
     }
@@ -1265,14 +831,14 @@ async function getSellerSession(connected, forceNew = false) {
 
   let signature = "";
   try {
-    signature = await getProvider().request({ method: "personal_sign", params: [stringToHex(message), connected] });
+    signature = await window.ethereum.request({ method: "personal_sign", params: [stringToHex(message), connected] });
   } catch (e) {
     if (Number(e?.code) === 4001) throw e;
-    signature = await getProvider().request({ method: "personal_sign", params: [message, connected] });
+    signature = await window.ethereum.request({ method: "personal_sign", params: [message, connected] });
   }
 
   const session = { wallet: connected, signature, issuedAt };
-  sessionStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session));
+  localStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session));
   return session;
 }
 
@@ -1302,7 +868,6 @@ async function saveSettingsFromForm(event) {
           "x-fundline-issued-at": session.issuedAt,
         },
         body: JSON.stringify({
-          displayName: settings.merchantName,
           telegramChatId: settings.telegramChatId,
           alerts: settings.alerts,
         }),
@@ -1311,7 +876,7 @@ async function saveSettingsFromForm(event) {
     let res = await sendSettings(await getSellerSession(connected));
     if (res.status === 401) {
       // Stored signature is stale or rejected; drop it, re-sign once, and retry.
-      sessionStorage.removeItem(SELLER_SESSION_KEY);
+      localStorage.removeItem(SELLER_SESSION_KEY);
       res = await sendSettings(await getSellerSession(connected, true));
     }
     if (!res.ok) {
@@ -1330,7 +895,6 @@ async function saveSettingsFromForm(event) {
   };
   saveSettings();
   renderSettings();
-  renderWalletState();
   showToast("Settings saved.");
 }
 
@@ -1405,292 +969,6 @@ function closeDialog() {
   els.dialog.close();
 }
 
-// Human labels for the on-chain memo fields, shown in the publish-confirmation dialog.
-const MEMO_FIELD_LABELS = {
-  number: "Invoice number",
-  total: "Total amount",
-  createdAt: "Issue date",
-  dueDate: "Due date",
-  merchantName: "Business name",
-  clientName: "Client name",
-  items: "Line item details",
-  note: "Invoice note",
-  hash: "Tamper-proof hash (content stays private)",
-};
-
-// Final consent gate before an invoice writes a public, permanent on-chain memo. Returns
-// a promise that resolves true (proceed and publish) or false (cancel, revert to no memo).
-function confirmMemoPublish(fields) {
-  return new Promise((resolve) => {
-    const dialog = document.querySelector("#memoConfirmDialog");
-    const body = document.querySelector("#memoConfirmBody");
-    if (!dialog || !body) {
-      resolve(true);
-      return;
-    }
-    const list = fields.map((key) => `<li>${escapeHtml(MEMO_FIELD_LABELS[key] || key)}</li>`).join("");
-    body.innerHTML = `
-      <div class="dialog-head">
-        <div>
-          <p class="eyebrow">On-chain memo</p>
-          <h2>Publish these details on-chain?</h2>
-        </div>
-      </div>
-      <p class="memo-warning-text">These fields will be written permanently and publicly on the Arc blockchain when this invoice is paid from a connected wallet. Once recorded, they cannot be edited or removed by anyone, including you.</p>
-      <ul class="memo-warning-list">${list}</ul>
-      <div class="receipt-actions">
-        <button class="primary-action" type="button" data-memo-confirm>Agree and create</button>
-        <button class="ghost-action" type="button" data-memo-cancel>Cancel</button>
-      </div>
-    `;
-    const onCancel = (event) => {
-      event.preventDefault();
-      finish(false);
-    };
-    function finish(value) {
-      dialog.removeEventListener("cancel", onCancel);
-      dialog.close();
-      resolve(value);
-    }
-    body.querySelector("[data-memo-confirm]").addEventListener("click", () => finish(true), { once: true });
-    body.querySelector("[data-memo-cancel]").addEventListener("click", () => finish(false), { once: true });
-    dialog.addEventListener("cancel", onCancel);
-    dialog.showModal();
-  });
-}
-
-// ---- Batch payout pay page (/batch/:id) ----
-
-let _payBatchData = null;
-
-async function loadBatch(id) {
-  _payBatchData = null;
-  try {
-    const res = await fetch(`/api/batches/${id}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    _payBatchData = data.batch || null;
-  } catch (error) {
-    _payBatchData = null;
-  }
-}
-
-function resetBusyButton(button) {
-  if (!button) return;
-  button.disabled = false;
-  if (button.dataset.originalHtml) {
-    button.innerHTML = button.dataset.originalHtml;
-    delete button.dataset.originalHtml;
-  }
-}
-
-function renderBatchPayPage(id) {
-  const batch = _payBatchData;
-  document.body.classList.add("payment-mode");
-  els.appPage.hidden = true;
-  els.payPage.hidden = false;
-  els.pageEyebrow.textContent = "Bulk payout";
-  els.pageTitle.textContent = batch ? batch.title || "Bulk payout" : "Payout not found";
-
-  if (!batch) {
-    els.payPage.innerHTML = `
-      <section class="pay-card checkout-card">
-        <div class="payment-hero"><div class="payment-merchant"><p class="eyebrow">Missing payout</p><h1>Payout not found</h1></div></div>
-        <div class="checkout-grid"><div class="empty-state">This payout link was not found on the server. Check the link.</div></div>
-      </section>`;
-    return;
-  }
-
-  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-  const paid = batch.status === "paid";
-  const connected = hasConnectedWallet();
-  const totalText = `${formatUsdc(batch.total)} USDC`;
-  const countText = `${batch.count} recipient${batch.count > 1 ? "s" : ""}`;
-  const rows = batch.items
-    .map(
-      (item, index) => `
-      <tr>
-        <td>${index + 1}</td>
-        <td>${escapeHtml(item.recipientName) || "-"}</td>
-        <td class="bulk-wallet">${escapeHtml(shortAddress(item.recipientWallet))}</td>
-        <td class="bulk-amt">${formatUsdc(item.amount)}</td>
-        ${batch.withMemo ? `<td>${escapeHtml(item.reference) || "-"}</td>` : ""}
-      </tr>`,
-    )
-    .join("");
-  const explorerTx = batch.txHash ? `${config.explorerBase || ARC_EXPLORER_URL}/tx/${batch.txHash}` : "";
-
-  let actionBlock;
-  if (paid) {
-    actionBlock = `
-      <div class="batch-pay-done">
-        <span class="pay-status pay-status-paid">Paid</span>
-        <p>This payout has been settled on Arc. Every recipient received their USDC in one transaction.</p>
-        ${explorerTx ? `<a class="ghost-action" href="${escapeHtml(explorerTx)}" target="_blank" rel="noreferrer">View transaction on Arcscan</a>` : ""}
-      </div>`;
-  } else if (!config.batchPaymentsEnabled) {
-    actionBlock = `<div class="empty-state">Batch payouts are not enabled on this server yet.</div>`;
-  } else if (!connected) {
-    actionBlock = `
-      <button class="primary-action" id="batchConnectBtn" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM16 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-        Connect wallet to pay
-      </button>
-      <p class="batch-pay-note">Connect the wallet that will fund this payout. It will send ${totalText} to all recipients in one transaction.</p>`;
-  } else {
-    actionBlock = `
-      <button class="primary-action" id="payBatchBtn" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-        Pay all ${countText}
-      </button>
-      <p class="batch-pay-note">One transaction sends ${totalText} from your wallet to every recipient. You approve USDC once, then confirm the payout.</p>
-      <p class="batch-pay-status" id="batchPayStatus"></p>`;
-  }
-
-  els.payPage.innerHTML = `
-    <section class="pay-card checkout-card">
-      <div class="payment-hero">
-        <div class="payment-merchant">
-          <p class="eyebrow">Bulk payout from</p>
-          <h1>${escapeHtml(batch.creatorName || "Fundline")}</h1>
-          <div class="invoice-number-row">
-            <span>${escapeHtml(batch.title || "Payout")}</span>
-            <span class="pay-status pay-status-${paid ? "paid" : "open"}">${paid ? "paid" : "open"}</span>
-          </div>
-        </div>
-        <div class="batch-pay-amount">
-          <span>Total payout</span>
-          <strong>${totalText}</strong>
-          <span class="bulk-count">${countText}</span>
-        </div>
-      </div>
-      <div class="checkout-grid">
-        <div class="checkout-panel">
-          <div class="bulk-table-wrap">
-            <table class="bulk-table">
-              <thead><tr><th>#</th><th>Name</th><th>Wallet</th><th>Amount</th>${batch.withMemo ? "<th>Reference</th>" : ""}</tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>
-        </div>
-        <div class="checkout-panel">${actionBlock}</div>
-      </div>
-    </section>`;
-
-  document.querySelector("#batchConnectBtn")?.addEventListener("click", () => connectWallet());
-  document.querySelector("#payBatchBtn")?.addEventListener("click", () => payBatchAll(id));
-}
-
-async function payBatchAll(id) {
-  const batch = _payBatchData;
-  if (!batch || batch.status === "paid") return;
-  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-  if (!config.batchRouterAddress || !config.batchPaymentsEnabled) {
-    showToast("Batch payouts are not enabled on this server yet.");
-    return;
-  }
-  if (!window.FundlineBatch) {
-    showToast("Batch helper failed to load. Hard refresh and try again.");
-    return;
-  }
-  const provider = getProvider();
-  if (!provider?.request) {
-    showToast("No wallet extension found. Install or open an EVM wallet.");
-    return;
-  }
-  let payer = getConnectedWallet();
-  if (!payer) {
-    await connectWallet();
-    payer = getConnectedWallet();
-  }
-  if (!payer) return;
-
-  const button = document.querySelector("#payBatchBtn");
-  const statusEl = document.querySelector("#batchPayStatus");
-  const setStatus = (text) => {
-    if (statusEl) statusEl.textContent = text;
-  };
-
-  try {
-    setButtonBusy(button, "Checking balance...");
-    setStatus("Switching to Arc and checking USDC balance...");
-    await ensurePaymentNetwork(provider, config);
-    const totalUnits = BigInt(batch.totalUnits);
-    const balance = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payer);
-    if (balance < totalUnits) {
-      throw new Error(`Insufficient USDC. Need ${formatUnits(totalUnits, ARC_USDC_DECIMALS)} USDC, wallet has ${formatUnits(balance, ARC_USDC_DECIMALS)} USDC.`);
-    }
-    const allowance = await readUsdcAllowance(provider, config.usdcTokenAddress, payer, config.batchRouterAddress);
-    if (allowance < totalUnits) {
-      setButtonBusy(button, "Approve USDC (1 of 2)...");
-      setStatus("Approve USDC for the batch router (step 1 of 2)...");
-      const approveTx = await sendUsdcApprove(provider, {
-        from: payer,
-        token: config.usdcTokenAddress,
-        spender: config.batchRouterAddress,
-        amount: totalUnits,
-      });
-      setStatus("Confirming approval...");
-      await waitForArcTx(provider, approveTx);
-      setButtonBusy(button, "Pay all (2 of 2)...");
-    } else {
-      setButtonBusy(button, "Paying all...");
-    }
-    setStatus(`Sending one transaction to pay ${batch.count} recipient(s)...`);
-    const txHash = await sendBatchPayment(provider, { from: payer, router: config.batchRouterAddress, batch });
-    setStatus("Waiting for confirmation...");
-    await waitForArcTx(provider, txHash);
-    setStatus("Verifying payout on Arc...");
-    const verified = await verifyBatch(id, payer, txHash);
-    if (verified) {
-      showToast("Batch payout verified.");
-      await loadBatch(id);
-      renderBatchPayPage(id);
-    } else {
-      setStatus("Payment sent, but verification is still pending. Refresh in a few seconds.");
-      resetBusyButton(button);
-    }
-  } catch (error) {
-    const rejected = error?.code === 4001 || /rejected|denied/i.test(String(error?.message));
-    setStatus("");
-    showToast(rejected ? "Transaction rejected by user." : error?.message || "Payout failed.");
-    resetBusyButton(button);
-  }
-}
-
-function sendBatchPayment(provider, { from, router, batch }) {
-  const recipients = batch.items.map((item) => item.recipientWallet);
-  const amounts = batch.items.map((item) => parseTokenUnits(item.amount, ARC_USDC_DECIMALS));
-  const batchId = batch.onchainBatchId;
-  const data = batch.withMemo
-    ? window.FundlineBatch.encodePayBatchWithMemo({ batchId, recipients, amounts, memos: batch.items.map((item) => item.reference || "") })
-    : window.FundlineBatch.encodePayBatch({ batchId, recipients, amounts });
-  return provider.request({
-    method: "eth_sendTransaction",
-    params: [{ from, to: router, data, value: "0x0" }],
-  });
-}
-
-async function verifyBatch(id, payerWallet, txHash) {
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    try {
-      const res = await fetch(`/api/batches/${id}/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txHash, payerWallet }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.batch && data.batch.status === "paid") return true;
-      }
-    } catch (error) {
-      /* retry */
-    }
-    if (attempt < 4) await delay(3000);
-  }
-  return false;
-}
-
 function renderPayPage(invoiceId) {
   const invoice = state.invoices.find((item) => item.id === invoiceId);
   document.body.classList.add("payment-mode");
@@ -1717,22 +995,8 @@ function renderPayPage(invoiceId) {
   }
 
   const status = getInvoiceStatus(invoice);
-  const payConfig = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-  // EIP-681 NATIVE payment URI. On Arc, USDC IS the native gas token, so a plain
-  // native value transfer pays the invoice - and every wallet (incl. exchange
-  // apps) can scan a native send without importing a token contract (an ERC-20
-  // transfer URI made wallets like OKX demand the token be added first). The
-  // native value uses 18 decimals. The server verifier accepts this direct
-  // transfer (no PaymentRouter event) via its native-transfer fallback.
-  // Falls back to the pay link for paid invoices (nothing left to pay).
-  const nativeDecimals = payConfig.nativeUsdcDecimals || ARC_NATIVE_USDC_DECIMALS;
-  const nativeValue = parseTokenUnits(invoice.total, nativeDecimals).toString();
-  const payUri =
-    invoice.status === "paid"
-      ? getInvoicePayLink(invoice)
-      : `ethereum:${invoice.merchantWallet}@${payConfig.chainId}?value=${nativeValue}`;
-  const qrCaption = invoice.status === "paid" ? "Payment link QR" : "Scan to pay";
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=8&data=${encodeURIComponent(payUri)}`;
+  const payLink = getInvoicePayLink(invoice);
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=8&data=${encodeURIComponent(payLink)}`;
   els.payPage.innerHTML = `
     <section class="pay-card checkout-card">
       <div class="payment-hero">
@@ -1752,7 +1016,7 @@ function renderPayPage(invoiceId) {
           </div>
           <div class="qr-box">
             <img src="${escapeHtml(qrUrl)}" alt="Payment QR code" />
-            <span>${escapeHtml(qrCaption)}</span>
+            <span>Payment link QR</span>
           </div>
         </div>
       </div>
@@ -1770,11 +1034,7 @@ function renderPayPage(invoiceId) {
           <div class="reference-grid">
             <article><span>Client</span><strong>${escapeHtml(invoice.clientName)}</strong></article>
             <article><span>Due date</span><strong>${escapeHtml(formatDate(invoice.dueDate))}</strong></article>
-            <article>
-              <span>Receiving wallet</span>
-              <strong>${escapeHtml(invoice.merchantWallet)}</strong>
-              <button type="button" class="copy-inline-btn" id="copyMerchantWalletRef" title="Copy wallet address">Copy</button>
-            </article>
+            <article><span>Receiving wallet</span><strong>${escapeHtml(invoice.merchantWallet)}</strong></article>
             <article><span>Payment reference ID</span><strong>${escapeHtml(invoice.onchainInvoiceId)}</strong></article>
           </div>
         </section>
@@ -1798,23 +1058,13 @@ function renderPayPage(invoiceId) {
     </section>
   `;
 
-  _paymentSourceAutoPicked = false;
   document.querySelector("#payWithWallet")?.addEventListener("click", () => handleInvoicePaymentAction(invoice.id));
-  // A manual source change wins over auto-pick for the rest of this page.
-  document.querySelector("#paymentSourceChain")?.addEventListener("change", () => {
-    _paymentSourceAutoPicked = true;
-    refreshPaymentSourceStatus(invoice.id);
-  });
-  document.querySelector("#refreshPaymentSource")?.addEventListener("click", () => autoPickBestSource(invoice.id));
+  document.querySelector("#paymentSourceChain")?.addEventListener("change", () => refreshPaymentSourceStatus(invoice.id));
+  document.querySelector("#refreshPaymentSource")?.addEventListener("click", () => refreshPaymentSourceStatus(invoice.id));
   document.querySelector("#paymentVerifyForm")?.addEventListener("submit", (event) => verifyPaymentAndMarkPaid(invoice.id, event));
   document.querySelector("#downloadReceipt")?.addEventListener("click", () => downloadReceiptPdf(invoice));
-  const copyWallet = () => {
-    navigator.clipboard.writeText(invoice.merchantWallet).then(() => showToast("Wallet address copied.")).catch(() => {});
-  };
-  document.querySelector("#copyMerchantWallet")?.addEventListener("click", copyWallet);
-  document.querySelector("#copyMerchantWalletRef")?.addEventListener("click", copyWallet);
   if (hasConnectedWallet() && invoice.status !== "paid") {
-    window.setTimeout(() => autoPickBestSource(invoice.id), 0);
+    window.setTimeout(() => refreshPaymentSourceStatus(invoice.id, { silent: true }), 0);
   }
 }
 
@@ -1826,80 +1076,49 @@ function renderPaymentVerification(invoice) {
   const sourceOptions = getPaymentSourceOptions()
     .map((source) => `<option value="${escapeHtml(source.key)}">${escapeHtml(source.label)}</option>`)
     .join("");
-
-  const walletHeading = isSelfPayment
-    ? "Use a different payer wallet"
-    : config.onchainPaymentsEnabled
-    ? (payerWallet ? "Choose USDC source" : "Connect wallet to pay")
-    : "Wallet payment unavailable";
-
-  const walletDesc = isSelfPayment
-    ? "The connected wallet is also the receiving wallet. A self-transfer does not settle an invoice."
-    : config.onchainPaymentsEnabled
-    ? (payerWallet
-        ? `Choose the network where your USDC is. Arc pays instantly with no bridge. Other supported testnets bridge via CCTP first. Need testnet USDC? <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Get some at faucet.circle.com</a>.`
-        : "Connect your wallet for automatic payment and instant on-chain verification. Supports direct Arc payments and cross-chain bridging from Base Sepolia and Ethereum Sepolia.")
-    : "Wallet payment is not configured on this server. Use manual transfer below.";
-
-  const walletBlock = `
+  return `
     <div class="onchain-payment">
       <div>
         <p class="eyebrow">Wallet payment</p>
-        <h2>${walletHeading}</h2>
-        <p>${walletDesc}</p>
+        <h2>${isSelfPayment ? "Use a different payer wallet" : config.onchainPaymentsEnabled ? "Choose USDC source" : "PaymentRouter not configured"}</h2>
+        <p>${
+          isSelfPayment
+            ? "The connected wallet is also the receiving wallet. A self-transfer does not settle an invoice."
+            :
+          config.onchainPaymentsEnabled
+            ? `Choose where your USDC is. If Arc balance is enough, pay directly. If USDC is on another testnet, Fundline will bridge first, then pay. Need testnet USDC? <a href="https://faucet.circle.com/" target="_blank" rel="noreferrer">Get some at faucet.circle.com</a>.`
+            : "Send USDC manually to the receiving wallet, then use verification below."
+        }</p>
       </div>
-      ${payerWallet && !payDisabled ? `
-        <div class="payment-source-box">
-          <label>
-            <span class="field-label">
-              Pay with
-              <span class="help-tip" tabindex="0" data-help="Choose the network where this payer wallet already has USDC. Arc pays directly; other supported testnets bridge first." aria-label="Pay source help">?</span>
-            </span>
-            <select id="paymentSourceChain">${sourceOptions}</select>
-          </label>
-          <button class="ghost-action" id="refreshPaymentSource" type="button">Check balance</button>
-        </div>
-      ` : ""}
-      <div class="payment-source-status" id="paymentSourceStatus"></div>
-      <p class="muted payment-source-scan" id="paymentSourceScan"></p>
-      ${!payDisabled ? `
-        <button class="primary-action" id="payWithWallet" type="button" data-action="${payerWallet ? "checking" : "connect"}">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
-          ${payerWallet ? "Checking balance..." : "Connect wallet"}
-        </button>
-      ` : ""}
+      <div class="payment-source-box">
+        <label>
+          <span class="field-label">
+            Pay with
+            <span class="help-tip" tabindex="0" data-help="Choose the network where this payer wallet already has USDC. Arc pays directly; other supported testnets bridge first." aria-label="Pay source help">?</span>
+          </span>
+          <select id="paymentSourceChain" ${payDisabled ? "disabled" : ""}>${sourceOptions}</select>
+        </label>
+        <button class="ghost-action" id="refreshPaymentSource" type="button" ${payDisabled ? "disabled" : ""}>Check balance</button>
+      </div>
+      <div class="payment-source-status" id="paymentSourceStatus">${payerWallet ? "Checking selected USDC balance..." : "Connect wallet to check USDC balance."}</div>
+      <button class="primary-action" id="payWithWallet" type="button" data-action="connect" ${payDisabled ? "disabled" : ""}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>
+        ${payerWallet ? "Checking balance..." : "Connect wallet"}
+      </button>
       <div class="bridge-pay-progress" id="bridgePayProgress" hidden></div>
     </div>
-  `;
-
-  // Wallet connected: show only the wallet pay block, auto-verify handles the rest.
-  if (payerWallet) {
-    return walletBlock;
-  }
-
-  // No wallet: show connect block + OR divider + manual pay block.
-  return `
-    ${walletBlock}
-    <div class="or-divider">OR</div>
     <form class="payment-verify" id="paymentVerifyForm">
       <div>
-        <p class="eyebrow">Manual payment</p>
-        <h2>Send USDC and verify</h2>
-        <p>Send exactly ${escapeHtml(formatUsdc(invoice.total))} USDC to the address below, then enter your wallet address to confirm the payment on-chain.</p>
-      </div>
-      <div class="field-copy-row">
-        <label>
-          <span class="field-label">Receiving wallet</span>
-          <input value="${escapeHtml(invoice.merchantWallet)}" readonly />
-        </label>
-        <button type="button" class="ghost-action copy-wallet-btn" id="copyMerchantWallet">Copy</button>
+        <p class="eyebrow">Payment verification</p>
+        <h2>Verify on Arcscan</h2>
+        <p>After sending USDC, connect the payer wallet or enter the wallet that sent payment. The app checks Arcscan before marking this invoice paid.</p>
       </div>
       <label>
         <span class="field-label">
-          Your wallet address
-          <span class="help-tip" tabindex="0" data-help="Wallet address that sent the USDC payment." aria-label="Payer wallet help">?</span>
+          Payer wallet
+          <span class="help-tip" tabindex="0" data-help="Wallet address that sent the USDC payment. If you connect the payer wallet, this field can be filled automatically." aria-label="Payer wallet help">?</span>
         </span>
-        <input name="payerWallet" placeholder="0x wallet that sent the payment" />
+        <input name="payerWallet" placeholder="0x wallet that paid this invoice" value="${escapeHtml(payerWallet)}" />
       </label>
       <label>
         <span class="field-label">
@@ -2014,87 +1233,6 @@ function paymentButtonHtml(label) {
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14m0 0l6-6m-6 6l-6-6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" /></svg>${escapeHtml(label)}`;
 }
 
-let _paymentSourceAutoPicked = false;
-
-// Race a promise against a timeout so one slow or dead RPC cannot hang the scan.
-function withRpcTimeout(promise, ms) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error("RPC timed out")), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
-// Read the payer's USDC balance on every supported source chain in parallel.
-// Pure eth_call reads (no signature, no gas); a failed RPC counts as 0 so one
-// dead endpoint does not block the rest.
-async function scanUsdcAcrossChains(wallet) {
-  const sources = getPaymentSourceOptions();
-  const results = await Promise.allSettled(
-    sources.map((source) => {
-      const chain = getPaymentSourceChain(source.key);
-      return withRpcTimeout(readUsdcBalanceFromRpc(chain.rpcUrls[0], chain.usdc, wallet), 6000);
-    }),
-  );
-  return sources.map((source, index) => ({
-    key: source.key,
-    shortName: getPaymentSourceChain(source.key).shortName,
-    balance: results[index].status === "fulfilled" ? results[index].value : 0n,
-    ok: results[index].status === "fulfilled",
-  }));
-}
-
-// Pick the cheapest/fastest single chain that already covers the amount,
-// ordered by CCTP_TESTNET_CHAINS[key].preference (lowest first).
-function suggestBestChainKey(scanned, amountUnits) {
-  const sorted = [...scanned].sort((a, b) => {
-    const pa = (CCTP_TESTNET_CHAINS[a.key] || {}).preference ?? 999;
-    const pb = (CCTP_TESTNET_CHAINS[b.key] || {}).preference ?? 999;
-    return pa - pb;
-  });
-  return sorted.find((row) => row.ok && row.balance >= amountUnits)?.key || "";
-}
-
-function renderScanSummary(scanned) {
-  const parts = scanned.map(
-    (item) => `${item.shortName} ${item.ok ? formatUnits(item.balance, ARC_USDC_DECIMALS) : "n/a"}`,
-  );
-  return `Your USDC by chain: ${parts.join(", ")}.`;
-}
-
-// Scan all chains, auto-select the cheapest single chain that covers the invoice
-// (only once, so a manual change sticks), show a per-chain summary, then run the
-// normal per-source status. Keeps the common case one chain, one click, with no
-// signature or gas (reads only). Aggregation across chains is out of scope here.
-async function autoPickBestSource(id) {
-  const invoice = state.invoices.find((item) => item.id === id);
-  if (!invoice || invoice.status === "paid") return;
-  const wallet = getConnectedWallet();
-  const select = document.querySelector("#paymentSourceChain");
-  const scanEl = document.querySelector("#paymentSourceScan");
-  if (!wallet || !select) {
-    await refreshPaymentSourceStatus(id);
-    return;
-  }
-  if (scanEl) scanEl.textContent = "Scanning your USDC across chains...";
-  let scanned;
-  try {
-    scanned = await scanUsdcAcrossChains(wallet);
-  } catch {
-    if (scanEl) scanEl.textContent = "";
-    await refreshPaymentSourceStatus(id);
-    return;
-  }
-  if (!_paymentSourceAutoPicked) {
-    const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
-    const best = suggestBestChainKey(scanned, amountUnits);
-    if (best) select.value = best;
-    _paymentSourceAutoPicked = true;
-  }
-  if (scanEl) scanEl.textContent = renderScanSummary(scanned);
-  await refreshPaymentSourceStatus(id);
-}
-
 function getPaymentSourceChain(key) {
   if (key === "arcTestnet") {
     const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
@@ -2103,8 +1241,6 @@ function getPaymentSourceChain(key) {
       usdc: config.usdcTokenAddress || CCTP_TESTNET_CHAINS.arcTestnet.usdc,
       rpcUrls: [config.rpcUrl || CCTP_TESTNET_CHAINS.arcTestnet.rpcUrls[0]],
       explorer: config.explorerBase || CCTP_TESTNET_CHAINS.arcTestnet.explorer,
-      tokenMessenger: CCTP_TESTNET_CHAINS.arcTestnet.tokenMessenger,
-      messageTransmitter: CCTP_TESTNET_CHAINS.arcTestnet.messageTransmitter,
     };
   }
   return CCTP_TESTNET_CHAINS[key] || CCTP_TESTNET_CHAINS.arcTestnet;
@@ -2187,7 +1323,7 @@ async function handleInvoicePaymentAction(id) {
   const action = button?.dataset.action || "connect";
   if (action === "connect") {
     await connectWallet();
-    await autoPickBestSource(id);
+    await refreshPaymentSourceStatus(id);
     return;
   }
   if (action === "bridge-pay") {
@@ -2215,7 +1351,7 @@ async function payInvoiceWithWallet(id) {
     return;
   }
 
-  const provider = getProvider();
+  const provider = window.ethereum;
   if (!provider?.request) {
     showToast("No wallet extension found. Install or open an EVM wallet.");
     return;
@@ -2290,7 +1426,7 @@ async function _retryDirectPay(id, fromStep) {
   renderBridgePayProgress(progress);
   const button = document.querySelector("#payWithWallet");
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-  const provider = getProvider();
+  const provider = window.ethereum;
   const payerWallet = ctx.payerWallet || getConnectedWallet();
   if (!payerWallet) return;
   try {
@@ -2329,7 +1465,7 @@ async function _retryDirectPay(id, fromStep) {
 // Legacy wrapper - kept for backward compat; bridge path calls this directly.
 // Direct pay path now calls submitArcPaymentWithProgress instead.
 async function submitArcPayment(invoice, payerWallet, button) {
-  const provider = getProvider();
+  const provider = window.ethereum;
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
   await ensurePaymentNetwork(provider, config);
   const onchainDecimals = await readUsdcDecimals(provider, config.usdcTokenAddress);
@@ -2375,36 +1511,9 @@ async function submitArcPayment(invoice, payerWallet, button) {
   return autoVerifySubmittedPayment(invoice.id, { payerWallet, txHash, button });
 }
 
-// SHA-256 (hex) of the invoice's canonical content, for the optional on-chain
-// commitment. Uses the same canonical string the verifier would, so the hash is
-// reproducible off-chain.
-async function computeInvoiceCommitHash(invoice) {
-  const canonical = window.FundlineMemo.canonicalInvoiceForHash(invoice);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-// Build the opt-in on-chain memo text for an invoice from its stored field selection.
-// Returns "" when the merchant did not opt in, in which case the plain payInvoice path
-// is used and nothing extra is written on-chain.
-async function buildOnchainMemo(invoice) {
-  const memo = window.FundlineMemo;
-  const fields = memo ? memo.normalizeMemoFields(invoice.onchainMemoFields) : [];
-  if (!memo || fields.length === 0) return "";
-  let hashHex = "";
-  if (fields.includes("hash")) {
-    try {
-      hashHex = await computeInvoiceCommitHash(invoice);
-    } catch (error) {
-      hashHex = "";
-    }
-  }
-  return memo.buildInvoiceMemoText(invoice, fields, hashHex);
-}
-
 // Stepper-aware version used by direct pay path.
 async function submitArcPaymentWithProgress(invoice, payerWallet, button, progress) {
-  const provider = getProvider();
+  const provider = window.ethereum;
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
   setProgressStep(progress, "pay", "active", "Switching to Arc network...");
   await ensurePaymentNetwork(provider, config);
@@ -2434,14 +1543,12 @@ async function submitArcPaymentWithProgress(invoice, payerWallet, button, progre
     setProgressStep(progress, "pay", "active", "Paying invoice...");
     setButtonBusy(button, "Paying invoice...");
   }
-  const memoText = await buildOnchainMemo(invoice);
   const txHash = await sendRouterPayment(provider, {
     from: payerWallet,
     router: config.paymentRouterAddress,
     invoiceId: invoice.onchainInvoiceId,
     merchantWallet: invoice.merchantWallet,
     amount: amountUnits,
-    memoText,
   });
   setProgressStep(progress, "pay", "done", "Payment submitted");
   if (_activeBridgeContext) _activeBridgeContext.arcTxHash = txHash;
@@ -2490,7 +1597,7 @@ async function bridgeAndPayInvoice(id, sourceKey) {
     await payInvoiceWithWallet(id);
     return;
   }
-  const provider = getProvider();
+  const provider = window.ethereum;
   if (!provider?.request) {
     showToast("No wallet extension found. Install or open an EVM wallet.");
     return;
@@ -2525,33 +1632,21 @@ async function bridgeAndPayInvoice(id, sourceKey) {
     setButtonBusy(button, "Checking source...");
     await ensureWalletNetwork(provider, source);
     const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
-    const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-    // Bridge a bit more than the invoice: the forwarder deducts protocol + forward fee from
-    // the burned amount, and the payer still needs a little Arc USDC for the approve +
-    // payInvoice gas. Bridging total + fees + gas buffer means the payer nets at least the
-    // invoice total (plus gas) on Arc, so even a fully empty Arc wallet can pay.
-    const feeQuote = await resolveCctpFee({ sourceDomain: source.domain, destinationDomain: CCTP_TESTNET_CHAINS.arcTestnet.domain, amountUnits, fast: true });
-    const bridgeUnits = amountUnits + feeQuote.protocolFee + feeQuote.forwardFee + CCTP_PAY_GAS_BUFFER;
     const balance = await readUsdcBalance(provider, source.usdc, payerWallet);
-    if (balance < bridgeUnits) {
-      throw new Error(`Insufficient USDC on ${source.shortName}. Need ${formatUnits(bridgeUnits, ARC_USDC_DECIMALS)} USDC (invoice plus bridge fee).`);
+    if (balance < amountUnits) {
+      throw new Error(`Insufficient USDC on ${source.shortName}.`);
     }
     setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
 
-    const arcBalanceBefore = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payerWallet).catch(() => 0n);
-    _activeBridgeContext.arcBalanceBefore = arcBalanceBefore;
-
-    setProgressStep(progress, "bridge", "active", "Checking bridge allowance...");
-    setButtonBusy(button, "Checking allowance...");
-    const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, source.tokenMessenger);
-    if (allowance < bridgeUnits) {
-      setProgressStep(progress, "bridge", "active", "Approving USDC bridge (one-time)...");
-      setButtonBusy(button, "Approving bridge...");
+    setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
+    setButtonBusy(button, "Approving bridge...");
+    const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, CCTP_TOKEN_MESSENGER_V2);
+    if (allowance < amountUnits) {
       const approveTx = await sendUsdcApprove(provider, {
         from: payerWallet,
         token: source.usdc,
-        spender: source.tokenMessenger,
-        amount: MAX_UINT256,
+        spender: CCTP_TOKEN_MESSENGER_V2,
+        amount: amountUnits,
       });
       await waitForTransaction(provider, approveTx);
     }
@@ -2562,22 +1657,26 @@ async function bridgeAndPayInvoice(id, sourceKey) {
       from: payerWallet,
       source,
       destination: CCTP_TESTNET_CHAINS.arcTestnet,
-      amount: bridgeUnits,
+      amount: amountUnits,
       recipient: payerWallet,
       fast: true,
       onFeeResolved: (feeInfo) => {
-        setProgressStep(progress, "bridge", "active", `Bridging via ${feeInfo.mode === "fast" ? "Fast" : "Standard"} (fee ${feeInfo.feeText})...`);
+        const modeLabel = feeInfo.mode === "fast" ? "Fast" : "Standard";
+        const feeDetail = feeInfo.mode === "fast" ? `fee ${feeInfo.feeText}` : feeInfo.feeText;
+        setProgressStep(progress, "bridge", "active", `Bridging via ${modeLabel} (${feeDetail})...`);
       }
     });
     _activeBridgeContext.burnTx = burnTx;
     await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
+    setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
+    const message = await fetchCctpAttestation(source.domain, burnTx);
+    _activeBridgeContext.cctpMessage = message;
 
-    // Circle's forwarder fetches the attestation, mints on Arc, and pays the Arc gas. The
-    // payer does not submit a mint and needs no Arc gas to receive. Poll until it lands.
-    setProgressStep(progress, "bridge", "active", "Circle is delivering USDC to Arc (gasless)...");
-    setButtonBusy(button, "Receiving on Arc...");
-    await ensurePaymentNetwork(provider, config);
-    await waitForForwarderMint(config, payerWallet, arcBalanceBefore + amountUnits);
+    setProgressStep(progress, "bridge", "active", "Minting USDC on Arc...");
+    setButtonBusy(button, "Minting on Arc...");
+    await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
+    const mintTx = await sendCctpMint(provider, { from: payerWallet, message: message.message, attestation: message.attestation });
+    await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
     setProgressStep(progress, "bridge", "done", "USDC received on Arc");
 
     setProgressStep(progress, "pay", "active", "Paying invoice on Arc...");
@@ -2607,7 +1706,7 @@ async function _retryBridgePay(id, sourceKey, fromStep) {
   if (!ctx) return;
   const progress = ctx.steps;
   const source = getPaymentSourceChain(sourceKey);
-  const provider = getProvider();
+  const provider = window.ethereum;
   const payerWallet = ctx.payerWallet || getConnectedWallet();
   if (!payerWallet) return;
   const button = document.querySelector("#payWithWallet");
@@ -2629,47 +1728,47 @@ async function _retryBridgePay(id, sourceKey, fromStep) {
       if (balance < amountUnits) throw new Error(`Insufficient USDC on ${source.shortName}.`);
       setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
     }
-    const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-    if (["check", "bridge"].includes(fromStep) && !ctx.burnTx) {
-      // Not bridged yet: approve + burn (with forwarding hook), then wait for the forwarder.
-      const feeQuote = await resolveCctpFee({ sourceDomain: source.domain, destinationDomain: CCTP_TESTNET_CHAINS.arcTestnet.domain, amountUnits, fast: true });
-      const bridgeUnits = amountUnits + feeQuote.protocolFee + feeQuote.forwardFee + CCTP_PAY_GAS_BUFFER;
-      setProgressStep(progress, "bridge", "active", "Checking bridge allowance...");
-      setButtonBusy(button, "Checking allowance...");
-      const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, source.tokenMessenger);
-      if (allowance < bridgeUnits) {
-        setProgressStep(progress, "bridge", "active", "Approving USDC bridge (one-time)...");
-        setButtonBusy(button, "Approving bridge...");
-        const approveTx = await sendUsdcApprove(provider, { from: payerWallet, token: source.usdc, spender: source.tokenMessenger, amount: MAX_UINT256 });
+    if (["check", "bridge"].includes(fromStep) && !ctx.cctpMessage) {
+      setProgressStep(progress, "bridge", "active", "Approving bridge spend...");
+      setButtonBusy(button, "Approving bridge...");
+      const allowance = await readUsdcAllowance(provider, source.usdc, payerWallet, CCTP_TOKEN_MESSENGER_V2);
+      if (allowance < amountUnits) {
+        const approveTx = await sendUsdcApprove(provider, { from: payerWallet, token: source.usdc, spender: CCTP_TOKEN_MESSENGER_V2, amount: amountUnits });
         await waitForTransaction(provider, approveTx);
       }
-      ctx.arcBalanceBefore = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payerWallet).catch(() => 0n);
       setProgressStep(progress, "bridge", "active", `Moving USDC from ${source.shortName} to Arc...`);
       setButtonBusy(button, "Starting bridge...");
-      const burnTx = await sendCctpBurn(provider, {
-        from: payerWallet,
-        source,
-        destination: CCTP_TESTNET_CHAINS.arcTestnet,
-        amount: bridgeUnits,
-        recipient: payerWallet,
+      const burnTx = await sendCctpBurn(provider, { 
+        from: payerWallet, 
+        source, 
+        destination: CCTP_TESTNET_CHAINS.arcTestnet, 
+        amount: amountUnits, 
+        recipient: payerWallet, 
         fast: true,
         onFeeResolved: (feeInfo) => {
-          setProgressStep(progress, "bridge", "active", `Bridging via ${feeInfo.mode === "fast" ? "Fast" : "Standard"} (fee ${feeInfo.feeText})...`);
+          const modeLabel = feeInfo.mode === "fast" ? "Fast" : "Standard";
+          const feeDetail = feeInfo.mode === "fast" ? `fee ${feeInfo.feeText}` : feeInfo.feeText;
+          setProgressStep(progress, "bridge", "active", `Bridging via ${modeLabel} (${feeDetail})...`);
         }
       });
       ctx.burnTx = burnTx;
       await waitForTransaction(provider, burnTx, { attempts: 60, intervalMs: 2500 });
-      setProgressStep(progress, "bridge", "active", "Circle is delivering USDC to Arc (gasless)...");
-      setButtonBusy(button, "Receiving on Arc...");
-      await ensurePaymentNetwork(provider, config);
-      await waitForForwarderMint(config, payerWallet, (ctx.arcBalanceBefore || 0n) + amountUnits);
+      setProgressStep(progress, "bridge", "active", "Waiting for Circle attestation...");
+      const message = await fetchCctpAttestation(source.domain, burnTx);
+      ctx.cctpMessage = message;
+      setProgressStep(progress, "bridge", "active", "Minting USDC on Arc...");
+      setButtonBusy(button, "Minting on Arc...");
+      await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
+      const mintTx = await sendCctpMint(provider, { from: payerWallet, message: message.message, attestation: message.attestation });
+      await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
       setProgressStep(progress, "bridge", "done", "USDC received on Arc");
-    } else if (["check", "bridge"].includes(fromStep) && ctx.burnTx) {
-      // Burn already submitted: just wait for the forwarder to deliver on Arc (no re-burn).
-      setProgressStep(progress, "bridge", "active", "Circle is delivering USDC to Arc (gasless)...");
-      setButtonBusy(button, "Receiving on Arc...");
-      await ensurePaymentNetwork(provider, config);
-      await waitForForwarderMint(config, payerWallet, (ctx.arcBalanceBefore || 0n) + amountUnits);
+    } else if (["check", "bridge"].includes(fromStep) && ctx.cctpMessage) {
+      // Already have attestation, just mint
+      setProgressStep(progress, "bridge", "active", "Minting USDC on Arc (retry)...");
+      setButtonBusy(button, "Minting on Arc...");
+      await ensurePaymentNetwork(provider, state.publicConfig || DEFAULT_PUBLIC_CONFIG);
+      const mintTx = await sendCctpMint(provider, { from: payerWallet, message: ctx.cctpMessage.message, attestation: ctx.cctpMessage.attestation });
+      await waitForTransaction(provider, mintTx, { attempts: 60, intervalMs: 2500 });
       setProgressStep(progress, "bridge", "done", "USDC received on Arc");
     }
     if (["check", "bridge", "pay"].includes(fromStep)) {
@@ -2841,15 +1940,10 @@ async function waitForArcTx(provider, txHash) {
   throw new Error("Transaction not confirmed after 3 minutes.");
 }
 
-function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, amount, memoText }) {
+function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, amount }) {
   const invoiceBytes = normalizeBytes32(invoiceId);
   if (!invoiceBytes) throw new Error("Invoice is missing a valid onchain invoice ID.");
-  // With an opt-in memo, call payInvoiceWithMemo so the chosen invoice fields are written
-  // on-chain in the same settlement tx. Without one, use the plain payInvoice selector so
-  // nothing extra is emitted and the calldata is identical to the pre-memo path.
-  const data = memoText && window.FundlineMemo
-    ? window.FundlineMemo.encodePayInvoiceWithMemo({ invoiceId: invoiceBytes, merchant: merchantWallet, amount, memoText })
-    : `${PAYMENT_ROUTER_PAY_SELECTOR}${encodeBytes32(invoiceBytes)}${encodeAddress(merchantWallet)}${encodeUint256(amount)}`;
+  const data = `${PAYMENT_ROUTER_PAY_SELECTOR}${encodeBytes32(invoiceBytes)}${encodeAddress(merchantWallet)}${encodeUint256(amount)}`;
   return provider.request({
     method: "eth_sendTransaction",
     params: [{ from, to: router, data, value: "0x0" }],
@@ -2858,13 +1952,12 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, 
 
 async function resolveCctpFee({ sourceDomain, destinationDomain, amountUnits, fast }) {
   let mode = fast ? "fast" : "standard";
-  let protocolFee = 0n;
-  let forwardFee = 0n;
+  let maxFee = 0n;
   let minFinalityThreshold = fast ? CCTP_FAST_FINALITY_THRESHOLD : CCTP_STANDARD_FINALITY_THRESHOLD;
+  let feeText = fast ? "calculating..." : "free, slower (~13-19 min)";
 
   try {
-    // forward=true also returns the forwardFee tiers for the gasless destination mint.
-    const url = `${CCTP_IRIS_SANDBOX_BASE}/v2/burn/USDC/fees/${sourceDomain}/${destinationDomain}?forward=true`;
+    const url = `${CCTP_IRIS_SANDBOX_BASE}/v2/burn/USDC/fees/${sourceDomain}/${destinationDomain}`;
     const response = await fetch(url, { cache: "no-store" });
     const payload = await response.json();
     const tiers = Array.isArray(payload) ? payload : [];
@@ -2885,35 +1978,36 @@ async function resolveCctpFee({ sourceDomain, destinationDomain, amountUnits, fa
         minFinalityThreshold = Number(tier.finalityThreshold) || minFinalityThreshold;
         const bps = Number(tier.minimumFee) || 0;
         if (bps > 0) {
-          // bps may be a float like 1.3; scale by 100 to integer math, divisor 10000*100.
+          // bps might be a float like 1.3, so scale it up by 100 to make it an integer
           const bpsScaled = BigInt(Math.ceil(bps * 100));
-          const feeUnits = (amountUnits * bpsScaled + 999999n) / 1000000n;
-          protocolFee = (feeUnits * 125n) / 100n; // 25% headroom on the protocol fee
+          // Divisor is now 10,000 * 100 = 1,000,000
+          let feeUnits = (amountUnits * bpsScaled + 999999n) / 1000000n;
+          maxFee = (feeUnits * 125n) / 100n;
+          feeText = formatUnits(maxFee, ARC_USDC_DECIMALS) + " USDC";
+        } else {
+          maxFee = 0n;
+          feeText = "free, slower (~13-19 min)";
         }
-        // Forwarding (gasless destination mint) fee, a flat amount in base units.
-        const fwd = tier.forwardFee && typeof tier.forwardFee === "object" ? tier.forwardFee : null;
-        const fwdUnits = fwd ? Number(fwd.high ?? fwd.med ?? fwd.low ?? 0) : Number(tier.forwardFee || 0);
-        if (Number.isFinite(fwdUnits) && fwdUnits > 0) forwardFee = BigInt(Math.ceil(fwdUnits));
       }
     }
   } catch (error) {
     console.error("CCTP fee API failed:", error);
   }
 
-  if (fast && protocolFee === 0n && forwardFee === 0n) {
+  if (fast && maxFee === 0n) {
     mode = "standard";
     minFinalityThreshold = CCTP_STANDARD_FINALITY_THRESHOLD;
+    feeText = "free, slower (~13-19 min)";
   }
 
-  // Cap only the protocol (percentage) portion at 1%. The forwarding fee is a flat amount
-  // that can exceed 1% of a small invoice, which is expected, so it is excluded from this guard.
-  if (protocolFee > amountUnits / 100n) {
-    throw new Error("Bridge fee exceeds 1% of the transfer amount. Please retry later or pay directly on Arc.");
+  if (maxFee > 0n) {
+    const onePercent = amountUnits / 100n;
+    if (maxFee > onePercent) {
+      throw new Error("Bridge fee exceeds 1% of the transfer amount. Please retry later or pay directly on Arc.");
+    }
   }
 
-  const maxFee = protocolFee + forwardFee;
-  const feeText = maxFee > 0n ? `${formatUnits(maxFee, ARC_USDC_DECIMALS)} USDC` : "free, slower (~13-19 min)";
-  return { maxFee, protocolFee, forwardFee, minFinalityThreshold, mode, feeText };
+  return { maxFee, minFinalityThreshold, mode, feeText };
 }
 
 async function sendCctpBurn(provider, { from, source, destination, amount, recipient, fast = false, onFeeResolved }) {
@@ -2926,38 +2020,20 @@ async function sendCctpBurn(provider, { from, source, destination, amount, recip
 
   if (onFeeResolved) onFeeResolved(feeInfo);
 
-  // depositForBurnWithHook with the basic forwarding hook. destinationCaller MUST be zero
-  // (the forwarder does not support a set destinationCaller). The trailing dynamic bytes
-  // (hookData) sits after the 8-word head: offset 0x100, length 32, then the 32-byte hook.
   const data =
-    CCTP_DEPOSIT_FOR_BURN_WITH_HOOK_SELECTOR +
+    CCTP_DEPOSIT_FOR_BURN_SELECTOR +
     encodeUint256(amount) +
     encodeUint256(destination.domain) +
     encodeBytes32(addressToBytes32(recipient)) +
     encodeAddress(source.usdc) +
     encodeBytes32(ZERO_BYTES32) +
     encodeUint256(feeInfo.maxFee) +
-    encodeUint256(feeInfo.minFinalityThreshold) +
-    encodeUint256(256) +
-    encodeUint256(32) +
-    CCTP_FORWARD_HOOK_DATA;
-
+    encodeUint256(feeInfo.minFinalityThreshold);
+    
   return provider.request({
     method: "eth_sendTransaction",
-    params: [{ from, to: source.tokenMessenger, data, value: "0x0" }],
+    params: [{ from, to: CCTP_TOKEN_MESSENGER_V2, data, value: "0x0" }],
   });
-}
-
-// Poll the payer's Arc USDC balance until Circle's forwarder has minted the bridged USDC
-// (balance reaches at least targetUnits). Replaces the client-submitted receiveMessage: the
-// forwarder pays the Arc gas, so the payer needs no Arc gas to receive.
-async function waitForForwarderMint(config, owner, targetUnits, { attempts = 80, intervalMs = 4000 } = {}) {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const balance = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, owner).catch(() => 0n);
-    if (balance >= targetUnits) return balance;
-    await delay(intervalMs);
-  }
-  throw new Error("Circle forwarder has not delivered the USDC on Arc yet. Press Retry in a moment.");
 }
 
 async function fetchCctpAttestation(sourceDomain, txHash) {
@@ -2983,7 +2059,7 @@ function sendCctpMint(provider, { from, message, attestation }) {
   const data = CCTP_RECEIVE_MESSAGE_SELECTOR + encodeDynamicBytesPair(message, attestation);
   return provider.request({
     method: "eth_sendTransaction",
-    params: [{ from, to: CCTP_TESTNET_CHAINS.arcTestnet.messageTransmitter, data, value: "0x0" }],
+    params: [{ from, to: CCTP_MESSAGE_TRANSMITTER_V2, data, value: "0x0" }],
   });
 }
 
@@ -3169,22 +2245,22 @@ async function sendTelegramTestAlert(event) {
     showToast("Add Telegram chat ID first.");
     return;
   }
-  try {
-    const response = await fetch("/api/telegram/verify-alert", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: settings.telegramChatId }),
-    });
-    if (!response.ok) {
-      const result = await response.json().catch(function () { return {}; });
-      showToast("Telegram alert failed: " + (result.error || "server error " + response.status));
-      return;
-    }
-    const result = await response.json();
-    showToast(result.ok ? "Telegram alert verified." : "Telegram alert failed: " + (result.error || "unknown error"));
-  } catch (error) {
-    showToast("Telegram alert failed: could not reach server.");
-  }
+  const sampleInvoice = {
+    id: "telegram-test",
+    number: "TEST-PAID",
+    clientName: "Demo client",
+    total: 25,
+    paidAt: new Date().toISOString(),
+    payerWallet: getConnectedWallet() || "0x0000000000000000000000000000000000000000",
+    merchantWallet: getConnectedWallet() || state.settings.merchantWallet || "0x...",
+    txHash: "demo-telegram-test",
+    verificationSource: "telegram_test",
+  };
+  const result = await sendPaymentNotification(sampleInvoice, {
+    chatId: settings.telegramChatId,
+    force: true,
+  });
+  showToast(result.ok ? "Test Telegram alert sent." : `Telegram alert failed: ${result.error}`);
 }
 
 async function sendPaymentNotification(invoice, options = {}) {
@@ -3222,318 +2298,41 @@ async function sendPaymentNotification(invoice, options = {}) {
   }
 }
 
-// Status -> display label + cell colors for the export. "expired" is shown as
-// "Overdue" to match the dashboard wording.
-const INVOICE_EXPORT_STATUS = {
-  paid: { label: "Paid", bg: "#c6f6d5", color: "#1b7a44" },
-  open: { label: "Open", bg: "#fdeeb8", color: "#8a6a00" },
-  expired: { label: "Overdue", bg: "#ffd3d3", color: "#b3001b" },
-  verifying: { label: "Verifying", bg: "#cfe1ff", color: "#1c4fb8" },
-};
-
-function pad2(value) {
-  return String(value).padStart(2, "0");
-}
-
-// Normalize any stored date string (ISO YYYY-MM-DD, US M/D/YYYY, or a full
-// timestamp) to a single DD/MM/YYYY form for the export.
-function formatExportDate(value) {
-  if (!value) return "";
-  const text = String(value).trim();
-  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[3]}/${iso[2]}/${iso[1]}`;
-  const us = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (us) return `${pad2(us[2])}/${pad2(us[1])}/${us[3]}`;
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) return text;
-  return `${pad2(date.getUTCDate())}/${pad2(date.getUTCMonth() + 1)}/${date.getUTCFullYear()}`;
-}
-
-// Paid-at timestamps to DD/MM/YYYY HH:MM UTC.
-function formatExportDateTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return `${pad2(date.getUTCDate())}/${pad2(date.getUTCMonth() + 1)}/${date.getUTCFullYear()} ${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())} UTC`;
-}
-
-// Export invoices as a styled spreadsheet. CSV cannot carry colors, so this builds
-// an HTML table that Excel and LibreOffice open as a formatted sheet: a gold header
-// row and status cells tinted by state (Paid green, Open amber, Overdue red).
-function exportInvoicesXls() {
+function exportCsv() {
   if (!state.invoices.length) {
     showToast("No invoices to export.");
     return;
   }
-  const columns = [
-    { label: "Number", get: (i) => i.number },
-    { label: "Client", get: (i) => i.clientName },
-    { label: "Email", get: (i) => i.clientEmail },
-    { label: "Status", status: true },
-    { label: "Due Date", get: (i) => formatExportDate(i.dueDate) },
-    { label: "Total USDC", get: (i) => formatUsdc(i.total), align: "right" },
-    { label: "Payment Reference Id", get: (i) => i.onchainInvoiceId },
-    { label: "Paid At", get: (i) => formatExportDateTime(i.paidAt) },
-    { label: "Merchant Wallet", get: (i) => i.merchantWallet },
-    { label: "Payer Wallet", get: (i) => i.payerWallet },
-    { label: "Tx Hash", get: (i) => i.txHash },
-    { label: "Verification Source", get: (i) => i.verificationSource },
+  const headers = [
+    "number",
+    "client",
+    "email",
+    "status",
+    "due_date",
+    "total_usdc",
+    "payment_reference_id",
+    "paid_at",
+    "merchant_wallet",
+    "payer_wallet",
+    "tx_hash",
+    "verification_source",
   ];
-  const headStyle = "background-color:#d4af37;color:#1a1410;font-weight:700;padding:8px 11px;border:1px solid #b8860b;text-align:left;white-space:nowrap;";
-  const headHtml = columns.map((col) => `<th style="${headStyle}">${escapeHtml(col.label)}</th>`).join("");
-
-  const rowsHtml = state.invoices
-    .map((invoice, index) => {
-      const zebra = index % 2 ? "#f6f4ee" : "#ffffff";
-      const cells = columns
-        .map((col) => {
-          if (col.status) {
-            const key = getInvoiceStatus(invoice);
-            const style = INVOICE_EXPORT_STATUS[key] || { label: key, bg: "#eeeeee", color: "#333333" };
-            return `<td style="background-color:${style.bg};color:${style.color};font-weight:700;text-align:center;padding:6px 11px;border:1px solid #e3ddcb;">${escapeHtml(style.label)}</td>`;
-          }
-          const align = col.align === "right" ? "right" : "left";
-          return `<td style="background-color:${zebra};text-align:${align};padding:6px 11px;border:1px solid #e3ddcb;white-space:nowrap;">${escapeHtml(col.get(invoice))}</td>`;
-        })
-        .join("");
-      return `<tr>${cells}</tr>`;
-    })
-    .join("");
-
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8" /></head><body><table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#1a1410;"><thead><tr>${headHtml}</tr></thead><tbody>${rowsHtml}</tbody></table></body></html>`;
-
-  downloadBlob(`﻿${html}`, "application/vnd.ms-excel;charset=utf-8", `fundline-invoices-${todaySlug()}.xls`);
-}
-
-// ---- Bulk payout (batch) ----
-// A company uploads a CSV of recipients, the server stores it as a batch, and the
-// returned /batch/:id link lets the payer settle everyone in one transaction (phase 4).
-
-let _batchItems = [];
-
-const BATCH_TEMPLATE_HEADERS = ["Recipient name", "Recipient wallet", "Amount (USDC)", "Reference", "Email"];
-const BATCH_TEMPLATE_ROWS = [
-  ["Alice Nguyen", "0x1111111111111111111111111111111111111111", "1500", "Salary March 2026", "alice@example.com"],
-  ["Bob Tran", "0x2222222222222222222222222222222222222222", "1200.50", "Salary March 2026", "bob@example.com"],
-  ["Carol Le", "0x3333333333333333333333333333333333333333", "800", "Contractor fee", "carol@example.com"],
-];
-
-function wireBulkPayout() {
-  const tabs = document.querySelector("#createModeTabs");
-  tabs?.addEventListener("click", (event) => {
-    const btn = event.target.closest(".create-mode");
-    if (btn) switchCreateMode(btn.dataset.mode);
-  });
-  document.querySelector("#downloadBatchTemplate")?.addEventListener("click", downloadBatchTemplate);
-  document.querySelector("#batchFile")?.addEventListener("change", handleBatchFile);
-  document.querySelector("#batchMemoEnabled")?.addEventListener("change", (event) => {
-    const hint = document.querySelector("#batchMemoHint");
-    if (hint) hint.hidden = !event.target.checked;
-  });
-  document.querySelector("#createBatchBtn")?.addEventListener("click", createBatch);
-}
-
-function switchCreateMode(mode) {
-  const target = mode === "bulk" ? "bulk" : "single";
-  document.querySelectorAll("#createModeTabs .create-mode").forEach((b) => b.classList.toggle("is-active", b.dataset.mode === target));
-  document.querySelectorAll("[data-mode-panel]").forEach((panel) => {
-    panel.hidden = panel.dataset.modePanel !== target;
-  });
-}
-
-function csvField(value) {
-  const text = String(value == null ? "" : value);
-  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-function downloadBatchTemplate() {
-  const lines = [BATCH_TEMPLATE_HEADERS, ...BATCH_TEMPLATE_ROWS].map((row) => row.map(csvField).join(","));
-  downloadBlob(`﻿${lines.join("\r\n")}\r\n`, "text/csv;charset=utf-8", "fundline-payout-template.csv");
-}
-
-// Minimal RFC-4180-ish CSV parser: handles quoted fields, escaped quotes, and CRLF.
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
-  const src = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  for (let i = 0; i < src.length; i += 1) {
-    const c = src[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (src[i + 1] === '"') { field += '"'; i += 1; } else inQuotes = false;
-      } else field += c;
-    } else if (c === '"') {
-      inQuotes = true;
-    } else if (c === ",") {
-      row.push(field);
-      field = "";
-    } else if (c === "\n") {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else {
-      field += c;
-    }
-  }
-  if (field.length || row.length) {
-    row.push(field);
-    rows.push(row);
-  }
-  return rows.filter((r) => r.some((cell) => String(cell).trim() !== ""));
-}
-
-function batchHeaderMap(headers) {
-  const map = {};
-  headers.forEach((header, index) => {
-    const key = String(header).toLowerCase().replace(/\(.*?\)/g, "").trim();
-    if (map.recipientName === undefined && /(recipient\s*name|^name$)/.test(key)) map.recipientName = index;
-    else if (map.recipientWallet === undefined && /(wallet|address)/.test(key)) map.recipientWallet = index;
-    else if (map.amount === undefined && /(amount|usdc)/.test(key)) map.amount = index;
-    else if (map.reference === undefined && /(reference|note|memo)/.test(key)) map.reference = index;
-    else if (map.email === undefined && /email/.test(key)) map.email = index;
-  });
-  return map;
-}
-
-function handleBatchFile(event) {
-  const file = event.target.files && event.target.files[0];
-  if (!file) return;
-  const nameEl = document.querySelector("#batchFileName");
-  if (nameEl) nameEl.textContent = file.name;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      renderBatchPreview(parseCsv(reader.result));
-    } catch (error) {
-      showToast("Could not read the CSV file.");
-    }
-  };
-  reader.readAsText(file);
-}
-
-function renderBatchPreview(rows) {
-  const preview = document.querySelector("#batchPreview");
-  const totalEl = document.querySelector("#batchTotal");
-  const countEl = document.querySelector("#batchCount");
-  const createBtn = document.querySelector("#createBatchBtn");
-  _batchItems = [];
-  if (createBtn) createBtn.disabled = true;
-  if (!preview) return;
-  if (!rows.length) {
-    preview.innerHTML = "";
-    return;
-  }
-  const header = batchHeaderMap(rows[0]);
-  if (header.recipientWallet === undefined || header.amount === undefined) {
-    preview.innerHTML = `<p class="bulk-error">The file needs at least a Recipient wallet and an Amount column. Use the template.</p>`;
-    return;
-  }
-  const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-  const maxRecipients = config.maxBatchRecipients || 256;
-  const items = [];
-  let invalid = 0;
-  let totalUnits = 0n;
-  const body = rows.slice(1).map((cells, index) => {
-    const wallet = String(cells[header.recipientWallet] || "").trim();
-    const amountRaw = String(cells[header.amount] || "").trim();
-    const amount = Number(amountRaw.replace(/,/g, ""));
-    const name = header.recipientName !== undefined ? String(cells[header.recipientName] || "").trim() : "";
-    const reference = header.reference !== undefined ? String(cells[header.reference] || "").trim() : "";
-    const email = header.email !== undefined ? String(cells[header.email] || "").trim() : "";
-    const walletOk = /^0x[0-9a-fA-F]{40}$/.test(wallet);
-    const amountOk = Number.isFinite(amount) && amount > 0;
-    if (walletOk && amountOk) {
-      items.push({ recipientName: name, recipientWallet: wallet, amount, reference, email });
-      totalUnits += parseTokenUnits(amount, ARC_USDC_DECIMALS);
-    } else {
-      invalid += 1;
-    }
-    const err = !walletOk ? "invalid wallet" : !amountOk ? "invalid amount" : "";
-    return `<tr class="${walletOk && amountOk ? "" : "bulk-row-bad"}">
-      <td>${index + 1}</td>
-      <td>${escapeHtml(name) || "-"}</td>
-      <td class="bulk-wallet">${walletOk ? escapeHtml(shortAddress(wallet)) : escapeHtml(wallet || "-")}</td>
-      <td class="bulk-amt">${amountOk ? formatUsdc(amount) : escapeHtml(amountRaw || "-")}</td>
-      <td>${escapeHtml(reference) || "-"}</td>
-      <td class="bulk-rowerr">${err}</td>
-    </tr>`;
-  }).join("");
-
-  const tooMany = items.length > maxRecipients;
-  preview.innerHTML = `
-    <div class="bulk-table-wrap">
-      <table class="bulk-table">
-        <thead><tr><th>#</th><th>Name</th><th>Wallet</th><th>Amount</th><th>Reference</th><th></th></tr></thead>
-        <tbody>${body}</tbody>
-      </table>
-    </div>
-    ${invalid ? `<p class="bulk-error">${invalid} row(s) have an invalid wallet or amount. Fix them and re-upload.</p>` : ""}
-    ${tooMany ? `<p class="bulk-error">${items.length} recipients exceed the ${maxRecipients} per-batch limit. Split into smaller files.</p>` : ""}
-  `;
-  if (totalEl) totalEl.textContent = `${formatUnits(totalUnits, ARC_USDC_DECIMALS)} USDC`;
-  if (countEl) countEl.textContent = items.length ? `${items.length} recipient${items.length > 1 ? "s" : ""}` : "";
-  _batchItems = items;
-  if (createBtn) createBtn.disabled = !(items.length >= 1 && invalid === 0 && !tooMany);
-}
-
-async function createBatch() {
-  if (!_batchItems.length) {
-    showToast("Upload a CSV with at least one valid recipient.");
-    return;
-  }
-  let creatorWallet = getConnectedWallet();
-  if (!creatorWallet) {
-    await connectWallet();
-    creatorWallet = getConnectedWallet();
-  }
-  if (!creatorWallet) return;
-  const withMemo = Boolean(document.querySelector("#batchMemoEnabled")?.checked);
-  const title = String(document.querySelector("#batchTitle")?.value || "").trim();
-  const createBtn = document.querySelector("#createBatchBtn");
-  if (createBtn) createBtn.disabled = true;
-  try {
-    const res = await fetch("/api/batches", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        creatorWallet,
-        creatorName: state.settings.merchantName || "",
-        title,
-        withMemo,
-        items: _batchItems,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.error?.message || data?.error || "Could not create the payout");
-    showBatchResult(data.batch);
-    showToast("Payout link created.");
-  } catch (error) {
-    showToast(error?.message || "Could not create the payout.");
-    if (createBtn) createBtn.disabled = false;
-  }
-}
-
-function showBatchResult(batch) {
-  const result = document.querySelector("#batchResult");
-  if (!result) return;
-  const link = `${window.location.origin}/batch/${batch.id}`;
-  result.hidden = false;
-  result.innerHTML = `
-    <p class="eyebrow">Payout link ready</p>
-    <p class="bulk-result-sub">Share this link with whoever funds the payout. They open it, connect a wallet, and pay all ${batch.count} recipient${batch.count > 1 ? "s" : ""} in one transaction.</p>
-    <div class="copy-row">
-      <input readonly value="${escapeHtml(link)}" />
-      <button class="ghost-action" type="button" data-copy-batch="${escapeHtml(link)}">Copy link</button>
-    </div>
-    <div class="receipt-actions">
-      <a class="primary-action" href="/batch/${escapeHtml(batch.id)}" target="_blank" rel="noreferrer">Open payout page</a>
-    </div>
-  `;
-  result.querySelector("[data-copy-batch]")?.addEventListener("click", (event) => copyText(event.currentTarget.dataset.copyBatch));
-  result.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const rows = state.invoices.map((invoice) => [
+    invoice.number,
+    invoice.clientName,
+    invoice.clientEmail,
+    getInvoiceStatus(invoice),
+    invoice.dueDate,
+    formatUsdc(invoice.total),
+    invoice.onchainInvoiceId,
+    invoice.paidAt,
+    invoice.merchantWallet,
+    invoice.payerWallet,
+    invoice.txHash,
+    invoice.verificationSource,
+  ]);
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  downloadBlob(csv, "text/csv;charset=utf-8", `arc-invoices-${todaySlug()}.csv`);
 }
 
 function downloadReceiptPdf(invoice) {
@@ -3804,7 +2603,7 @@ function nextInvoiceNumber() {
 
 function loadInvoices() {
   try {
-    const parsed = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "[]");
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -3812,12 +2611,12 @@ function loadInvoices() {
 }
 
 function saveInvoices() {
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state.invoices));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.invoices));
 }
 
 function loadSettings() {
   try {
-    const parsed = JSON.parse(sessionStorage.getItem(SETTINGS_KEY) || "{}");
+    const parsed = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     return {
       merchantName: parsed.merchantName || "",
       merchantWallet: normalizeAddress(parsed.merchantWallet || ""),
@@ -3830,7 +2629,7 @@ function loadSettings() {
 }
 
 function saveSettings() {
-  sessionStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
 }
 
 function copyText(value) {
@@ -4047,6 +2846,10 @@ function todaySlug() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -4067,7 +2870,7 @@ function escapePdfText(value) {
 
 
 async function fetchServerSettings() {
-  const sessionStr = sessionStorage.getItem("fundline_dashboard_session");
+  const sessionStr = localStorage.getItem("fundline_dashboard_session");
   const connected = getConnectedWallet();
   if (!sessionStr || !connected) return;
   const session = JSON.parse(sessionStr);
@@ -4084,14 +2887,12 @@ async function fetchServerSettings() {
     if (res.ok) {
       const data = await res.json();
       if (data.settings) {
-        if (data.settings.displayName) state.settings.merchantName = data.settings.displayName;
         state.settings.telegramChatId = data.settings.telegramChatId || "";
         if (data.settings.alerts) {
           state.settings.alerts = { ...state.settings.alerts, ...data.settings.alerts };
         }
         saveSettings();
         renderSettings();
-        renderWalletState();
       }
     }
   } catch(e) {}

@@ -21,18 +21,27 @@
           </div>
         </a>
         <nav class="nav" aria-label="Invoice navigation">
-          <button class="nav-item is-active" data-view="dashboard" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-            Dashboard
-          </button>
-          <button class="nav-item" data-view="create" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
-            New invoice
-          </button>
-          <button class="nav-item" data-view="settings" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8h12M6 16h12M9 5v6M15 13v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
-            Settings
-          </button>
+          <div class="nav-group is-open">
+            <button class="nav-group-toggle" type="button" aria-expanded="true" aria-controls="invoiceNavChildren">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 2v6h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+              Invoice
+              <svg class="nav-group-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="nav-group-children" id="invoiceNavChildren">
+              <button class="nav-item is-active" data-view="dashboard" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h16M4 19h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+                Dashboard
+              </button>
+              <button class="nav-item" data-view="create" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
+                New invoice
+              </button>
+              <button class="nav-item" data-view="settings" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8h12M6 16h12M9 5v6M15 13v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+                Settings
+              </button>
+            </div>
+          </div>
           <button class="nav-item nav-item-disabled" type="button" disabled aria-disabled="true" title="Agent settings coming soon">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8h10M8 15h8M10 4h4l1 3h3v11H6V7h3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg>
             <span class="nav-item-copy">

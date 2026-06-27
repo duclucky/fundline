@@ -188,6 +188,71 @@ a {
   gap: 5px;
 }
 
+.nav-group {
+  display: grid;
+  gap: 0;
+}
+
+.nav-group-toggle {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
+  min-height: 50px;
+  padding: 0 13px;
+  width: 100%;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  font-weight: 850;
+  font-size: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.nav-group-toggle:hover {
+  color: var(--gold);
+}
+
+.nav-group-toggle > svg:first-child {
+  width: 18px;
+  height: 18px;
+  color: inherit;
+}
+
+.nav-group-chevron {
+  width: 16px;
+  height: 16px;
+  color: inherit;
+  transition: transform 0.22s ease;
+}
+
+.nav-group.is-open .nav-group-chevron {
+  transform: rotate(180deg);
+}
+
+.nav-group-children {
+  display: grid;
+  gap: 4px;
+  padding-left: 10px;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.nav-group.is-open .nav-group-children {
+  max-height: 240px;
+  opacity: 1;
+  padding-top: 4px;
+  padding-bottom: 2px;
+}
+
 .soon-badge {
   width: fit-content;
   padding: 3px 8px;
