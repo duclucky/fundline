@@ -365,7 +365,7 @@ function renderDetail(slug, wf) {
     <div class="wf-detail-body">
       <div class="wf-detail-hero">
         <p class="wf-detail-desc">${esc(wf.longDesc)}</p>
-        <div class="wf-detail-stats">
+        <div class="wf-stat-bar">
           <div class="wf-stat"><span class="wf-stat-val">${esc(wf.price)} USDC</span><span class="wf-stat-lbl">per call</span></div>
           <div class="wf-stat"><span class="wf-stat-val">${esc(wf.version)}</span><span class="wf-stat-lbl">version</span></div>
           <div class="wf-stat"><span class="wf-stat-val">${esc(wf.runtime)}</span><span class="wf-stat-lbl">est. runtime</span></div>
@@ -408,13 +408,13 @@ function renderTabOverview(wf) {
         <h4>Output</h4>
         <p class="wf-muted">${esc(wf.outputHint)}</p>
       </div>
-      <div class="wf-overview-block">
+      <div class="wf-overview-block wf-overview-full">
         <h4>Limits</h4>
-        <table class="wf-limits-table">
-          <tr><td>Max input</td><td>${wf.limits.inputChars.toLocaleString()} characters</td></tr>
-          <tr><td>Max output</td><td>${wf.limits.outputWords.toLocaleString()} words</td></tr>
-          <tr><td>Max concurrent calls</td><td>5</td></tr>
-        </table>
+        <div class="wf-limits-row">
+          <div class="wf-limit-item"><span class="wf-limit-lbl">Max input</span><span class="wf-limit-val">${wf.limits.inputChars.toLocaleString()} characters</span></div>
+          <div class="wf-limit-item"><span class="wf-limit-lbl">Max output</span><span class="wf-limit-val">${wf.limits.outputWords.toLocaleString()} words</span></div>
+          <div class="wf-limit-item"><span class="wf-limit-lbl">Max concurrent calls</span><span class="wf-limit-val">5</span></div>
+        </div>
       </div>
     </div>
   </div>`;
@@ -444,35 +444,37 @@ function renderTabSteps(wf) {
     </div>`).join("");
 
   return `<div class="wf-tab-panel" data-panel="Workflow Steps">
-    <div class="wf-graph-scroll">
-      <div class="wf-graph">
-        <div class="wf-graph-node-wrap">
-          <div class="wf-graph-node wf-graph-endpoint">
-            <div class="wf-graph-badge wf-graph-badge-io">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3 9H3l9-13z M12 22v-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <div class="wf-graph-node-body">
-              <div class="wf-graph-node-name">User Input</div>
-              <div class="wf-graph-node-purpose wf-muted">Your prompt or instructions</div>
+    <div class="wf-steps-split">
+      <div class="wf-graph-scroll">
+        <div class="wf-graph">
+          <div class="wf-graph-node-wrap">
+            <div class="wf-graph-node wf-graph-endpoint">
+              <div class="wf-graph-badge wf-graph-badge-io">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l3 9H3l9-13z M12 22v-8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <div class="wf-graph-node-body">
+                <div class="wf-graph-node-name">User Input</div>
+                <div class="wf-graph-node-purpose wf-muted">Your prompt or instructions</div>
+              </div>
             </div>
           </div>
-        </div>
-        ${nodes}
-        <div class="wf-graph-node-wrap">
-          <div class="wf-graph-connector"></div>
-          <div class="wf-graph-node wf-graph-endpoint wf-graph-endpoint-out">
-            <div class="wf-graph-badge wf-graph-badge-io">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22l-3-9h18L12 22z M12 2v8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </div>
-            <div class="wf-graph-node-body">
-              <div class="wf-graph-node-name">Final Output</div>
-              <div class="wf-graph-node-purpose wf-muted">Ready to use result</div>
+          ${nodes}
+          <div class="wf-graph-node-wrap">
+            <div class="wf-graph-connector"></div>
+            <div class="wf-graph-node wf-graph-endpoint wf-graph-endpoint-out">
+              <div class="wf-graph-badge wf-graph-badge-io">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22l-3-9h18L12 22z M12 2v8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+              <div class="wf-graph-node-body">
+                <div class="wf-graph-node-name">Final Output</div>
+                <div class="wf-graph-node-purpose wf-muted">Ready to use result</div>
+              </div>
             </div>
           </div>
         </div>
       </div>
+      <div class="wf-step-list">${steps}</div>
     </div>
-    <div class="wf-step-list">${steps}</div>
   </div>`;
 }
 
@@ -533,10 +535,16 @@ function renderTabApi(slug, wf) {
 }`;
   return `<div class="wf-tab-panel" data-panel="API">
     <div class="wf-api-note">API access requires an API key from the Developers section. <span class="wf-api-soon">Coming soon.</span></div>
-    <div class="wf-example-label">Request</div>
-    <pre class="wf-code-block"><code>${esc(code)}</code></pre>
-    <div class="wf-example-label" style="margin-top:20px">Response</div>
-    <pre class="wf-code-block"><code>${esc(resp)}</code></pre>
+    <div class="wf-api-pair">
+      <div>
+        <div class="wf-example-label">Request</div>
+        <pre class="wf-code-block"><code>${esc(code)}</code></pre>
+      </div>
+      <div>
+        <div class="wf-example-label">Response</div>
+        <pre class="wf-code-block"><code>${esc(resp)}</code></pre>
+      </div>
+    </div>
   </div>`;
 }
 
