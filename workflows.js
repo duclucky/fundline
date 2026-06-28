@@ -218,6 +218,32 @@ function navigate(href) {
   render();
 }
 
+function switchToTab(name) {
+  const tabsEl = document.querySelector(".wf-tabs");
+  if (!tabsEl) return;
+  tabsEl.querySelectorAll(".wf-tab").forEach((t) => t.classList.toggle("is-active", t.dataset.tab === name));
+  document.querySelectorAll(".wf-tab-panel").forEach((p) => p.classList.toggle("is-active", p.dataset.panel === name));
+}
+
+function setNodeState(idx, state) {
+  const node = document.querySelector(`.wfg2-node[data-node-idx="${idx}"]`);
+  if (!node) return;
+  node.classList.remove("wfg2-node--pending", "wfg2-node--running", "wfg2-node--completed", "wfg2-node--failed");
+  if (state) node.classList.add("wfg2-node--" + state);
+}
+
+function setStepRowState(idx, state) {
+  const row = document.querySelector(`tr[data-step-row="${idx}"]`);
+  if (!row) return;
+  const badge = row.querySelector(".wfg-step-status");
+  if (badge) {
+    badge.className = "wfg-step-status wfg-step-status--" + state;
+    const labels = { pending: "Pending", running: "Running", completed: "Done", failed: "Failed" };
+    badge.textContent = labels[state] || state;
+  }
+  row.classList.toggle("wfg-row--running", state === "running");
+}
+
 function render() {
   const route = getRoute();
   const root = document.getElementById("wfRoot");
@@ -420,71 +446,101 @@ function renderTabOverview(wf) {
   </div>`;
 }
 
-function renderWfgNode(node) {
-  if (node.type === "input") {
-    return `<div class="wfg-node wfg-node-input">
-      <div class="wfg-node-badge wfg-badge-io">INPUT</div>
-      <div class="wfg-node-ico">
-        <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20"><circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c0-3.87 3.13-7 7-7s7 3.13 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      </div>
-      <div class="wfg-node-name">${esc(node.title)}</div>
-      <div class="wfg-node-purpose">${esc(node.purpose)}</div>
-    </div>`;
+function wfgNodeIcon(type) {
+  if (type === "input") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c0-3.87 3.13-7 7-7s7 3.13 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   }
-  if (node.type === "output") {
-    return `<div class="wfg-node wfg-node-output">
-      <div class="wfg-node-badge wfg-badge-io">OUTPUT</div>
-      <div class="wfg-node-ico wfg-ico-out">
-        <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20"><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
-      </div>
-      <div class="wfg-node-name">${esc(node.title)}</div>
-      <div class="wfg-node-purpose">${esc(node.purpose)}</div>
-    </div>`;
+  if (type === "output") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
   }
-  return `<div class="wfg-node wfg-node-ai">
-    <div class="wfg-node-badge">STEP ${String(node.stepNum).padStart(2, "0")}</div>
-    <div class="wfg-node-ico">
-      <svg viewBox="0 0 24 24" aria-hidden="true" width="20" height="20"><rect x="3" y="8" width="18" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 8V6a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="13.5" r="1" fill="currentColor"/><circle cx="15" cy="13.5" r="1" fill="currentColor"/></svg>
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 8V6a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="13.5" r="1" fill="currentColor"/><circle cx="15" cy="13.5" r="1" fill="currentColor"/></svg>';
+}
+
+function renderCanvasNode(node, gCol, gRow) {
+  const cls = node.type === "input" ? "wfg2-node--input wfg2-node--io"
+    : node.type === "output" ? "wfg2-node--output wfg2-node--io"
+    : "wfg2-node--ai";
+  const step = node.type === "input" ? "INPUT"
+    : node.type === "output" ? "OUTPUT"
+    : "STEP " + String(node.stepNum).padStart(2, "0");
+  const model = node.model ? `<span class="wfg2-model">${esc(node.model)}</span>` : "";
+  const state = `<span class="wfg2-state">`
+    + `<span class="wfg2-state-dot"></span>`
+    + `<span class="wfg2-check"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
+    + `</span>`;
+  return `<div class="wfg2-node ${cls}" data-node-idx="${node.idx}" style="grid-column:${gCol};grid-row:${gRow}">
+    <div class="wfg2-node-top">
+      <span class="wfg2-ico">${wfgNodeIcon(node.type)}</span>
+      <span class="wfg2-step">${step}</span>
+      ${state}
     </div>
-    <div class="wfg-node-name">${esc(node.name)}</div>
-    <div class="wfg-node-model">${esc(node.model)}</div>
-    <div class="wfg-node-purpose">${esc(node.purpose)}</div>
-    ${node.tokens ? `<div class="wfg-node-tokens">${esc(node.tokens)} tokens</div>` : ""}
+    <div class="wfg2-name">${esc(node.name)}</div>
+    ${model}
+    <div class="wfg2-purpose">${esc(node.purpose)}</div>
   </div>`;
 }
 
 function renderTabSteps(wf) {
   const pricing = wf.pricing || [];
 
-  const allNodes = [
-    { type: "input", title: "User Input", purpose: wf.inputHint || "Your prompt or instructions" },
-    ...wf.steps.map((s, i) => ({ type: "ai", stepNum: i + 1, name: s.name, model: s.model, purpose: s.purpose, tokens: s.tokens, cost: pricing[i] ? pricing[i].cost : null })),
-    { type: "output", title: "Final Output", purpose: wf.outputHint || "Ready to use result" },
+  const nodes = [
+    { type: "input", idx: 0, name: "User Input", purpose: wf.inputHint || "Your prompt or instructions" },
+    ...wf.steps.map((s, i) => ({ type: "ai", idx: i + 1, stepNum: i + 1, name: s.name, model: s.model, purpose: s.purpose })),
+    { type: "output", idx: wf.steps.length + 1, name: "Final Output", purpose: wf.outputHint || "Ready to use result" },
   ];
 
-  const flowHtml = allNodes.map((node, i) => {
-    const conn = i < allNodes.length - 1 ? '<div class="wfg-conn" aria-hidden="true"></div>' : "";
-    return renderWfgNode(node) + conn;
-  }).join("");
+  const total = nodes.length;
+  const nodeCols = total <= 3 ? total : Math.ceil(total / 2);
+  const twoRows = total > 3;
 
-  const summaryRows = [
-    { label: "Input", name: "User Input", model: null, purpose: wf.inputHint, cost: null },
-    ...wf.steps.map((s, i) => ({
-      label: "Step " + String(i + 1).padStart(2, "0"),
-      name: s.name,
-      model: s.model,
-      purpose: s.purpose,
-      cost: pricing[i] ? pricing[i].cost : null,
-    })),
-    { label: "Output", name: "Final Output", model: null, purpose: wf.outputHint, cost: null },
-  ];
+  // Build grid template: node columns are flexible, connector columns are fixed width.
+  const colParts = [];
+  for (let c = 0; c < nodeCols; c++) {
+    if (c > 0) colParts.push("44px");
+    colParts.push("minmax(0, 1fr)");
+  }
+  const rowTpl = twoRows ? "auto 42px auto" : "auto";
 
-  const summaryHtml = summaryRows.map((r) => `
-    <tr>
+  // Snake placement: row 0 left to right, row 1 right to left.
+  function colIndexOf(n) {
+    const row = Math.floor(n / nodeCols);
+    const pos = n % nodeCols;
+    return row % 2 === 0 ? pos : (nodeCols - 1 - pos);
+  }
+
+  const cells = [];
+  nodes.forEach((node, n) => {
+    const row = Math.floor(n / nodeCols);
+    const colIdx = colIndexOf(n);
+    const gCol = colIdx * 2 + 1;
+    const gRow = row * 2 + 1;
+    cells.push(renderCanvasNode(node, gCol, gRow));
+    if (n < nodes.length - 1) {
+      const nextRow = Math.floor((n + 1) / nodeCols);
+      if (nextRow === row) {
+        const nextColIdx = colIndexOf(n + 1);
+        const connCol = Math.min(colIdx, nextColIdx) * 2 + 2;
+        const dir = row % 2 === 0 ? "right" : "left";
+        cells.push(`<div class="wfg2-conn wfg2-conn--h wfg2-conn--${dir}" style="grid-column:${connCol};grid-row:${gRow}" aria-hidden="true"></div>`);
+      } else {
+        cells.push(`<div class="wfg2-conn wfg2-conn--v" style="grid-column:${gCol};grid-row:${gRow + 1}" aria-hidden="true"></div>`);
+      }
+    }
+  });
+
+  const summaryRows = nodes.map((node) => {
+    const p = node.type === "ai" ? pricing[node.stepNum - 1] : null;
+    const label = node.type === "input" ? "Input" : node.type === "output" ? "Output" : "Step " + String(node.stepNum).padStart(2, "0");
+    return { label, name: node.name, model: node.model || null, purpose: node.purpose, cost: p ? p.cost : null };
+  });
+
+  const summaryHtml = summaryRows.map((r, i) => `
+    <tr data-step-row="${i}">
       <td><span class="wfg-row-label">${esc(r.label)}</span><span class="wfg-row-name">${esc(r.name)}</span></td>
-      <td>${r.model ? `<span class="wf-graph-model-tag">${esc(r.model)}</span>` : '<span class="wf-muted">—</span>'}</td>
+      <td>${r.model ? `<span class="wf-graph-model-tag">${esc(r.model)}</span>` : '<span class="wf-muted">-</span>'}</td>
       <td class="wf-muted" style="font-size:12px;line-height:1.5">${esc(r.purpose)}</td>
-      <td class="wf-num">${r.cost ? `<span class="wfg-cost">~$${esc(r.cost)}</span>` : '<span class="wf-muted">—</span>'}</td>
+      <td class="wf-num">${r.cost ? `<span class="wfg-cost">~$${esc(r.cost)}</span>` : '<span class="wf-muted">-</span>'}</td>
+      <td><span class="wfg-step-status wfg-step-status--pending">Pending</span></td>
     </tr>`).join("");
 
   return `<div class="wf-tab-panel" data-panel="Workflow Steps">
@@ -495,19 +551,21 @@ function renderTabSteps(wf) {
           <div class="wfg-canvas-sub">Transparent execution steps, models, and estimated cost.</div>
         </div>
         <div class="wfg-chips">
-          <span class="wfg-chip">${allNodes.length} nodes</span>
+          <span class="wfg-chip">${total} nodes</span>
           <span class="wfg-chip">${wf.modelCount} AI models</span>
           <span class="wfg-chip">${esc(wf.runtime)}</span>
         </div>
       </div>
-      <div class="wfg-flow-wrap">
-        <div class="wfg-flow">${flowHtml}</div>
+      <div class="wfg2-board">
+        <div class="wfg2-grid" style="grid-template-columns:${colParts.join(" ")};grid-template-rows:${rowTpl}">
+          ${cells.join("")}
+        </div>
       </div>
       <div class="wfg-summary">
         <div class="wfg-summary-hd">Execution Summary</div>
         <div class="wf-table-wrap">
           <table class="wfg-sum-table">
-            <thead><tr><th>Step</th><th>Model</th><th>Purpose</th><th class="wf-num">Est. cost</th></tr></thead>
+            <thead><tr><th>Step</th><th>Model</th><th>Purpose</th><th class="wf-num">Est. cost</th><th>Status</th></tr></thead>
             <tbody>${summaryHtml}</tbody>
           </table>
         </div>
@@ -622,7 +680,13 @@ function renderRunPanel(slug, wf) {
       <div class="wf-run-progress" id="wfRunProgress"></div>
     </div>
     <div id="wfRunResult" hidden>
-      <div class="wf-run-result-label">Result</div>
+      <div class="wf-result-header">
+        <div class="wf-run-result-label">Result</div>
+        <div class="wf-result-actions">
+          <button class="wf-result-btn" id="wfCopyBtn" type="button">Copy</button>
+          <button class="wf-result-btn" id="wfDownloadBtn" type="button">Download .md</button>
+        </div>
+      </div>
       <pre class="wf-run-result-body" id="wfRunResultBody"></pre>
     </div>
     <div id="wfRunReceipt" hidden>
@@ -700,6 +764,8 @@ function bindDetail(slug, wf) {
       setTimeout(() => ta.style.outline = "", 2000);
       return;
     }
+    // Switch to Workflow Steps tab before running so the canvas is visible
+    switchToTab("Workflow Steps");
     runWorkflow(slug, wf, prompt);
   });
 
@@ -717,50 +783,73 @@ function runWorkflow(slug, wf, prompt) {
   const stateEl = document.getElementById("wfRunState");
   const resultEl = document.getElementById("wfRunResult");
   const receiptEl = document.getElementById("wfRunReceipt");
-  const progressEl = document.getElementById("wfRunProgress");
 
-  runBtn.disabled = true;
-  stateEl.hidden = false;
+  // Reset sidebar panel state
+  stateEl.hidden = true;
   resultEl.hidden = true;
   receiptEl.hidden = true;
-  progressEl.innerHTML = "";
+  runBtn.disabled = true;
+  runBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg> Running...`;
 
-  const steps = wf.steps;
-  let i = 0;
-
-  function addStep(done) {
-    const item = document.createElement("div");
-    item.className = "wf-progress-step";
-    if (done) {
-      item.classList.add("is-done");
-      item.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${esc(steps[i].name)} <span class="wf-muted">(${esc(steps[i].model)})</span>`;
-    } else {
-      item.innerHTML = `<span class="wf-progress-spinner"></span> ${esc(steps[i].name)} <span class="wf-muted">(${esc(steps[i].model)})</span>`;
-    }
-    progressEl.appendChild(item);
+  // Node layout: 0 = User Input, 1..N = AI steps, N+1 = Final Output
+  const stepCount = wf.steps.length;
+  const outputIdx = stepCount + 1;
+  const totalNodes = stepCount + 2;
+  for (let j = 0; j < totalNodes; j++) {
+    setNodeState(j, "pending");
+    setStepRowState(j, "pending");
   }
 
-  function tick() {
-    if (i >= steps.length) {
-      const runId = randId();
-      setTimeout(() => showResult(wf, runId), 400);
+  // Per-step delays (ms) for the AI steps
+  const DELAYS = [1200, 1500, 2000, 1200, 1800, 1000];
+
+  // User Input node completes instantly
+  setTimeout(() => {
+    setNodeState(0, "completed");
+    setStepRowState(0, "completed");
+    runStep(1);
+  }, 160);
+
+  function runStep(k) {
+    if (k > stepCount) {
+      // Final output node
+      setNodeState(outputIdx, "completed");
+      setStepRowState(outputIdx, "completed");
+      setTimeout(() => showResult(wf, randId()), 350);
       return;
     }
-    addStep(false);
-    const delay = 600 + Math.random() * 700;
+    setNodeState(k, "running");
+    setStepRowState(k, "running");
+    const delay = DELAYS[k - 1] !== undefined ? DELAYS[k - 1] : 900 + Math.floor(Math.random() * 500);
     setTimeout(() => {
-      progressEl.lastChild.remove();
-      addStep(true);
-      i++;
-      tick();
+      setNodeState(k, "completed");
+      setStepRowState(k, "completed");
+      runStep(k + 1);
     }, delay);
   }
-
-  tick();
 
   function showResult(wf, runId) {
     resultEl.hidden = false;
     document.getElementById("wfRunResultBody").textContent = wf.exampleOutput;
+
+    const copyBtn = document.getElementById("wfCopyBtn");
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(wf.exampleOutput).then(() => {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+      });
+    };
+
+    const dlBtn = document.getElementById("wfDownloadBtn");
+    dlBtn.onclick = () => {
+      const blob = new Blob([wf.exampleOutput], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = slug + "-result.md";
+      a.click();
+      URL.revokeObjectURL(url);
+    };
 
     receiptEl.hidden = false;
     const tokenIn = wf.pricing.reduce((s, p) => s + p.inputTokens, 0);
