@@ -628,6 +628,20 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   tx on Arcscan (no "free run" wording - every run is billed and counts to the budget pool).
   Run button reads "Pay 0.05 USDC and run" when billing on. User correction noted: there is NO
   free run path in prod; all runs charge USDC + count to the per-IP/global v98 budget caps.
+- SINGLE dApp-WIDE WALLET SESSION (2026-06-29, NOT pushed; commits 154fe55 + 6297302 + 7a98bf2 on
+  main, local). NEW `wallet.js` (loaded by app.html + workflows.html, before the page script) owns
+  ONE connect/disconnect session in localStorage (key fundline_wallet_session), rendered as a
+  sidebar widget ABOVE the network pill: Connect button when disconnected, address chip when
+  connected -> click slides out a balance panel (Arc Testnet USDC now, more networks later) with a
+  Disconnect button. Exposes window.FundlineWallet {getAddress,getSession,isConnected,connect,
+  disconnect,refreshBalance} + fires document "fundline:walletchange". app.js: removed its own
+  session storage + the header wallet control markup; connectWallet() delegates to
+  FundlineWallet.connect(); syncWalletFromShared() mirrors the shared session into state.wallet on
+  load + on the event (keeps invoice/payment logic intact). workflows.js: dropped its in-panel
+  connect row/helpers; billing fund uses FundlineWallet.getAddress()/connect(); a run still
+  requires a connected wallet. Result modal (6297302) + wallet persistence (154fe55) also pending.
+  Sidebar exists only on app.html + workflows.html. node --check clean; serve test confirms widget
+  + wallet.js on both pages and the old header control gone. Browser wallet UI not auto-tested.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
