@@ -327,7 +327,7 @@ async function fundWorkflowRun(slug, statusFn) {
   return quote.runId;
 }
 
-// Show an error in the run result area (used for funding failures before the run).
+// Show an error in the run result area (funding failures or run failures).
 function displayRunError(message) {
   const resultEl = document.getElementById("wfRunResult");
   const receiptEl = document.getElementById("wfRunReceipt");
@@ -336,10 +336,129 @@ function displayRunError(message) {
   resultEl.hidden = false;
   const label = resultEl.querySelector(".wf-run-result-label");
   if (label) label.textContent = "Could not complete";
-  const actions = resultEl.querySelector(".wf-result-actions");
-  if (actions) actions.style.display = "none";
-  const body = document.getElementById("wfRunResultBody");
-  if (body) body.textContent = message;
+  const viewBtn = document.getElementById("wfViewResultBtn");
+  if (viewBtn) viewBtn.hidden = true;
+  const msg = document.getElementById("wfRunResultMsg");
+  if (msg) { msg.hidden = false; msg.textContent = message; }
+}
+
+// --- Markdown -> safe HTML (compact, for the result report modal) ---
+function mdInline(s) {
+  let t = esc(s);
+  t = t.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
+  t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
+    const safe = /^(https?:\/\/|\/)/i.test(url.trim()) ? url.trim() : "#";
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+  return t;
+}
+function mdSplitRow(line) {
+  return line.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|").map((c) => c.trim());
+}
+function renderMarkdown(md) {
+  const lines = String(md || "").replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      const buf = [];
+      i += 1;
+      while (i < lines.length && !/^\s*```/.test(lines[i])) { buf.push(lines[i]); i += 1; }
+      i += 1;
+      out.push(`<pre class="wf-report-code"><code>${esc(buf.join("\n"))}</code></pre>`);
+      continue;
+    }
+    if (line.indexOf("|") !== -1 && i + 1 < lines.length && lines[i + 1].indexOf("|") !== -1 && /^[\s|:-]+$/.test(lines[i + 1]) && lines[i + 1].indexOf("-") !== -1) {
+      const header = mdSplitRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].indexOf("|") !== -1 && lines[i].trim() !== "") { rows.push(mdSplitRow(lines[i])); i += 1; }
+      let t = `<table class="wf-report-table"><thead><tr>${header.map((h) => `<th>${mdInline(h)}</th>`).join("")}</tr></thead><tbody>`;
+      t += rows.map((r) => `<tr>${r.map((c) => `<td>${mdInline(c)}</td>`).join("")}</tr>`).join("");
+      out.push(`${t}</tbody></table>`);
+      continue;
+    }
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { out.push(`<h${h[1].length}>${mdInline(h[2])}</h${h[1].length}>`); i += 1; continue; }
+    if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { out.push("<hr>"); i += 1; continue; }
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*]\s+/, "")); i += 1; }
+      out.push(`<ul>${items.map((it) => `<li>${mdInline(it)}</li>`).join("")}</ul>`);
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+\.\s+/, "")); i += 1; }
+      out.push(`<ol>${items.map((it) => `<li>${mdInline(it)}</li>`).join("")}</ol>`);
+      continue;
+    }
+    if (line.trim() === "") { i += 1; continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== "" && !/^\s*(#{1,6}\s|```|[-*]\s|\d+\.\s)/.test(lines[i]) && lines[i].indexOf("|") === -1) {
+      para.push(lines[i]);
+      i += 1;
+    }
+    if (para.length) { out.push(`<p>${mdInline(para.join(" "))}</p>`); } else { out.push(`<p>${mdInline(line)}</p>`); i += 1; }
+  }
+  return out.join("\n");
+}
+
+// --- Result report modal ---
+function closeResultModal() {
+  const overlay = document.getElementById("wfResultModal");
+  if (overlay) overlay.hidden = true;
+  document.body.style.overflow = "";
+}
+function openResultModal(markdown, slug) {
+  let overlay = document.getElementById("wfResultModal");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "wfResultModal";
+    overlay.className = "wf-modal-overlay";
+    overlay.hidden = true;
+    overlay.innerHTML = `
+      <div class="wf-modal" role="dialog" aria-modal="true" aria-label="Workflow result">
+        <div class="wf-modal-head">
+          <h3 class="wf-modal-title">Result</h3>
+          <div class="wf-modal-actions">
+            <button class="wf-result-btn" id="wfModalCopy" type="button">Copy</button>
+            <button class="wf-result-btn" id="wfModalDownload" type="button">Download .md</button>
+            <button class="wf-modal-close" id="wfModalClose" type="button" aria-label="Close">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="wf-modal-body wf-report" id="wfModalBody"></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeResultModal(); });
+    document.getElementById("wfModalClose").addEventListener("click", closeResultModal);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeResultModal(); });
+  }
+  document.getElementById("wfModalBody").innerHTML = renderMarkdown(markdown);
+  const copyBtn = document.getElementById("wfModalCopy");
+  copyBtn.textContent = "Copy";
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(markdown).then(() => {
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+    });
+  };
+  document.getElementById("wfModalDownload").onclick = () => {
+    const blob = new Blob([markdown], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slug || "workflow"}-result.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  overlay.hidden = false;
+  document.body.style.overflow = "hidden";
 }
 
 // --- Wallet connection state + UI (billing) ---
@@ -880,12 +999,9 @@ function renderRunPanel(slug, wf) {
     <div id="wfRunResult" hidden>
       <div class="wf-result-header">
         <div class="wf-run-result-label">Result</div>
-        <div class="wf-result-actions">
-          <button class="wf-result-btn" id="wfCopyBtn" type="button">Copy</button>
-          <button class="wf-result-btn" id="wfDownloadBtn" type="button">Download .md</button>
-        </div>
+        <button class="wf-btn-secondary" id="wfViewResultBtn" type="button" hidden>View result</button>
       </div>
-      <pre class="wf-run-result-body" id="wfRunResultBody"></pre>
+      <p class="wf-run-result-msg wf-muted" id="wfRunResultMsg" hidden></p>
     </div>
     <div id="wfRunReceipt" hidden>
       ${renderReceiptShell()}
@@ -1125,12 +1241,7 @@ function runWorkflow(slug, wf, opts) {
 
   function showRunError(data) {
     const msg = (data && (data.message || data.error)) || "The workflow could not complete.";
-    resultEl.hidden = false;
-    const label = resultEl.querySelector(".wf-run-result-label");
-    if (label) label.textContent = "Could not complete";
-    const actions = resultEl.querySelector(".wf-result-actions");
-    if (actions) actions.style.display = "none";
-    document.getElementById("wfRunResultBody").textContent = msg;
+    displayRunError(msg);
   }
 
   function showRunResult(data) {
@@ -1138,27 +1249,15 @@ function runWorkflow(slug, wf, opts) {
     resultEl.hidden = false;
     const label = resultEl.querySelector(".wf-run-result-label");
     if (label) label.textContent = "Result";
-    const actions = resultEl.querySelector(".wf-result-actions");
-    if (actions) actions.style.display = "";
-    document.getElementById("wfRunResultBody").textContent = output;
-
-    const copyBtn = document.getElementById("wfCopyBtn");
-    copyBtn.onclick = () => {
-      navigator.clipboard.writeText(output).then(() => {
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
-      });
-    };
-    const dlBtn = document.getElementById("wfDownloadBtn");
-    dlBtn.onclick = () => {
-      const blob = new Blob([output], { type: "text/markdown" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = slug + "-result.md";
-      a.click();
-      URL.revokeObjectURL(url);
-    };
+    const resultMsg = document.getElementById("wfRunResultMsg");
+    if (resultMsg) resultMsg.hidden = true;
+    const viewBtn = document.getElementById("wfViewResultBtn");
+    if (viewBtn) {
+      viewBtn.hidden = false;
+      viewBtn.onclick = () => openResultModal(output, slug);
+    }
+    // Open the report immediately so the user sees it right away.
+    openResultModal(output, slug);
 
     receiptEl.hidden = false;
     const sources = Array.isArray(data.sources) ? data.sources : [];
