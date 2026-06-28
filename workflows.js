@@ -186,14 +186,8 @@ const CATEGORY_COLORS = {
   Business: "#ff9a8b",
 };
 
-const MOCK_RUNS = [
-  { id: "wfr_a1b2c3d4", workflow: "Proposal Writer", slug: "proposal-writer", version: "v1.2.0", models: "gpt-4.1-mini, claude-3.5-sonnet", cost: "0.0403", status: "completed", at: "2026-06-28 14:32" },
-  { id: "wfr_e5f6g7h8", workflow: "X Thread Writer", slug: "x-thread-writer", version: "v2.1.0", models: "claude-3-haiku, claude-3.5-sonnet", cost: "0.0201", status: "completed", at: "2026-06-28 13:10" },
-  { id: "wfr_i9j0k1l2", workflow: "Code Review", slug: "code-review", version: "v1.3.0", models: "gpt-4.1-mini, claude-3.5-sonnet", cost: "0.0296", status: "completed", at: "2026-06-28 11:55" },
-  { id: "wfr_m3n4o5p6", workflow: "Client Research", slug: "client-research", version: "v1.0.1", models: "gpt-4.1-mini, claude-3.5-sonnet", cost: "0.0503", status: "completed", at: "2026-06-27 17:20" },
-  { id: "wfr_q7r8s9t0", workflow: "SEO Article", slug: "seo-article", version: "v1.1.0", models: "claude-3-haiku, claude-3.5-sonnet", cost: "0.0597", status: "failed", at: "2026-06-27 09:44" },
-  { id: "wfr_u1v2w3x4", workflow: "Crypto Research Report", slug: "crypto-research-report", version: "v1.0.0", models: "gpt-4.1-mini, claude-3.5-sonnet", cost: "0.0694", status: "completed", at: "2026-06-26 21:18" },
-];
+// In-session run history; populated by showRunResult / showRunError in runWorkflow.
+const RUN_HISTORY = [];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -504,7 +498,7 @@ function render() {
     root.innerHTML = renderDetail(route.slug, wf);
     bindDetail(route.slug, wf);
   } else if (route.page === "runs") {
-    document.title = "Workflow Runs - Fundline";
+    document.title = "Run History - Fundline";
     root.innerHTML = renderRuns();
     bindRuns();
   } else if (route.page === "settings") {
@@ -643,14 +637,13 @@ function renderDetail(slug, wf) {
       <div class="wf-detail-layout">
         <div class="wf-detail-main">
           <div class="wf-tabs" role="tablist">
-            ${["Overview","Workflow Steps","Pricing","Example Output","API"].map((t, i) =>
+            ${["Overview","Workflow Steps","Example Output","API"].map((t, i) =>
               `<button class="wf-tab${i===0?" is-active":""}" role="tab" data-tab="${t}" type="button">${t}</button>`
             ).join("")}
           </div>
           <div class="wf-tab-panels">
             ${renderTabOverview(wf)}
             ${renderTabSteps(wf)}
-            ${renderTabPricing(wf)}
             ${renderTabExample(wf)}
             ${renderTabApi(slug, wf)}
           </div>
@@ -813,32 +806,6 @@ function renderTabSteps(wf) {
   </div>`;
 }
 
-function renderTabPricing(wf) {
-  let total = 0;
-  const rows = wf.pricing.map((p) => {
-    total += parseFloat(p.cost);
-    return `<tr>
-      <td>${esc(p.step)}</td>
-      <td><span class="wf-graph-model-tag">${esc(p.model)}</span></td>
-      <td class="wf-num">${p.inputTokens.toLocaleString()}</td>
-      <td class="wf-num">${p.outputTokens.toLocaleString()}</td>
-      <td class="wf-num">~$${p.cost}</td>
-    </tr>`;
-  }).join("");
-  return `<div class="wf-tab-panel" data-panel="Pricing">
-    <p class="wf-muted" style="margin-bottom:20px">Pricing below reflects typical usage. Actual cost depends on input length. You are charged the fixed rate of <strong>${esc(wf.price)} USDC per call</strong>.</p>
-    <div class="wf-table-wrap">
-      <table class="wf-pricing-table">
-        <thead><tr><th>Step</th><th>Model</th><th class="wf-num">In tokens</th><th class="wf-num">Out tokens</th><th class="wf-num">Model cost</th></tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr><td colspan="4"><strong>Total model cost</strong></td><td class="wf-num"><strong>~$${total.toFixed(4)}</strong></td></tr></tfoot>
-      </table>
-    </div>
-    <div class="wf-pricing-note">
-      <strong>You pay:</strong> ${esc(wf.price)} USDC flat per call. Platform fee and model cost are included.
-    </div>
-  </div>`;
-}
 
 function renderTabExample(wf) {
   const lines = wf.exampleOutput.split("\n").map((l) => esc(l)).join("\n");
@@ -1177,11 +1144,31 @@ function runWorkflow(slug, wf, opts) {
 
   function showRunError(data) {
     const msg = (data && (data.message || data.error)) || "The workflow could not complete.";
+    RUN_HISTORY.unshift({
+      id: opts.runId || randId(),
+      slug: slug,
+      workflow: wf.name,
+      status: "failed",
+      at: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+      output: null,
+      releaseTx: null,
+      charged: wf.price,
+    });
     displayRunError(msg);
   }
 
   function showRunResult(data) {
     const output = String(data.output || "");
+    RUN_HISTORY.unshift({
+      id: opts.runId || randId(),
+      slug: slug,
+      workflow: wf.name,
+      status: "completed",
+      at: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+      output: output,
+      releaseTx: data.releaseTx || null,
+      charged: wf.price,
+    });
     resultEl.hidden = false;
     const label = resultEl.querySelector(".wf-run-result-label");
     if (label) label.textContent = "Result";
@@ -1213,39 +1200,58 @@ function runWorkflow(slug, wf, opts) {
 
     if (quotaEl && data.remaining != null) {
       quotaEl.hidden = false;
-      quotaEl.textContent = `${data.remaining} free runs left today (beta). Resets 00:00 UTC.`;
+      quotaEl.textContent = `${data.remaining} runs remaining today (daily limit). Resets 00:00 UTC.`;
     }
   }
 }
 
-// ─── Runs Page ────────────────────────────────────────────────────────────────
+// ─── Run History Page ─────────────────────────────────────────────────────────
 
 function renderRuns() {
-  const rows = MOCK_RUNS.map((r) => `
-    <tr>
-      <td class="wf-mono">${esc(r.id)}</td>
-      <td><a href="/workflows/${esc(r.slug)}" class="wf-link" data-nav="/workflows/${esc(r.slug)}">${esc(r.workflow)}</a></td>
-      <td class="wf-muted">${esc(r.version)}</td>
-      <td class="wf-muted" style="font-size:12px">${esc(r.models)}</td>
-      <td class="wf-num wf-price-val">${esc(r.cost)}</td>
-      <td><span class="wf-run-status ${r.status === "completed" ? "wf-status-done" : "wf-status-failed"}">${r.status}</span></td>
-      <td class="wf-muted">${esc(r.at)}</td>
-      <td><button class="wf-receipt-btn" type="button" data-id="${esc(r.id)}">View</button></td>
-    </tr>`).join("");
-
-  return `
+  const header = `
     <header class="topbar">
       <div>
         <p class="eyebrow">Workflows</p>
-        <h1>Workflow Runs</h1>
+        <h1>Run History</h1>
       </div>
-    </header>
+    </header>`;
+
+  if (!RUN_HISTORY.length) {
+    return header + `
+    <div class="wf-explore-body">
+      <div class="wf-settings-placeholder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <h3>No runs yet</h3>
+        <p>Open a workflow and run it to see your history here.</p>
+      </div>
+    </div>`;
+  }
+
+  const rows = RUN_HISTORY.map((r, idx) => {
+    const tx = r.releaseTx
+      ? `<a class="wf-link wf-mono" href="${esc((WF_CONFIG.explorerBase || "https://testnet.arcscan.app") + "/tx/" + r.releaseTx)}" target="_blank" rel="noopener">${esc(r.releaseTx.slice(0, 8) + "..." + r.releaseTx.slice(-6))}</a>`
+      : `<span class="wf-muted">-</span>`;
+    const viewBtn = r.output
+      ? `<button class="wf-receipt-btn" type="button" data-idx="${idx}">View</button>`
+      : `<button class="wf-receipt-btn" type="button" disabled style="opacity:0.4;cursor:default">View</button>`;
+    return `<tr>
+      <td class="wf-mono" style="font-size:12px">${esc(r.id)}</td>
+      <td><a href="/workflows/${esc(r.slug)}" class="wf-link" data-nav="/workflows/${esc(r.slug)}">${esc(r.workflow)}</a></td>
+      <td>${tx}</td>
+      <td class="wf-num">${esc(r.charged)}</td>
+      <td><span class="wf-run-status ${r.status === "completed" ? "wf-status-done" : "wf-status-failed"}">${r.status}</span></td>
+      <td class="wf-muted" style="font-size:12px">${esc(r.at)}</td>
+      <td>${viewBtn}</td>
+    </tr>`;
+  }).join("");
+
+  return header + `
     <div class="wf-explore-body">
       <div class="wf-table-wrap">
         <table class="wf-runs-table">
           <thead><tr>
-            <th>Run ID</th><th>Workflow</th><th>Version</th><th>Models</th>
-            <th class="wf-num">Cost (USDC)</th><th>Status</th><th>Date</th><th></th>
+            <th>Run ID</th><th>Workflow</th><th>Transaction</th>
+            <th class="wf-num">Charged (USDC)</th><th>Status</th><th>Date</th><th></th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
@@ -1260,8 +1266,11 @@ function bindRuns() {
       navigate(el.dataset.nav);
     });
   });
-  document.querySelectorAll(".wf-receipt-btn").forEach((btn) => {
-    btn.addEventListener("click", () => alert("Receipt " + btn.dataset.id + ":\nFull receipt view coming soon."));
+  document.querySelectorAll(".wf-receipt-btn[data-idx]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const run = RUN_HISTORY[parseInt(btn.dataset.idx, 10)];
+      if (run && run.output) openResultModal(run.output, run.slug);
+    });
   });
 }
 
