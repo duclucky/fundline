@@ -75,6 +75,10 @@ const ARC_PAYMENT_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_PAYMENT_ROUT
 // invoice router above. payBatch / payBatchWithMemo emit BatchPaid + BatchItemPaid.
 const ARC_BATCH_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_BATCH_ROUTER_ADDRESS || "");
 const MAX_BATCH_RECIPIENTS = 256; // must match FundlineBatchRouter.MAX_BATCH
+// FundlineRunEscrow: non-custodial per-run workflow-billing escrow (USDC on Arc).
+// treasury is the fixed beneficiary (a Fundline-controlled key, NOT a user key).
+const ARC_RUN_ESCROW_ADDRESS = normalizeAddress(process.env.ARC_RUN_ESCROW_ADDRESS || "");
+const ARC_TREASURY_ADDRESS = normalizeAddress(process.env.ARC_TREASURY_ADDRESS || "");
 
 // --- AI workflow runner (v98store) + free-run rate limiting (phase 1) ---
 // Master switch: when off, the workflow run endpoints are not served, so prod
@@ -469,6 +473,8 @@ function handlePublicConfig(req, res) {
     batchRouterAddress: ARC_BATCH_ROUTER_ADDRESS,
     batchPaymentsEnabled: Boolean(ARC_BATCH_ROUTER_ADDRESS && ARC_USDC_TOKEN_ADDRESS),
     maxBatchRecipients: MAX_BATCH_RECIPIENTS,
+    runEscrowAddress: ARC_RUN_ESCROW_ADDRESS,
+    workflowBillingEnabled: Boolean(ARC_RUN_ESCROW_ADDRESS && ARC_USDC_TOKEN_ADDRESS),
     gatewayWalletAddress: GATEWAY_WALLET_ADDRESS,
     gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
     gatewayEnabled: Boolean(CIRCLE_GATEWAY_API_KEY),
