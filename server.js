@@ -4,6 +4,9 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { ethers } = require("ethers");
+const v98Client = require("./v98-client");
+const v98Models = require("./v98-models");
+const workflowLimiter = require("./workflow-limiter");
 
 const PORT = Number(process.env.PORT || 5190);
 const ROOT = __dirname;
@@ -22,6 +25,8 @@ const EVENT_DB_PATH = path.join(DATA_DIR, "events.json");
 const TELEGRAM_LINK_DB_PATH = path.join(DATA_DIR, "telegram-links.json");
 const TELEGRAM_SESSION_DB_PATH = path.join(DATA_DIR, "telegram-sessions.json");
 const BATCH_DB_PATH = path.join(DATA_DIR, "batches.json");
+const WORKFLOW_USAGE_DB_PATH = path.join(DATA_DIR, "workflow-usage.json");
+const WORKFLOW_BUDGET_DB_PATH = path.join(DATA_DIR, "workflow-budget.json");
 
 const AGENT_RATE_LIMIT_PER_MIN = Number(process.env.AGENT_RATE_LIMIT_PER_MIN || 60);
 const rateLimits = new Map();
@@ -68,6 +73,28 @@ const ARC_PAYMENT_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_PAYMENT_ROUT
 // invoice router above. payBatch / payBatchWithMemo emit BatchPaid + BatchItemPaid.
 const ARC_BATCH_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_BATCH_ROUTER_ADDRESS || "");
 const MAX_BATCH_RECIPIENTS = 256; // must match FundlineBatchRouter.MAX_BATCH
+
+// --- AI workflow runner (v98store) + free-run rate limiting (phase 1) ---
+// Master switch: when off, the workflow run endpoints are not served, so prod
+// stays on the frontend mock. Turn on locally to test live v98store calls.
+// See .claude/workflow-rate-limit-spec.md and the v98store-api skill.
+const WORKFLOW_RATE_LIMIT_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.WORKFLOW_RATE_LIMIT_ENABLED || ""));
+const V98STORE_API_KEY = String(process.env.V98STORE_API_KEY || "").trim();
+const V98STORE_BASE_URL = String(process.env.V98STORE_BASE_URL || "https://v98store.com/v1").trim();
+const V98STORE_GROUP_RATIO = Number(process.env.V98STORE_GROUP_RATIO || 1) || 1;
+const WORKFLOW_BUILD_PROMPT_MODEL = String(process.env.WORKFLOW_BUILD_PROMPT_MODEL || "gpt-4o-mini").trim();
+const WORKFLOW_RUNS_PER_IP_PER_DAY = Number(process.env.WORKFLOW_RUNS_PER_IP_PER_DAY || 3);
+const WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY = Number(process.env.WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY || 3);
+const WORKFLOW_SPEND_PER_IP_PER_DAY_USD = Number(process.env.WORKFLOW_SPEND_PER_IP_PER_DAY_USD || 0.5);
+const WORKFLOW_DAILY_BUDGET_USD = Number(process.env.WORKFLOW_DAILY_BUDGET_USD || 10);
+const WORKFLOW_TRUST_PROXY = String(process.env.WORKFLOW_TRUST_PROXY || "xff").trim();
+const WORKFLOW_BETA_NOTICE = /^(1|true|yes|on)$/i.test(String(process.env.WORKFLOW_BETA_NOTICE || "true"));
+const WORKFLOW_LIMITS = {
+  runsPerDay: WORKFLOW_RUNS_PER_IP_PER_DAY,
+  gensPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
+  spendCapMicros: Math.round(WORKFLOW_SPEND_PER_IP_PER_DAY_USD * 1000000),
+  dailyBudgetMicros: Math.round(WORKFLOW_DAILY_BUDGET_USD * 1000000),
+};
 const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
@@ -289,6 +316,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  const wfBuildPromptMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/build-prompt$/i);
+  if (wfBuildPromptMatch) {
+    handleWorkflowBuildPrompt(req, res, wfBuildPromptMatch[1]);
+    return;
+  }
+
+  const wfRunMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/run$/i);
+  if (wfRunMatch) {
+    handleWorkflowRun(req, res, wfRunMatch[1]);
+    return;
+  }
+
   const requested = resolveRequestPath(url.pathname);
   const filePath = path.normalize(path.join(ROOT, requested));
 
@@ -424,7 +463,110 @@ function handlePublicConfig(req, res) {
     gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
     gatewayEnabled: Boolean(CIRCLE_GATEWAY_API_KEY),
     walletConnectProjectId: WALLETCONNECT_PROJECT_ID,
+    workflowRunnerEnabled: WORKFLOW_RATE_LIMIT_ENABLED,
+    workflowFreeRunsPerDay: WORKFLOW_RUNS_PER_IP_PER_DAY,
+    workflowGenPromptsPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
+    workflowBetaNotice: WORKFLOW_BETA_NOTICE,
   });
+}
+
+// --- AI workflow runner (phase 1) ---
+
+function workflowLimitMessage(code) {
+  if (code === "daily_limit") return "You have used all your runs for today. Fundline workflows are in beta, so the daily quota is limited for now. It resets at 00:00 UTC.";
+  if (code === "gen_limit") return "You have used all your prompt generations for today. Resets at 00:00 UTC.";
+  if (code === "spend_limit") return "You have reached today's usage limit. Resets at 00:00 UTC.";
+  if (code === "service_budget_reached") return "Workflow runs are paused for today. Please try again tomorrow.";
+  return "Limit reached.";
+}
+
+function workflowClientIpKey(req) {
+  return workflowLimiter.getClientIp(req.headers, req.socket && req.socket.remoteAddress, WORKFLOW_TRUST_PROXY);
+}
+
+function workflowLimiterPaths() {
+  return { usagePath: WORKFLOW_USAGE_DB_PATH, budgetPath: WORKFLOW_BUDGET_DB_PATH };
+}
+
+// POST /api/workflows/:slug/build-prompt - turn a short description into a polished
+// prompt with one v98store call. Free, but has its own per-IP daily quota (genCount)
+// and still counts against the per-IP spend cap and the global daily budget.
+async function handleWorkflowBuildPrompt(req, res, slug) {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED) {
+    sendJson(res, 404, { error: "Not found" });
+    return;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  if (!V98STORE_API_KEY) {
+    sendJson(res, 503, { error: "service_unconfigured", message: "Workflow provider is not configured." });
+    return;
+  }
+
+  const paths = workflowLimiterPaths();
+  const ipKey = workflowClientIpKey(req);
+  const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "gen", limits: WORKFLOW_LIMITS });
+  if (!reserve.ok) {
+    sendJson(res, reserve.status, { error: reserve.error, message: workflowLimitMessage(reserve.error), remaining: 0, resetsAt: reserve.resetsAt });
+    return;
+  }
+
+  let input;
+  try {
+    input = await readJsonBody(req);
+  } catch (error) {
+    workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "gen" });
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Invalid request" } });
+    return;
+  }
+
+  const description = String(input.description || "").trim().slice(0, 4000);
+  const category = String(input.category || "general").trim().slice(0, 60);
+  if (!description) {
+    workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "gen" });
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A description is required" } });
+    return;
+  }
+
+  const modelId = v98Models.resolveModelId(WORKFLOW_BUILD_PROMPT_MODEL);
+  try {
+    const result = await v98Client.callV98Chat(
+      { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL },
+      {
+        model: modelId,
+        maxTokens: 600,
+        temperature: 0.7,
+        messages: [
+          { role: "system", content: "You are an expert prompt engineer. Turn the user's short description into a single, clear, professional prompt that another AI can follow to produce an excellent result. Return only the prompt text, with no preamble or explanation." },
+          { role: "user", content: `Category: ${category}\n\nDescription:\n${description}` },
+        ],
+      },
+    );
+    const cost = v98Models.computeCostMicros(modelId, result.usage.prompt_tokens, result.usage.completion_tokens, V98STORE_GROUP_RATIO);
+    workflowLimiter.recordCost({ ...paths, ipKey, costMicros: cost || 0 });
+    sendJson(res, 200, { prompt: result.content, remaining: reserve.remaining, resetsAt: reserve.resetsAt });
+  } catch (error) {
+    workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "gen" });
+    console.error("[Workflow] build-prompt error:", error.message);
+    sendJson(res, 502, { error: "provider_error", message: "Could not generate a prompt right now." });
+  }
+}
+
+// POST /api/workflows/:slug/run - live multi-step execution. The chains are not
+// wired server-side yet (phase 2), so this reserves nothing and reports
+// not-implemented; the limiter and provider plumbing it will use already exist.
+function handleWorkflowRun(req, res, slug) {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED) {
+    sendJson(res, 404, { error: "Not found" });
+    return;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  sendJson(res, 501, { error: "not_implemented", message: "Live workflow runs are coming soon." });
 }
 
 // Shared invoice-creation core used by both POST /api/invoices and the Telegram
