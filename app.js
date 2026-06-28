@@ -17,6 +17,10 @@ const DEFAULT_PUBLIC_CONFIG = {
 const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
 const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
 const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
+// Wallet sign-in session, persisted per-tab so it survives page navigation
+// (e.g. Payments -> Workflows -> Payments) without re-signing. Cleared on
+// disconnect, account change, or tab close (sessionStorage).
+const WALLET_SESSION_KEY = "fundline_wallet_session";
 const ERC20_DECIMALS_SELECTOR = "0x313ce567";
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
@@ -134,6 +138,7 @@ init();
 async function init() {
   bindEvents();
   await loadPublicConfig();
+  await restoreWalletSession();
   if (isPayRoute()) {
     await loadPayInvoice(getPayInvoiceId());
     renderWalletState();
@@ -391,9 +396,43 @@ async function refreshWalletBalance(event) {
   renderWalletState();
 }
 
+function saveWalletSession(address, authAt) {
+  try {
+    sessionStorage.setItem(WALLET_SESSION_KEY, JSON.stringify({ address: normalizeAddress(address), authAt: authAt || "" }));
+  } catch (error) {
+    // sessionStorage may be unavailable (private mode); session just won't persist.
+  }
+}
+
+function clearWalletSession() {
+  try { sessionStorage.removeItem(WALLET_SESSION_KEY); } catch (error) { /* ignore */ }
+}
+
+// On load, restore a prior wallet sign-in WITHOUT re-prompting a signature, but
+// only if the wallet still controls that address (silent eth_accounts check).
+async function restoreWalletSession() {
+  let stored = null;
+  try { stored = JSON.parse(sessionStorage.getItem(WALLET_SESSION_KEY) || "null"); } catch (error) { stored = null; }
+  if (!stored || !stored.address) return;
+  const provider = window.ethereum;
+  if (!provider?.request) return;
+  try {
+    const accounts = await provider.request({ method: "eth_accounts" });
+    const current = normalizeAddress(accounts?.[0]);
+    if (current && current === normalizeAddress(stored.address)) {
+      setConnectedWallet(current, { authAt: stored.authAt, silent: true });
+    } else {
+      clearWalletSession();
+    }
+  } catch (error) {
+    // leave disconnected on any error
+  }
+}
+
 function disconnectWallet(options = {}) {
   state.wallet = { connected: false, address: "", balance: "", authAt: "" };
   state.walletMenuOpen = false;
+  clearWalletSession();
   if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: "" };
     saveSettings();
@@ -410,6 +449,7 @@ function setConnectedWallet(address, options = {}) {
   const normalized = normalizeAddress(address);
   if (!normalized) return;
   state.wallet = { connected: true, address: normalized, balance: state.wallet.balance || "", authAt: options.authAt || new Date().toISOString() };
+  saveWalletSession(normalized, state.wallet.authAt);
   if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: normalized };
     saveSettings();
