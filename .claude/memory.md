@@ -527,6 +527,15 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   on branch. TO DEPLOY later: enable WORKFLOW_RATE_LIMIT_ENABLED + V98STORE_API_KEY + TAVILY_API_KEY
   in the cPanel env, then merge to main + push (auto-deploys); restart not needed for static files
   but IS needed for server.js env/code changes.
+- WORKFLOW RUNNER DEPLOYED to main 2026-06-28 (merged workflow-runner-phase1 fast-forward,
+  e01ac15..4c53f0a, pushed -> FTP auto-deploy + tmp/restart.txt touched so Passenger reloads
+  server.js). FEATURE IS DORMANT until the cPanel Node app env is set: add
+  WORKFLOW_RATE_LIMIT_ENABLED=true, V98STORE_API_KEY, V98STORE_BASE_URL=https://v98store.com/v1,
+  TAVILY_API_KEY (and optionally V98STORE_GROUP_RATIO if the key is not group 1x) in the cPanel
+  Environment Variables, then restart the Node app. Until then /api/config returns
+  workflowRunnerEnabled=false and EVERY workflow shows "Coming soon" (the old mock Run demo is
+  gone on prod while dormant - expected, safe). Once enabled: client-research runs live
+  (search + paste modes), others stay "Coming soon". Frontend DOM still not browser-tested by me.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
