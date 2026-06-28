@@ -562,6 +562,24 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   all workflows (price passed at fund, server-validated). Billing runs on TESTNET USDC = beta
   (tests on-chain flow, NOT revenue); since v98 cost is REAL USD even when user pays testnet USDC,
   the per-IP + global budget caps STAY ON as the real-cost guard. Awaiting user "build" go.
+- FundlineRunEscrow BUILT + AUDITED PASS (2026-06-28, branch `run-escrow`, commit 50627a4, NOT
+  merged/deployed). contracts/FundlineRunEscrow.sol (non-custodial per-run billing escrow:
+  fund/release/refund/claimRefund, immutable usdc+treasury, REFUND_WINDOW 1h, self-emits
+  InvoiceMemo with topic byte-matching FundlineMemoRouter, IERC20 transferFrom not msg.value,
+  6-decimal raw units, CEI, return-value-checked, no owner/admin/fee/selfdestruct). Built via
+  escrow-build skill: escrow-engineer wrote it + scripts/deploy-fundline-run-escrow.js (mirrors
+  deploy-payment-router, writes ARC_RUN_ESCROW_ADDRESS); contract-auditor verdict PASS (no
+  High/Med; Lows are server-side: must verify payer==caller && amount==price && not settled
+  before running, use high-entropy runIds). server.js: ARC_RUN_ESCROW_ADDRESS + ARC_TREASURY_ADDRESS
+  consts, /api/config returns runEscrowAddress + workflowBillingEnabled. .env.example documents
+  ARC_TREASURY_ADDRESS/ARC_RUN_ESCROW_ADDRESS/ARC_TREASURY_PRIVATE_KEY. test_run_escrow.js (179,
+  offline surface/ABI audit). STILL TODO before live: (1) deploy contract to Arc testnet (manual:
+  set ARC_TREASURY_ADDRESS + ARC_DEPLOYER_PRIVATE_KEY, run the deploy script); (2) BILLING
+  INTEGRATION phase: /run returns runId+price+escrow, verify on-chain funded run (Lows above)
+  before executing, treasury key (ARC_TREASURY_PRIVATE_KEY) signs release(runId, memo via new
+  memo-util buildWorkflowMemoText) on success / refund on failure; frontend approve+fund flow;
+  (3) testnet lifecycle dry-run. Keep rate-limit + $10/day budget caps ON (testnet USDC billing
+  does not cover real v98 cost).
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
