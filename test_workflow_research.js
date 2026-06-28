@@ -20,7 +20,7 @@ eq("planner quoted fallback", JSON.stringify(R.parsePlannerQueries('1. "alpha" 2
 eq("planner empty -> fallback query", JSON.stringify(R.parsePlannerQueries("nonsense", "the query", 3)), JSON.stringify(["the query"]));
 
 // --- parsePersona ---
-const p1 = R.parsePersona('{"server":"💰 Finance Agent","agent_role_prompt":"You are a finance analyst."}');
+const p1 = R.parsePersona('{"server":"\u{1F4B0} Finance Agent","agent_role_prompt":"You are a finance analyst."}');
 eq("persona server emoji stripped", p1.server, "Finance Agent");
 eq("persona role prompt", p1.agent_role_prompt, "You are a finance analyst.");
 check("persona invalid -> null", R.parsePersona("no json here") === null);
@@ -50,7 +50,7 @@ check("context includes url", R.aggregateContext([{ title: "T", url: "http://u",
   const usageWrite = { prompt_tokens: 500, completion_tokens: 300 };
   function fakeCall(modelId, messages, maxTokens) {
     calls += 1;
-    if (calls === 1) return Promise.resolve({ content: '{"server":"💰 Finance Agent","agent_role_prompt":"You are a finance analyst."}', usage: usageRole });
+    if (calls === 1) return Promise.resolve({ content: '{"server":"\u{1F4B0} Finance Agent","agent_role_prompt":"You are a finance analyst."}', usage: usageRole });
     if (calls === 2) return Promise.resolve({ content: '["q1","q2","q3"]', usage: usagePlan });
     return Promise.resolve({ content: "# Report\nFinding ([A](http://a))\n\n## References\n[http://a](http://a)", usage: usageWrite });
   }
