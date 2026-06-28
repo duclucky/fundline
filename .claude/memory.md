@@ -600,7 +600,13 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   (test_billing_e2e_dryrun.js, live 2026-06-28): quote -> on-chain fund -> POST /run verified
   funding -> ran real workflow -> treasury released escrow (tx 0x214cbd5c...) -> released=true.
   ENTIRE billing system PROVEN server-side; only the browser wallet UI (popups) untested (needs a
-  real browser). Remaining: manual browser test, then merge run-escrow to main + set cPanel env.
+  real browser). MERGED + DEPLOYED to main 2026-06-28 (cadb0c2..ac0cf14, FTP auto-deploy +
+  Passenger restart). DORMANT until cPanel Node env is set: WORKFLOW_RATE_LIMIT_ENABLED=true,
+  V98STORE_API_KEY, V98STORE_BASE_URL, TAVILY_API_KEY,
+  ARC_RUN_ESCROW_ADDRESS=0xefDDfF01090404f1eC942d96346B00638339b8D5,
+  ARC_TREASURY_ADDRESS=0xee395f5bc60AE30b8279dfcf8cf0ABa392EC36FC, ARC_TREASURY_PRIVATE_KEY (secret),
+  optional V98STORE_GROUP_RATIO; then RESTART the Node app. Until set, /api/config reports runner +
+  billing off -> all workflows "coming soon" (safe). Browser wallet UI still untested by me.
   Server BILLING
   INTEGRATION wired (branch run-escrow, commit 4fb7383, NOT merged/deployed to prod): run-escrow-
   client.js (read getRun, treasury release/refund), memo-util.buildWorkflowMemoText, server.js
