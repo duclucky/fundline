@@ -619,6 +619,15 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   to activate signing/billing; (2) FRONTEND approve+fund flow (quote -> approve USDC -> fund(runId)
   via EIP-1193 -> /run with runId) - NOT built; (3) full lifecycle dry-run (fund/release/refund)
   once treasury key present. v98 budget cap stays separate from USDC paid.
+- BILLING UX FIXES deployed 2026-06-29 (commits 8ce053a + a4f1021 on main): (1) workflow page now
+  has a Connect-wallet button + connected-address chip (reflects existing connection via
+  eth_accounts, no popup; updates on accountsChanged); (2) if already connected, Run does NOT
+  re-request accounts - it uses WF_WALLET and just signs fund; approval is a ONE-TIME large
+  allowance (MAX_UINT256) so repeat runs need only the single fund signature (first run = approve
+  + fund); (3) receipt always shows "Charged 0.05 USDC" + "Invoice memo tx" linking the release
+  tx on Arcscan (no "free run" wording - every run is billed and counts to the budget pool).
+  Run button reads "Pay 0.05 USDC and run" when billing on. User correction noted: there is NO
+  free run path in prod; all runs charge USDC + count to the per-IP/global v98 budget caps.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
