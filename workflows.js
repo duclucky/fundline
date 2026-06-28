@@ -240,6 +240,7 @@ const ARC_CHAIN_ID_HEX = "0x4cef52"; // 5042002
 const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
 const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
 const ESCROW_FUND_SELECTOR = "0xe46bbc9e"; // fund(bytes32,uint256)
+const MAX_UINT256 = (2n ** 256n) - 1n; // one-time approval cap
 
 function getEthProvider() {
   return (typeof window !== "undefined" && window.ethereum) ? window.ethereum : null;
@@ -282,12 +283,16 @@ async function waitWalletTx(provider, hash) {
 async function fundWorkflowRun(slug, statusFn) {
   const provider = getEthProvider();
   if (!provider) throw new Error("No wallet found. Install a wallet to pay and run.");
-  statusFn("Connecting wallet...");
-  const accounts = await provider.request({ method: "eth_requestAccounts" });
-  const from = accounts && accounts[0];
-  if (!from) throw new Error("No wallet account available.");
-  WF_WALLET = from;
-  updateWalletChip();
+  // Use the already-connected wallet; only request (popup) if not connected yet.
+  let from = WF_WALLET;
+  if (!from) {
+    statusFn("Connecting wallet...");
+    const accounts = await provider.request({ method: "eth_requestAccounts" });
+    from = accounts && accounts[0];
+    if (!from) throw new Error("No wallet account available.");
+    WF_WALLET = from;
+    updateWalletChip();
+  }
   await ensureArcChain(provider);
 
   statusFn("Getting quote...");
@@ -303,10 +308,12 @@ async function fundWorkflowRun(slug, statusFn) {
   const escrow = quote.escrowAddress;
   const usdc = quote.usdc;
 
+  // One-time approval (large allowance) so every later run needs only the single
+  // fund signature, not approve + fund.
   const allowance = await readAllowance(provider, usdc, from, escrow);
   if (allowance < amount) {
-    statusFn("Approve USDC in your wallet...");
-    const approveData = ERC20_APPROVE_SELECTOR + encAddr(escrow) + encUint(amount);
+    statusFn("Approve USDC (one time) in your wallet...");
+    const approveData = ERC20_APPROVE_SELECTOR + encAddr(escrow) + encUint(MAX_UINT256);
     const approveHash = await sendWalletTx(provider, from, usdc, approveData);
     statusFn("Confirming approval...");
     await waitWalletTx(provider, approveHash);
@@ -1164,10 +1171,10 @@ function runWorkflow(slug, wf, opts) {
       <div class="wf-receipt-row"><span>Status</span><span class="wf-status-done">Completed</span></div>
       <div class="wf-receipt-steps">${stepRows}</div>
       <div class="wf-receipt-row"><span>Sources</span><span>${sources.length}</span></div>
-      ${data.releaseTx ? `
       <div class="wf-receipt-row"><span>Charged</span><span class="wf-receipt-price">${esc(wf.price)} USDC</span></div>
-      <div class="wf-receipt-row"><span>Invoice memo tx</span><a class="wf-link wf-mono" href="${esc((WF_CONFIG.explorerBase || "https://testnet.arcscan.app") + "/tx/" + data.releaseTx)}" target="_blank" rel="noopener">${esc(data.releaseTx.slice(0, 10) + "…" + data.releaseTx.slice(-8))}</a></div>`
-      : `<div class="wf-receipt-row"><span>Settlement</span><span class="wf-muted">Free run (no on-chain charge)</span></div>`}`;
+      ${data.releaseTx
+      ? `<div class="wf-receipt-row"><span>Invoice memo tx</span><a class="wf-link wf-mono" href="${esc((WF_CONFIG.explorerBase || "https://testnet.arcscan.app") + "/tx/" + data.releaseTx)}" target="_blank" rel="noopener">${esc(data.releaseTx.slice(0, 10) + "…" + data.releaseTx.slice(-8))}</a></div>`
+      : `<div class="wf-receipt-row"><span>Settlement</span><span class="wf-muted">Pending on-chain (Arc Testnet)</span></div>`}`;
 
     if (quotaEl && data.remaining != null) {
       quotaEl.hidden = false;
