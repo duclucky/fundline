@@ -2696,6 +2696,19 @@ a.nav-item {
   gap: 6px;
 }
 
+.wf-run-retrieval {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wf-run-quota {
+  font-size: 11px;
+  text-align: center;
+  margin-top: 8px;
+}
+
 .wf-run-mode-btn {
   padding: 8px;
   border-radius: 9px;

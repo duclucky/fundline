@@ -510,6 +510,23 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   drive the canvas off the response, add paste-sources UI mode, show remaining quota + beta notice.
   Then predeploy-check + decide deploy. Note: current WORKFLOWS frontend display still has mock
   step labels/metrics; align client-research display with the real chain when wiring.
+- WORKFLOW RUNNER PHASE 2 (FRONTEND) WIRED (2026-06-28, branch workflow-runner-phase1, NOT
+  deployed). workflows.js: client-research is now `live: true` with the REAL chain displayed
+  (Role analysis / Research plan / Web research [Tavily] / Report writer, modelCount 2). Run +
+  Generate-prompt call the real endpoints (/run, /build-prompt); the canvas animates steps and
+  holds the last node "running" until the real response, then shows the real report + receipt
+  (sources count, est. cost, remaining quota) with Copy/Download. Added a retrieval toggle (Search
+  the web vs Paste my sources -> mode search|paste). Errors (429/503/501/502) show the server
+  message. DEPLOY-SAFETY GATE: a workflow is runnable only if `wf.live && WF_RUNNER_ENABLED`, where
+  WF_RUNNER_ENABLED comes from GET /api/config workflowRunnerEnabled (fetched on load); until the
+  server flag is on, everything shows "coming soon" -> safe to deploy the frontend before enabling
+  the server. Other workflows: Run button disabled + "Coming soon". To TEST LOCALLY: set
+  WORKFLOW_RATE_LIMIT_ENABLED=true in .env (V98 + Tavily keys already there), npm start, open
+  /workflows/client-research, hard-refresh. node --check passes for workflows.js + server.js.
+  Frontend DOM not auto-tested (no headless browser); needs a manual browser pass. Commit pending
+  on branch. TO DEPLOY later: enable WORKFLOW_RATE_LIMIT_ENABLED + V98STORE_API_KEY + TAVILY_API_KEY
+  in the cPanel env, then merge to main + push (auto-deploys); restart not needed for static files
+  but IS needed for server.js env/code changes.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.

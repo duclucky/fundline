@@ -37,24 +37,28 @@ const WORKFLOWS = {
     description: "Deep-dive research brief on a company or person before a sales call, pitch, or outreach.",
     longDesc: "Aggregates public information about a target company or individual and synthesizes it into a structured brief with background, signals, and recommended angles.",
     category: "Freelance",
+    live: true,
+    usesRetrieval: true,
     price: "0.05",
     version: "v1.0.1",
     runtime: "~60s",
-    modelCount: 3,
+    modelCount: 2,
     calls: 893,
     inputLabel: "Company or person name",
     inputHint: "Enter the company name and context (e.g. 'sales call', 'investor outreach', 'partnership').",
-    outputHint: "Structured research brief with background, signals, and talking points.",
-    limits: { inputChars: 500, outputWords: 1200 },
+    outputHint: "Structured research report with background, signals, and cited sources.",
+    limits: { inputChars: 500, outputWords: 1500 },
     steps: [
-      { name: "Research Planner", model: "gpt-4.1-mini", purpose: "Identify what signals to look for based on research intent.", tokens: "~150" },
-      { name: "Info Synthesizer", model: "claude-3.5-sonnet", purpose: "Compile and structure all available public information.", tokens: "~1200" },
-      { name: "Brief Writer", model: "claude-3-haiku", purpose: "Format into a concise, scannable research brief.", tokens: "~600" },
+      { name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
+      { name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused web search queries.", tokens: "~60" },
+      { name: "Web research", model: "Tavily", purpose: "Search the web and gather ranked sources.", tokens: "-" },
+      { name: "Report writer", model: "gpt-4.1-mini", purpose: "Write a structured, cited research report.", tokens: "~1500" },
     ],
     pricing: [
-      { step: "Research Planner", model: "gpt-4.1-mini", inputTokens: 150, outputTokens: 200, cost: "0.0003" },
-      { step: "Info Synthesizer", model: "claude-3.5-sonnet", inputTokens: 350, outputTokens: 900, cost: "0.036" },
-      { step: "Brief Writer", model: "claude-3-haiku", inputTokens: 900, outputTokens: 500, cost: "0.014" },
+      { step: "Role analysis", model: "gpt-4o-mini", inputTokens: 50, outputTokens: 20, cost: "0.00002" },
+      { step: "Research plan", model: "gpt-4o-mini", inputTokens: 60, outputTokens: 40, cost: "0.00003" },
+      { step: "Web research", model: "Tavily", inputTokens: 0, outputTokens: 0, cost: "0.00" },
+      { step: "Report writer", model: "gpt-4.1-mini", inputTokens: 1200, outputTokens: 1200, cost: "0.0024" },
     ],
     examplePrompt: "Research Notion Inc for a partnership outreach call. We want to integrate our product with their API.",
     exampleOutput: "# Research Brief: Notion Inc\n\n**Intent:** Partnership outreach - API integration\n\n## Overview\n\nNotion is a productivity platform used by 35M+ users globally. Headquartered in San Francisco. Last round: Series C at $275M (2021).\n\n## Product Signals\n\n- Notion API launched 2021, now at v2. Active developer ecosystem.\n- Recent focus: Notion AI and enterprise SSO.\n- 3 open API positions on their jobs page.\n\n## Talking Points\n\n1. Reference their active API ecosystem as reason for outreach.\n2. Lead with use-case first: show what your integration solves for Notion users.\n3. Avoid cold pitch framing - lean into partnership benefits.\n\n## Recommended Angle\n\nEmail Head of Partnerships with a 3-sentence pitch, link to your integration demo, and a calendar link.",
@@ -216,6 +220,14 @@ function getRoute() {
 function navigate(href) {
   window.history.pushState({}, "", href);
   render();
+}
+
+// Server-reported master switch for the live workflow runner. Until /api/config
+// confirms it is on, every workflow shows as "coming soon" (safe to deploy the
+// frontend before the server flag and keys are enabled).
+let WF_RUNNER_ENABLED = false;
+function isWorkflowLive(wf) {
+  return Boolean(wf && wf.live && WF_RUNNER_ENABLED);
 }
 
 function switchToTab(name) {
@@ -644,12 +656,35 @@ function renderTabApi(slug, wf) {
 }
 
 function renderRunPanel(slug, wf) {
+  if (!isWorkflowLive(wf)) {
+    return `
+    <div class="wf-run-header">
+      <h3>Run this workflow</h3>
+      <div class="wf-run-price-tag">Coming soon</div>
+    </div>
+    <p class="wf-run-hint wf-muted">Live runs for this workflow are coming soon. Explore the steps and example output in the meantime.</p>
+    <button class="wf-btn-run" type="button" disabled>Coming soon</button>`;
+  }
+
+  const retrieval = wf.usesRetrieval ? `
+    <div class="wf-run-retrieval" role="group" aria-label="Sources">
+      <label class="wf-run-label">Sources</label>
+      <div class="wf-run-modes" id="wfRetrModes">
+        <button class="wf-run-mode-btn is-active" data-retr="search" type="button">Search the web</button>
+        <button class="wf-run-mode-btn" data-retr="paste" type="button">Paste my sources</button>
+      </div>
+      <div id="wfPastePanel" class="wf-run-mode-panel" hidden>
+        <p class="wf-run-hint wf-muted">Paste URLs or text, one source per blank-line-separated block.</p>
+        <textarea id="wfPasteSources" class="wf-run-textarea" rows="4" placeholder="https://example.com/page&#10;&#10;Or paste source text here..."></textarea>
+      </div>
+    </div>` : "";
+
   return `
     <div class="wf-run-header">
       <h3>Run this workflow</h3>
       <div class="wf-run-price-tag">${esc(wf.price)} USDC / call</div>
     </div>
-    <div class="wf-run-modes" role="group" aria-label="Input mode">
+    <div class="wf-run-modes" id="wfInputModes" role="group" aria-label="Input mode">
       <button class="wf-run-mode-btn is-active" data-mode="own" type="button">Write prompt</button>
       <button class="wf-run-mode-btn" data-mode="build" type="button">Generate prompt</button>
     </div>
@@ -662,7 +697,7 @@ function renderRunPanel(slug, wf) {
 
     <div id="wfModeBuild" class="wf-run-mode-panel" hidden>
       <label class="wf-run-label" for="wfBuildDesc">Describe what you want</label>
-      <textarea id="wfBuildDesc" class="wf-run-textarea" rows="3" placeholder="e.g. A proposal for redesigning a restaurant website..."></textarea>
+      <textarea id="wfBuildDesc" class="wf-run-textarea" rows="3" placeholder="e.g. Research a company before a partnership call..."></textarea>
       <button class="wf-btn-secondary" id="wfGenPrompt" type="button">Generate professional prompt</button>
       <div id="wfGenResult" hidden>
         <label class="wf-run-label" for="wfGenPromptEdit" style="margin-top:14px">Generated prompt (editable)</label>
@@ -670,10 +705,13 @@ function renderRunPanel(slug, wf) {
       </div>
     </div>
 
+    ${retrieval}
+
     <button class="wf-btn-run" id="wfRunBtn" type="button" data-slug="${esc(slug)}">
       <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
       Run Workflow
     </button>
+    <p class="wf-run-quota wf-muted" id="wfRunQuota" hidden></p>
 
     <div id="wfRunState" hidden>
       <div class="wf-run-progress" id="wfRunProgress"></div>
@@ -717,56 +755,99 @@ function bindDetail(slug, wf) {
     if (target) target.classList.add("is-active");
   });
 
-  // Mode toggle
-  const panel = document.getElementById("wfRunPanel");
-  panel.querySelector(".wf-run-modes").addEventListener("click", (e) => {
-    const btn = e.target.closest(".wf-run-mode-btn");
-    if (!btn) return;
-    panel.querySelectorAll(".wf-run-mode-btn").forEach((b) => b.classList.remove("is-active"));
-    btn.classList.add("is-active");
-    document.getElementById("wfModeOwn").hidden = btn.dataset.mode !== "own";
-    document.getElementById("wfModeBuild").hidden = btn.dataset.mode !== "build";
-  });
+  // Run-panel bindings (only for live workflows; the coming-soon panel has none)
+  if (isWorkflowLive(wf)) {
+    let retrievalMode = "search";
 
-  // Generate prompt
-  document.getElementById("wfGenPrompt").addEventListener("click", () => {
-    const desc = document.getElementById("wfBuildDesc").value.trim();
-    const btn = document.getElementById("wfGenPrompt");
-    btn.disabled = true;
-    btn.textContent = "Generating...";
-    setTimeout(() => {
-      const generated = desc
-        ? "You are a professional " + wf.category.toLowerCase() + " specialist.\n\nTask: " + desc + "\n\nRequirements:\n- Be thorough and professional\n- Use industry-standard formatting\n- Include all necessary sections\n- Optimize for clarity and impact"
-        : wf.examplePrompt;
-      const edit = document.getElementById("wfGenPromptEdit");
-      edit.value = generated;
-      document.getElementById("wfGenResult").hidden = false;
-      btn.disabled = false;
-      btn.textContent = "Regenerate prompt";
-    }, 1200);
-  });
+    function flashOutline(el) {
+      el.focus();
+      el.style.outline = "1.5px solid var(--red)";
+      setTimeout(() => { el.style.outline = ""; }, 2000);
+    }
+    function showQuotaMsg(text) {
+      const q = document.getElementById("wfRunQuota");
+      if (!q) return;
+      q.hidden = false;
+      q.textContent = text;
+    }
 
-  // Run workflow
-  document.getElementById("wfRunBtn").addEventListener("click", () => {
-    const mode = panel.querySelector(".wf-run-mode-btn.is-active").dataset.mode;
-    let prompt = "";
-    if (mode === "own") {
-      prompt = document.getElementById("wfOwnPrompt").value.trim();
-    } else {
-      const edit = document.getElementById("wfGenPromptEdit");
-      prompt = edit.value.trim() || document.getElementById("wfBuildDesc").value.trim();
+    // Input mode toggle (write vs generate)
+    const inputModes = document.getElementById("wfInputModes");
+    inputModes.addEventListener("click", (e) => {
+      const btn = e.target.closest(".wf-run-mode-btn");
+      if (!btn) return;
+      inputModes.querySelectorAll(".wf-run-mode-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
+      document.getElementById("wfModeOwn").hidden = btn.dataset.mode !== "own";
+      document.getElementById("wfModeBuild").hidden = btn.dataset.mode !== "build";
+    });
+
+    // Retrieval toggle (search the web vs paste sources)
+    const retrModes = document.getElementById("wfRetrModes");
+    if (retrModes) {
+      retrModes.addEventListener("click", (e) => {
+        const btn = e.target.closest(".wf-run-mode-btn");
+        if (!btn) return;
+        retrModes.querySelectorAll(".wf-run-mode-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
+        retrievalMode = btn.dataset.retr;
+        document.getElementById("wfPastePanel").hidden = retrievalMode !== "paste";
+      });
     }
-    if (!prompt) {
-      const ta = mode === "own" ? document.getElementById("wfOwnPrompt") : document.getElementById("wfBuildDesc");
-      ta.focus();
-      ta.style.outline = "1.5px solid var(--red)";
-      setTimeout(() => ta.style.outline = "", 2000);
-      return;
-    }
-    // Switch to Workflow Steps tab before running so the canvas is visible
-    switchToTab("Workflow Steps");
-    runWorkflow(slug, wf, prompt);
-  });
+
+    // Generate prompt (real call to /build-prompt)
+    document.getElementById("wfGenPrompt").addEventListener("click", () => {
+      const descEl = document.getElementById("wfBuildDesc");
+      const desc = descEl.value.trim();
+      if (!desc) { flashOutline(descEl); return; }
+      const btn = document.getElementById("wfGenPrompt");
+      btn.disabled = true;
+      btn.textContent = "Generating...";
+      fetch(`/api/workflows/${slug}/build-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: desc, category: wf.category }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.message || "Could not generate a prompt.");
+          return data;
+        })
+        .then((data) => {
+          document.getElementById("wfGenPromptEdit").value = data.prompt || "";
+          document.getElementById("wfGenResult").hidden = false;
+          btn.disabled = false;
+          btn.textContent = "Regenerate prompt";
+        })
+        .catch((err) => {
+          btn.disabled = false;
+          btn.textContent = "Generate professional prompt";
+          showQuotaMsg(err.message);
+        });
+    });
+
+    // Run workflow (real call to /run)
+    document.getElementById("wfRunBtn").addEventListener("click", () => {
+      const mode = inputModes.querySelector(".wf-run-mode-btn.is-active").dataset.mode;
+      let prompt = "";
+      if (mode === "own") {
+        prompt = document.getElementById("wfOwnPrompt").value.trim();
+      } else {
+        const edit = document.getElementById("wfGenPromptEdit");
+        prompt = edit.value.trim() || document.getElementById("wfBuildDesc").value.trim();
+      }
+      if (!prompt) {
+        flashOutline(mode === "own" ? document.getElementById("wfOwnPrompt") : document.getElementById("wfBuildDesc"));
+        return;
+      }
+      let sources = null;
+      if (retrievalMode === "paste") {
+        const pasteEl = document.getElementById("wfPasteSources");
+        sources = (pasteEl.value || "").trim().split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+        if (!sources.length) { flashOutline(pasteEl); return; }
+      }
+      switchToTab("Workflow Steps");
+      runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources });
+    });
+  }
 
   // Back navigation
   document.querySelectorAll("[data-nav]").forEach((el) => {
@@ -777,20 +858,22 @@ function bindDetail(slug, wf) {
   });
 }
 
-function runWorkflow(slug, wf, prompt) {
+function runWorkflow(slug, wf, opts) {
   const runBtn = document.getElementById("wfRunBtn");
   const stateEl = document.getElementById("wfRunState");
   const resultEl = document.getElementById("wfRunResult");
   const receiptEl = document.getElementById("wfRunReceipt");
+  const quotaEl = document.getElementById("wfRunQuota");
 
-  // Reset sidebar panel state
-  stateEl.hidden = true;
+  if (stateEl) stateEl.hidden = true;
   resultEl.hidden = true;
   receiptEl.hidden = true;
+  if (quotaEl) quotaEl.hidden = true;
   runBtn.disabled = true;
-  runBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg> Running...`;
+  const runIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>`;
+  runBtn.innerHTML = `${runIcon} Running...`;
 
-  // Node layout: 0 = User Input, 1..N = AI steps, N+1 = Final Output
+  // Node layout: 0 = User Input, 1..N = steps, N+1 = Final Output
   const stepCount = wf.steps.length;
   const outputIdx = stepCount + 1;
   const totalNodes = stepCount + 2;
@@ -799,49 +882,83 @@ function runWorkflow(slug, wf, prompt) {
     setStepRowState(j, "pending");
   }
 
-  // Per-step delays (ms) for the AI steps
-  const DELAYS = [1200, 1500, 2000, 1200, 1800, 1000];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // User Input node completes instantly
-  setTimeout(() => {
+  // Fire the real request immediately; the canvas animation paces against it.
+  const reqBody = { prompt: opts.prompt, mode: opts.mode };
+  if (opts.sources && opts.sources.length) reqBody.sources = opts.sources;
+  const fetchPromise = fetch(`/api/workflows/${slug}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(reqBody),
+  }).then(async (res) => {
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  }, (err) => ({ ok: false, status: 0, data: { message: err.message } }));
+
+  (async () => {
     setNodeState(0, "completed");
     setStepRowState(0, "completed");
-    runStep(1);
-  }, 160);
-
-  function runStep(k) {
-    if (k > stepCount) {
-      // Final output node
-      setNodeState(outputIdx, "completed");
-      setStepRowState(outputIdx, "completed");
-      setTimeout(() => showResult(wf, randId()), 350);
+    // Animate steps 1..N; hold the last node "running" until the real response lands.
+    for (let k = 1; k <= stepCount; k += 1) {
+      setNodeState(k, "running");
+      setStepRowState(k, "running");
+      if (k < stepCount) {
+        await sleep(650);
+        setNodeState(k, "completed");
+        setStepRowState(k, "completed");
+      }
+    }
+    const out = await fetchPromise;
+    if (!out.ok) {
+      setNodeState(stepCount, "failed");
+      setStepRowState(stepCount, "failed");
+      showRunError(out.data);
+      restoreBtn();
       return;
     }
-    setNodeState(k, "running");
-    setStepRowState(k, "running");
-    const delay = DELAYS[k - 1] !== undefined ? DELAYS[k - 1] : 900 + Math.floor(Math.random() * 500);
-    setTimeout(() => {
-      setNodeState(k, "completed");
-      setStepRowState(k, "completed");
-      runStep(k + 1);
-    }, delay);
+    setNodeState(stepCount, "completed");
+    setStepRowState(stepCount, "completed");
+    setNodeState(outputIdx, "completed");
+    setStepRowState(outputIdx, "completed");
+    showRunResult(out.data);
+    restoreBtn();
+  })();
+
+  function restoreBtn() {
+    runBtn.disabled = false;
+    runBtn.innerHTML = `${runIcon} Run again`;
   }
 
-  function showResult(wf, runId) {
+  function showRunError(data) {
+    const msg = (data && (data.message || data.error)) || "The workflow could not complete.";
     resultEl.hidden = false;
-    document.getElementById("wfRunResultBody").textContent = wf.exampleOutput;
+    const label = resultEl.querySelector(".wf-run-result-label");
+    if (label) label.textContent = "Could not complete";
+    const actions = resultEl.querySelector(".wf-result-actions");
+    if (actions) actions.style.display = "none";
+    document.getElementById("wfRunResultBody").textContent = msg;
+  }
+
+  function showRunResult(data) {
+    const output = String(data.output || "");
+    resultEl.hidden = false;
+    const label = resultEl.querySelector(".wf-run-result-label");
+    if (label) label.textContent = "Result";
+    const actions = resultEl.querySelector(".wf-result-actions");
+    if (actions) actions.style.display = "";
+    document.getElementById("wfRunResultBody").textContent = output;
 
     const copyBtn = document.getElementById("wfCopyBtn");
     copyBtn.onclick = () => {
-      navigator.clipboard.writeText(wf.exampleOutput).then(() => {
+      navigator.clipboard.writeText(output).then(() => {
         copyBtn.textContent = "Copied!";
         setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
       });
     };
-
     const dlBtn = document.getElementById("wfDownloadBtn");
     dlBtn.onclick = () => {
-      const blob = new Blob([wf.exampleOutput], { type: "text/markdown" });
+      const blob = new Blob([output], { type: "text/markdown" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -851,23 +968,23 @@ function runWorkflow(slug, wf, prompt) {
     };
 
     receiptEl.hidden = false;
-    const tokenIn = wf.pricing.reduce((s, p) => s + p.inputTokens, 0);
-    const tokenOut = wf.pricing.reduce((s, p) => s + p.outputTokens, 0);
-    const stepRows = wf.pricing.map((p) =>
-      `<div class="wf-receipt-step"><span>${esc(p.step)}</span><span class="wf-muted">${p.inputTokens}in / ${p.outputTokens}out</span><span class="wf-graph-model-tag">${esc(p.model)}</span></div>`
+    const sources = Array.isArray(data.sources) ? data.sources : [];
+    const steps = Array.isArray(data.steps) ? data.steps : [];
+    const stepRows = steps.map((s) =>
+      `<div class="wf-receipt-step"><span>${esc(s.name)}</span><span class="wf-graph-model-tag">${s.model ? esc(s.model) : "-"}</span></div>`
     ).join("");
     document.getElementById("wfReceiptBody").innerHTML = `
-      <div class="wf-receipt-row"><span>Receipt ID</span><span class="wf-mono">${runId}</span></div>
       <div class="wf-receipt-row"><span>Workflow</span><span>${esc(wf.name)}</span></div>
-      <div class="wf-receipt-row"><span>Version</span><span>${esc(wf.version)}</span></div>
       <div class="wf-receipt-row"><span>Status</span><span class="wf-status-done">Completed</span></div>
       <div class="wf-receipt-steps">${stepRows}</div>
-      <div class="wf-receipt-row"><span>Total tokens</span><span>${tokenIn.toLocaleString()} in / ${tokenOut.toLocaleString()} out</span></div>
-      <div class="wf-receipt-row wf-receipt-total"><span>Charged</span><span class="wf-receipt-price">${esc(wf.price)} USDC</span></div>
+      <div class="wf-receipt-row"><span>Sources</span><span>${sources.length}</span></div>
+      <div class="wf-receipt-row"><span>Est. cost</span><span>~$${esc(String(data.costUsd || "0"))}</span></div>
       <div class="wf-receipt-row"><span>Settlement</span><span class="wf-muted">Pending on-chain (Arc Testnet)</span></div>`;
 
-    runBtn.disabled = false;
-    runBtn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg> Run again`;
+    if (quotaEl && data.remaining != null) {
+      quotaEl.hidden = false;
+      quotaEl.textContent = `${data.remaining} free runs left today (beta). Resets 00:00 UTC.`;
+    }
   }
 }
 
@@ -963,7 +1080,11 @@ window.addEventListener("popstate", () => render());
 
 window.addEventListener("DOMContentLoaded", () => {
   bindSidebarToggles();
-  render();
+  fetch("/api/config")
+    .then((r) => r.json())
+    .then((c) => { WF_RUNNER_ENABLED = Boolean(c && c.workflowRunnerEnabled); })
+    .catch(() => {})
+    .finally(() => render());
 
   // Delegate all data-nav clicks (including dynamically rendered content)
   document.addEventListener("click", (e) => {
