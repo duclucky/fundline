@@ -96,9 +96,21 @@ These per-call costs feed the rate-limit caps (see the spec): 0.50 USD per IP pe
 
 ## Verification
 
-- One real request with the live key: confirm the exact `usage` shape (any
-  prompt_tokens_details / cached-token fields), that the billing/balance endpoints work
-  (`GET /v1/dashboard/billing/subscription`, `GET /v1/dashboard/billing/usage`), and the key's
-  group_ratio. Save the redacted response JSON.
+- usage shape CONFIRMED via a live request (2026-06-28): standard OpenAI, with
+  `usage.prompt_tokens`, `usage.completion_tokens`, `usage.total_tokens`, plus
+  `usage.prompt_tokens_details.cached_tokens` and `usage.completion_tokens_details`
+  (reasoning_tokens etc.). For cost, use prompt_tokens and completion_tokens; treat
+  cached_tokens at full input price unless v98store confirms a cache discount (cached_tokens
+  was 0 in the test, so no impact yet). Response also carries a non-standard latency_checkpoint
+  block, ignore it.
+- billing endpoint CONFIRMED (2026-06-28): `GET /v1/dashboard/billing/subscription` returns
+  `{ object, has_payment_method, soft_limit_usd, hard_limit_usd, system_hard_limit_usd,
+  access_until, token_name }`. On the test key hard_limit_usd was 259 (total credit). Get spent
+  via `GET /v1/dashboard/billing/usage?start_date=&end_date=` (total_usage); remaining =
+  hard_limit_usd - usage. Use this for the L2 global backstop and a low-balance alert.
+- STILL to confirm: the key's group_ratio (Default 1x vs higher), which scales real cost vs
+  the Default price table. Not exposed by the API responses seen so far; read it from the
+  v98store dashboard. Until confirmed, default group_ratio = 1x and make it a config override
+  (e.g. V98STORE_GROUP_RATIO) so the cost map can be corrected without code changes.
 - A unit test (standalone node test_*.js) for the cost function: known token counts x known
   prices -> expected micro-USD, including a non-1x group_ratio case.

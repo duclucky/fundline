@@ -444,10 +444,50 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   Q-A RESOLVED: global daily ceiling = USD 10/day for beta (WORKFLOW_DAILY_BUDGET_USD=10).
   v98store integration contract + model registry + price table + cost formula extracted into a
   NEW skill `.claude/skills/v98store-api/SKILL.md` (load-on-demand reference for expanding
-  workflows to new models; the spec covers the limiter, the skill covers the provider). STILL
-  OPEN before build: Q-B confirm prod XFF first entry is real client IP; one-off live v98store
-  request to lock exact usage fields, billing/balance path, the key's group_ratio, RPM/TPM. No
-  code written.
+  workflows to new models; the spec covers the limiter, the skill covers the provider). Live
+  v98store request CONFIRMED (2026-06-28, gpt-4.1-mini): endpoint + Bearer auth + standard
+  OpenAI usage block all work (usage.prompt_tokens/completion_tokens/total_tokens +
+  prompt_tokens_details.cached_tokens + completion_tokens_details; ignore the non-standard
+  latency_checkpoint). Billing endpoint CONFIRMED: GET /v1/dashboard/billing/subscription returns
+  hard_limit_usd (259 on the test key) + has_payment_method + token_name; remaining = hard_limit
+  minus /v1/dashboard/billing/usage total_usage -> usable for the L2 $10/day backstop. STILL
+  OPEN before build: Q-B confirm prod XFF first entry is real client IP; the key's group_ratio
+  (not in API responses, read from dashboard; default 1x + config override V98STORE_GROUP_RATIO
+  meanwhile). No app code written.
+- DIRECTION (2026-06-28): the current workflows `WORKFLOWS` catalog is demo/mock (simulated
+  runs, fabricated metrics, NO real per-step prompts; model labels are not even real v98store
+  ids). It first landed in commit d617c0b today with no Claude co-author trailer. User wants to
+  REPLACE the invented workflows by adapting publicly shared, community-accepted LLM prompt-
+  chains. Curated, sourced shortlist + recommended first 5 in `.claude/workflow-sources.md`
+  (top picks: GPT Researcher ~28k stars Apache-2.0 -> Client/Crypto Research; CrewAI
+  Research->Write->Edit -> SEO/X-thread; CrewAI Marketing Strategy MIT -> a marketing workflow;
+  Promplify/AirOps SEO prompts; CrewAI Stock Analysis re-skinned -> Crypto Research). We only
+  adapt the STEP STRUCTURE into v98store chat calls (per the v98store-api skill), not import
+  CrewAI/n8n runtimes. Next: pick which to implement first, design real per-step prompts. No code.
+- GPT Researcher DEEP-DIVE done -> `.claude/workflow-gpt-researcher.md` (verbatim prompts from
+  gpt_researcher/prompts.py + real config defaults + adapted 6-step chain: Role Select, Planner,
+  Retrieve+Scrape, Summarize, Curate, Writer). KEY FORK before building: GPT Researcher quality
+  depends on live web search+scrape. Fundline has NO retrieval tool. Options: A) add Tavily
+  search API (faithful, extra service+cost, has free tier); C1) user pastes sources (no API, real
+  citations, user retrieves); C2) knowledge-only (must drop citations, label un-sourced, weakest).
+  Recommended A + C1 fallback; avoid C2 as standalone research. DECIDED 2026-06-28: Option A + C1
+  (Tavily search + paste-your-sources fallback). Build needs TAVILY_API_KEY (.env + cPanel,
+  secret); confirm Tavily API shape + free-tier limit at build time.
+- WORKFLOW RUNNER PHASE 1 BUILT (2026-06-28, branch `workflow-runner-phase1`, NOT merged/deployed).
+  Shared plumbing behind master switch WORKFLOW_RATE_LIMIT_ENABLED (default OFF -> prod unchanged,
+  frontend still mock). New modules: `v98-models.js` (id map + price table + computeCostMicros,
+  micro-USD), `v98-client.js` (OpenAI-compatible callV98Chat with 429 retry/backoff),
+  `workflow-limiter.js` (per-IP UTC-day quota: runCount/genCount/spentMicros, global budget,
+  IPv4 + IPv6 /64 keying, XFF/CF IP resolution, checkAndReserve/rollbackReserve/recordCost; JSON
+  store data/workflow-usage.json + workflow-budget.json). server.js: env consts + WORKFLOW_LIMITS,
+  routes POST /api/workflows/:slug/build-prompt (REAL single v98 call, genCount quota, cost
+  recorded) and /run (501 not_implemented until phase 2), /api/config now returns
+  workflowRunnerEnabled/workflowFreeRunsPerDay/workflowGenPromptsPerDay/workflowBetaNotice. Tests:
+  test_v98_cost.js (14), test_workflow_limiter.js (23) pass; server requires cleanly with
+  FUNDLINE_NO_LISTEN; HTTP smoke test confirmed config fields + run 501 + build-prompt 503 (empty
+  key). .env.example documents all new vars. NOT YET DONE: real happy-path build-prompt call needs
+  the live key (costs ~$0.00002; user can test locally) + confirm key group_ratio; frontend not
+  wired (phase 2); /run execution (phase 2 = Tavily + GPT Researcher chain).
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
