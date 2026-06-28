@@ -283,15 +283,12 @@ async function waitWalletTx(provider, hash) {
 async function fundWorkflowRun(slug, statusFn) {
   const provider = getEthProvider();
   if (!provider) throw new Error("No wallet found. Install a wallet to pay and run.");
-  // Use the already-connected wallet; only request (popup) if not connected yet.
-  let from = WF_WALLET;
+  // Single dApp-wide wallet session (sidebar). Connect via it if not connected yet.
+  let from = window.FundlineWallet ? window.FundlineWallet.getAddress() : "";
   if (!from) {
     statusFn("Connecting wallet...");
-    const accounts = await provider.request({ method: "eth_requestAccounts" });
-    from = accounts && accounts[0];
-    if (!from) throw new Error("No wallet account available.");
-    WF_WALLET = from;
-    updateWalletChip();
+    from = window.FundlineWallet ? await window.FundlineWallet.connect() : "";
+    if (!from) throw new Error("Connect your wallet to run this workflow.");
   }
   await ensureArcChain(provider);
 
@@ -459,47 +456,6 @@ function openResultModal(markdown, slug) {
   };
   overlay.hidden = false;
   document.body.style.overflow = "hidden";
-}
-
-// --- Wallet connection state + UI (billing) ---
-let WF_WALLET = "";
-function shortAddr(a) { return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : ""; }
-function updateWalletChip() {
-  const btn = document.getElementById("wfConnectBtn");
-  const addr = document.getElementById("wfWalletAddr");
-  if (!btn || !addr) return;
-  if (WF_WALLET) {
-    btn.hidden = true;
-    addr.hidden = false;
-    addr.textContent = `${shortAddr(WF_WALLET)} (Arc Testnet)`;
-  } else {
-    btn.hidden = false;
-    addr.hidden = true;
-  }
-}
-async function connectWalletUI() {
-  const provider = getEthProvider();
-  if (!provider) throw new Error("No wallet found. Install a wallet to pay and run.");
-  const accounts = await provider.request({ method: "eth_requestAccounts" });
-  WF_WALLET = (accounts && accounts[0]) || "";
-  updateWalletChip();
-  return WF_WALLET;
-}
-// Reflect an already-connected wallet without popping the wallet (eth_accounts).
-async function refreshWalletUI() {
-  const provider = getEthProvider();
-  if (!provider) return;
-  try {
-    const accounts = await provider.request({ method: "eth_accounts" });
-    WF_WALLET = (accounts && accounts[0]) || "";
-  } catch (err) {
-    WF_WALLET = "";
-  }
-  updateWalletChip();
-  if (provider.on && !provider._wfBound) {
-    provider._wfBound = true;
-    provider.on("accountsChanged", (accs) => { WF_WALLET = (accs && accs[0]) || ""; updateWalletChip(); });
-  }
 }
 
 function switchToTab(name) {
@@ -979,13 +935,7 @@ function renderRunPanel(slug, wf) {
 
     ${retrieval}
 
-    ${isBillingEnabled(wf) ? `
-    <div class="wf-wallet-row" id="wfWalletRow">
-      <span class="wf-wallet-label">Wallet</span>
-      <button class="wf-btn-secondary wf-wallet-btn" id="wfConnectBtn" type="button">Connect wallet</button>
-      <span class="wf-wallet-addr" id="wfWalletAddr" hidden></span>
-    </div>
-    <p class="wf-run-hint wf-muted">Pay ${esc(wf.price)} USDC per run from your wallet. Refunded if the run fails.</p>` : ""}
+    ${isBillingEnabled(wf) ? `<p class="wf-run-hint wf-muted">Pay ${esc(wf.price)} USDC per run from your connected wallet (sidebar). Refunded if the run fails.</p>` : ""}
 
     <button class="wf-btn-run" id="wfRunBtn" type="button" data-slug="${esc(slug)}">
       <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
@@ -1035,20 +985,6 @@ function bindDetail(slug, wf) {
   // Run-panel bindings (only for live workflows; the coming-soon panel has none)
   if (isWorkflowLive(wf)) {
     let retrievalMode = "search";
-
-    // Wallet connect (billing only): reflect any existing connection and wire the button.
-    if (isBillingEnabled(wf)) {
-      refreshWalletUI();
-      const connectBtn = document.getElementById("wfConnectBtn");
-      if (connectBtn) {
-        connectBtn.addEventListener("click", () => {
-          connectBtn.disabled = true;
-          connectWalletUI()
-            .catch((err) => { displayRunError(err.message || "Could not connect wallet."); })
-            .finally(() => { connectBtn.disabled = false; });
-        });
-      }
-    }
 
     function flashOutline(el) {
       el.focus();

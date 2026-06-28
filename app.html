@@ -117,6 +117,7 @@
           </div>
 
         </nav>
+        <div class="wallet-widget" id="walletWidget"></div>
         <div class="network-pill">
           <span></span>
           Arc Testnet
@@ -130,30 +131,6 @@
             <h1 id="pageTitle">USDC invoice dashboard</h1>
           </div>
           <div class="top-actions">
-            <div class="wallet-control" id="walletControl">
-              <button class="ghost-action wallet-action" id="walletButton" type="button" aria-expanded="false" aria-controls="walletMenu">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16v10H4zM16 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-                <span id="walletButtonText">Connect wallet</span>
-              </button>
-              <div class="wallet-menu" id="walletMenu" hidden>
-                <div class="wallet-menu-head">
-                  <span>Wallet</span>
-                  <strong id="walletMenuStatus">Connected</strong>
-                </div>
-                <div class="wallet-menu-row">
-                  <span>Address</span>
-                  <strong id="walletMenuAddress">-</strong>
-                </div>
-                <div class="wallet-menu-row">
-                  <span>Balance</span>
-                  <strong id="walletMenuBalance">Checking...</strong>
-                </div>
-                <div class="wallet-menu-actions">
-                  <button class="ghost-action" id="walletRefreshBalance" type="button">Refresh</button>
-                  <button class="danger-action" id="walletDisconnect" type="button">Logout</button>
-                </div>
-              </div>
-            </div>
             <button class="primary-action" data-view="create" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
               New invoice
@@ -456,6 +433,7 @@
     </dialog>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/wallet.js"></script>
     <script src="/memo-util.js"></script>
     <script src="/batch-util.js"></script>
     <script src="/app.js"></script>

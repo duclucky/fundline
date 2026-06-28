@@ -20,7 +20,6 @@ const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
 // Wallet sign-in session, persisted per-tab so it survives page navigation
 // (e.g. Payments -> Workflows -> Payments) without re-signing. Cleared on
 // disconnect, account change, or tab close (sessionStorage).
-const WALLET_SESSION_KEY = "fundline_wallet_session";
 const ERC20_DECIMALS_SELECTOR = "0x313ce567";
 const PAYMENT_ROUTER_PAY_SELECTOR = "0xe1a9ef45";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
@@ -138,7 +137,7 @@ init();
 async function init() {
   bindEvents();
   await loadPublicConfig();
-  await restoreWalletSession();
+  syncWalletFromShared();
   if (isPayRoute()) {
     await loadPayInvoice(getPayInvoiceId());
     renderWalletState();
@@ -179,6 +178,7 @@ function bindEvents() {
   els.invoiceForm?.addEventListener("submit", createInvoice);
   els.invoiceList?.addEventListener("click", handleInvoiceAction);
   els.settingsForm?.addEventListener("submit", saveSettingsFromForm);
+  document.addEventListener("fundline:walletchange", syncWalletFromShared);
   els.walletButton?.addEventListener("click", handleWalletButton);
   els.walletRefreshBalance?.addEventListener("click", refreshWalletBalance);
   els.walletDisconnect?.addEventListener("click", disconnectWallet);
@@ -320,32 +320,17 @@ function handleWalletButton() {
   connectWallet();
 }
 
+// Connecting is handled by the single dApp wallet session (sidebar widget).
+// This just triggers it; syncWalletFromShared mirrors the result into app state.
 async function connectWallet() {
-  const provider = window.ethereum;
-  if (!provider?.request) {
+  if (!window.FundlineWallet) {
     showToast("No wallet extension found. Install or open OKX Wallet, MetaMask, or another EVM wallet.");
     return;
   }
-  state.walletConnecting = true;
-  renderWalletState();
   try {
-    const accounts = await provider.request({ method: "eth_requestAccounts" });
-    const address = normalizeAddress(accounts?.[0]);
-    if (!address) {
-      showToast("Wallet did not return a valid address.");
-      return;
-    }
-    const authAt = await requireWalletSignature(provider, address);
-    setConnectedWallet(address, { authAt, silent: true });
-    await refreshWalletBalance();
-    if (!isPayRoute()) await syncInvoicesFromServer();
-    refreshCurrentView();
-    showToast("Wallet connected.");
+    await window.FundlineWallet.connect();
   } catch (error) {
     showToast(error?.message || "Wallet connection rejected.");
-  } finally {
-    state.walletConnecting = false;
-    renderWalletState();
   }
 }
 
@@ -396,43 +381,26 @@ async function refreshWalletBalance(event) {
   renderWalletState();
 }
 
-function saveWalletSession(address, authAt) {
-  try {
-    sessionStorage.setItem(WALLET_SESSION_KEY, JSON.stringify({ address: normalizeAddress(address), authAt: authAt || "" }));
-  } catch (error) {
-    // sessionStorage may be unavailable (private mode); session just won't persist.
-  }
-}
-
-function clearWalletSession() {
-  try { sessionStorage.removeItem(WALLET_SESSION_KEY); } catch (error) { /* ignore */ }
-}
-
-// On load, restore a prior wallet sign-in WITHOUT re-prompting a signature, but
-// only if the wallet still controls that address (silent eth_accounts check).
-async function restoreWalletSession() {
-  let stored = null;
-  try { stored = JSON.parse(sessionStorage.getItem(WALLET_SESSION_KEY) || "null"); } catch (error) { stored = null; }
-  if (!stored || !stored.address) return;
-  const provider = window.ethereum;
-  if (!provider?.request) return;
-  try {
-    const accounts = await provider.request({ method: "eth_accounts" });
-    const current = normalizeAddress(accounts?.[0]);
-    if (current && current === normalizeAddress(stored.address)) {
-      setConnectedWallet(current, { authAt: stored.authAt, silent: true });
-    } else {
-      clearWalletSession();
+// The single dApp-wide wallet session is owned by the shared sidebar widget
+// (wallet.js). Mirror it into app state so the existing invoice/payment logic
+// (state.wallet / getConnectedWallet) keeps working. Fired on connect/disconnect
+// and pulled once on load.
+function syncWalletFromShared() {
+  const shared = window.FundlineWallet ? window.FundlineWallet.getSession() : null;
+  if (shared && shared.address) {
+    if (getConnectedWallet() !== normalizeAddress(shared.address)) {
+      setConnectedWallet(shared.address, { authAt: shared.authAt, silent: true });
+      refreshWalletBalance();
+      if (!isPayRoute()) syncInvoicesFromServer().then(refreshCurrentView).catch(() => {});
     }
-  } catch (error) {
-    // leave disconnected on any error
+  } else if (state.wallet.connected) {
+    disconnectWallet({ silent: true });
   }
 }
 
 function disconnectWallet(options = {}) {
   state.wallet = { connected: false, address: "", balance: "", authAt: "" };
   state.walletMenuOpen = false;
-  clearWalletSession();
   if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: "" };
     saveSettings();
@@ -449,7 +417,6 @@ function setConnectedWallet(address, options = {}) {
   const normalized = normalizeAddress(address);
   if (!normalized) return;
   state.wallet = { connected: true, address: normalized, balance: state.wallet.balance || "", authAt: options.authAt || new Date().toISOString() };
-  saveWalletSession(normalized, state.wallet.authAt);
   if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: normalized };
     saveSettings();
