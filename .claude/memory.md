@@ -592,8 +592,16 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   InvoiceMemo emitted with exact memo body, RunReleased), fund->refund (payer refunded,
   RunRefunded), double-release reverts, escrow USDC balance deltas exact. Env (first-wins loader,
   same as server.js): ARC_DEPLOYER_PRIVATE_KEY=payer 0x8124ca3f...54ea (61 USDC), ARC_TREASURY_
-  PRIVATE_KEY=treasury 0xee395f...36fc (= contract beneficiary). Backend + contract fully proven;
-  only the FRONTEND approve+fund flow remains for end-to-end UX. Server BILLING
+  PRIVATE_KEY=treasury 0xee395f...36fc (= contract beneficiary). Backend + contract fully proven.
+  FRONTEND approve+fund flow WIRED (workflows.js): on Run, if isBillingEnabled (wf.live &&
+  /api/config.workflowBillingEnabled), fundWorkflowRun connects -> ensureArcChain (0x4cef52) ->
+  POST /quote -> approve USDC if needed (0x095ea7b3) -> fund(runId) (0xe46bbc9e) via EIP-1193 ->
+  runWorkflow with runId. Free path preserved when billing off. BILLING E2E PASS 7/7
+  (test_billing_e2e_dryrun.js, live 2026-06-28): quote -> on-chain fund -> POST /run verified
+  funding -> ran real workflow -> treasury released escrow (tx 0x214cbd5c...) -> released=true.
+  ENTIRE billing system PROVEN server-side; only the browser wallet UI (popups) untested (needs a
+  real browser). Remaining: manual browser test, then merge run-escrow to main + set cPanel env.
+  Server BILLING
   INTEGRATION wired (branch run-escrow, commit 4fb7383, NOT merged/deployed to prod): run-escrow-
   client.js (read getRun, treasury release/refund), memo-util.buildWorkflowMemoText, server.js
   /api/workflows/:slug/quote (issues high-entropy runId + fixed price 50000=0.05 USDC) and /run

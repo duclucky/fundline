@@ -222,12 +222,115 @@ function navigate(href) {
   render();
 }
 
-// Server-reported master switch for the live workflow runner. Until /api/config
-// confirms it is on, every workflow shows as "coming soon" (safe to deploy the
-// frontend before the server flag and keys are enabled).
+// Server-reported config (/api/config). Until it loads, every workflow shows as
+// "coming soon" (safe to deploy the frontend before the server flag/keys are on).
 let WF_RUNNER_ENABLED = false;
+let WF_CONFIG = {};
 function isWorkflowLive(wf) {
   return Boolean(wf && wf.live && WF_RUNNER_ENABLED);
+}
+// Billing is on only when the workflow is live AND the server has the escrow +
+// treasury configured. When off, runs use the free beta path (no on-chain pay).
+function isBillingEnabled(wf) {
+  return Boolean(isWorkflowLive(wf) && WF_CONFIG && WF_CONFIG.workflowBillingEnabled);
+}
+
+// --- Minimal EIP-1193 wallet helpers for escrow funding (billing path) ---
+const ARC_CHAIN_ID_HEX = "0x4cef52"; // 5042002
+const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
+const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
+const ESCROW_FUND_SELECTOR = "0xe46bbc9e"; // fund(bytes32,uint256)
+
+function getEthProvider() {
+  return (typeof window !== "undefined" && window.ethereum) ? window.ethereum : null;
+}
+function encAddr(a) { return String(a).toLowerCase().replace(/^0x/, "").padStart(64, "0"); }
+function encUint(n) { return BigInt(n).toString(16).padStart(64, "0"); }
+function encBytes32(h) { return String(h).toLowerCase().replace(/^0x/, "").padStart(64, "0"); }
+
+async function ensureArcChain(provider) {
+  const current = await provider.request({ method: "eth_chainId" });
+  if (String(current).toLowerCase() === ARC_CHAIN_ID_HEX) return;
+  try {
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: ARC_CHAIN_ID_HEX }] });
+  } catch (err) {
+    throw new Error("Switch your wallet to Arc Testnet to pay.");
+  }
+}
+async function readAllowance(provider, usdc, owner, spender) {
+  const data = ERC20_ALLOWANCE_SELECTOR + encAddr(owner) + encAddr(spender);
+  const res = await provider.request({ method: "eth_call", params: [{ to: usdc, data }, "latest"] });
+  return BigInt(res || "0x0");
+}
+async function sendWalletTx(provider, from, to, data) {
+  return provider.request({ method: "eth_sendTransaction", params: [{ from, to, data, value: "0x0" }] });
+}
+async function waitWalletTx(provider, hash) {
+  for (let i = 0; i < 60; i += 1) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const rcpt = await provider.request({ method: "eth_getTransactionReceipt", params: [hash] });
+    if (rcpt) {
+      if (rcpt.status === "0x0") throw new Error("Transaction reverted on-chain.");
+      return rcpt;
+    }
+  }
+  throw new Error("Transaction not confirmed in time.");
+}
+
+// Quote -> approve (if needed) -> fund the escrow from the user's wallet.
+// statusFn(text) updates the run button label during the wallet steps.
+async function fundWorkflowRun(slug, statusFn) {
+  const provider = getEthProvider();
+  if (!provider) throw new Error("No wallet found. Install a wallet to pay and run.");
+  statusFn("Connecting wallet...");
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
+  const from = accounts && accounts[0];
+  if (!from) throw new Error("No wallet account available.");
+  await ensureArcChain(provider);
+
+  statusFn("Getting quote...");
+  const qRes = await fetch(`/api/workflows/${slug}/quote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const quote = await qRes.json().catch(() => ({}));
+  if (!qRes.ok) throw new Error(quote.message || "Could not get a quote.");
+
+  const amount = BigInt(quote.amount);
+  const escrow = quote.escrowAddress;
+  const usdc = quote.usdc;
+
+  const allowance = await readAllowance(provider, usdc, from, escrow);
+  if (allowance < amount) {
+    statusFn("Approve USDC in your wallet...");
+    const approveData = ERC20_APPROVE_SELECTOR + encAddr(escrow) + encUint(amount);
+    const approveHash = await sendWalletTx(provider, from, usdc, approveData);
+    statusFn("Confirming approval...");
+    await waitWalletTx(provider, approveHash);
+  }
+
+  statusFn("Confirm payment in your wallet...");
+  const fundData = ESCROW_FUND_SELECTOR + encBytes32(quote.runId) + encUint(amount);
+  const fundHash = await sendWalletTx(provider, from, escrow, fundData);
+  statusFn("Confirming payment...");
+  await waitWalletTx(provider, fundHash);
+  return quote.runId;
+}
+
+// Show an error in the run result area (used for funding failures before the run).
+function displayRunError(message) {
+  const resultEl = document.getElementById("wfRunResult");
+  const receiptEl = document.getElementById("wfRunReceipt");
+  if (receiptEl) receiptEl.hidden = true;
+  if (!resultEl) return;
+  resultEl.hidden = false;
+  const label = resultEl.querySelector(".wf-run-result-label");
+  if (label) label.textContent = "Could not complete";
+  const actions = resultEl.querySelector(".wf-result-actions");
+  if (actions) actions.style.display = "none";
+  const body = document.getElementById("wfRunResultBody");
+  if (body) body.textContent = message;
 }
 
 function switchToTab(name) {
@@ -845,7 +948,24 @@ function bindDetail(slug, wf) {
         if (!sources.length) { flashOutline(pasteEl); return; }
       }
       switchToTab("Workflow Steps");
-      runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources });
+
+      if (isBillingEnabled(wf)) {
+        // Pay first: quote -> approve -> fund the escrow, then run with the runId.
+        const runBtn = document.getElementById("wfRunBtn");
+        const runIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>`;
+        runBtn.disabled = true;
+        document.getElementById("wfRunResult").hidden = true;
+        document.getElementById("wfRunReceipt").hidden = true;
+        fundWorkflowRun(slug, (text) => { runBtn.innerHTML = esc(text); })
+          .then((runId) => runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, runId }))
+          .catch((err) => {
+            runBtn.disabled = false;
+            runBtn.innerHTML = `${runIcon} Run Workflow`;
+            displayRunError(err.message || "Payment was not completed.");
+          });
+      } else {
+        runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources });
+      }
     });
   }
 
@@ -887,6 +1007,7 @@ function runWorkflow(slug, wf, opts) {
   // Fire the real request immediately; the canvas animation paces against it.
   const reqBody = { prompt: opts.prompt, mode: opts.mode };
   if (opts.sources && opts.sources.length) reqBody.sources = opts.sources;
+  if (opts.runId) reqBody.runId = opts.runId;
   const fetchPromise = fetch(`/api/workflows/${slug}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1082,7 +1203,7 @@ window.addEventListener("DOMContentLoaded", () => {
   bindSidebarToggles();
   fetch("/api/config")
     .then((r) => r.json())
-    .then((c) => { WF_RUNNER_ENABLED = Boolean(c && c.workflowRunnerEnabled); })
+    .then((c) => { WF_CONFIG = c || {}; WF_RUNNER_ENABLED = Boolean(c && c.workflowRunnerEnabled); })
     .catch(() => {})
     .finally(() => render());
 
