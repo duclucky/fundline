@@ -51,6 +51,10 @@ repeatable workflows and orchestrate the subagents:
 - `predeploy-check` - the ship gate before pushing to main (syntax, tests, rule and secret scan)
 - `escrow-build` - the phase-1 FundlineEscrow pipeline (write, audit, wire, test); never deploys
 - `verify-payment-audit` - settlement-integrity audit of the on-chain payment verification path
+- `create-workflow` - end-to-end procedure to design and ship a new AI workflow (adapt a
+  community chain -> v98store executor -> /run wiring -> frontend -> tests -> deploy). Read it
+  before building any new workflow. Provider details: `v98store-api`. Also `v98store-api` - the
+  v98store provider contract, model-id map, and price table for workflow model calls.
 
 ## Memory
 

@@ -536,6 +536,12 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   workflowRunnerEnabled=false and EVERY workflow shows "Coming soon" (the old mock Run demo is
   gone on prod while dormant - expected, safe). Once enabled: client-research runs live
   (search + paste modes), others stay "Coming soon". Frontend DOM still not browser-tested by me.
+- SKILL `create-workflow` exists (`.claude/skills/create-workflow/SKILL.md`, listed in CLAUDE.md
+  Skills). It is the end-to-end procedure for building a new AI workflow (adapt a community chain
+  -> v98store executor -> /run wiring -> frontend -> tests -> deploy). WHEN THE USER ASKS TO
+  CREATE/ADD A NEW WORKFLOW, open and follow it so the design is consistent. It orchestrates the
+  v98store-api skill, workflow-rate-limit-spec.md, workflow-sources.md, and the worked example
+  workflow-gpt-researcher.md.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
