@@ -542,6 +542,22 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   CREATE/ADD A NEW WORKFLOW, open and follow it so the design is consistent. It orchestrates the
   v98store-api skill, workflow-rate-limit-spec.md, workflow-sources.md, and the worked example
   workflow-gpt-researcher.md.
+- WORKFLOW BILLING design DONE -> spec `.claude/workflow-billing-spec.md` (2026-06-28, NOT built).
+  Model: charge per workflow run via a NON-CUSTODIAL per-run escrow on Arc in USDC. Researched
+  Circle's official `circlefin/arc-escrow` (contract RefundProtocol.sol is non-custodial: funds
+  depositor->contract->beneficiary, no admin drain, no fee; but its APP layer uses Circle
+  Developer-Controlled Wallets + OpenAI + Supabase = custodial -> DROPPED). Decisions locked:
+  per-run escrow, USER signs fund() from own wallet for the FIXED workflow price (check balance,
+  else top up); output -> Fundline TREASURY key signs release() (no AI/confirm/window); failure ->
+  treasury refund() + a REFUND_WINDOW timeout so user can claimRefund() if treasury goes silent;
+  fixed price (profit/loss ours, no per-node cost in memo); memo self-emitted by the escrow in the
+  SAME InvoiceMemo format/topic as FundlineMemoRouter (reuse memo-util; new buildWorkflowMemoText
+  = workflow name + nodes + models, NO cost/user/input/output). New contract FundlineRunEscrow
+  (constructor usdc+treasury immutable, fund/release/refund/claimRefund, SafeERC20, 6 decimals).
+  Env: ARC_RUN_ESCROW_ADDRESS + ARC_TREASURY_PRIVATE_KEY (treasury is a Fundline hot key, NOT a
+  user key). MUST build via escrow-build skill (escrow-engineer + MANDATORY contract-auditor on
+  the invariants) before any deploy. Open: REFUND_WINDOW value; billing-replaces-beta vs
+  free-then-billed; one contract for all workflows (recommended).
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
