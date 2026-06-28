@@ -583,7 +583,11 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 - FundlineRunEscrow DEPLOYED to Arc testnet 2026-06-28: `0xefDDfF01090404f1eC942d96346B00638339b8D5`
   (treasury `0xee395f5bc60AE30b8279dfcf8cf0ABa392EC36FC`, deploy tx 0xecb2a6f2..., block 49154785).
   ARC_RUN_ESCROW_ADDRESS in .env (the deploy script printed "Updated .env" but the write did NOT
-  persist - had to append manually; watch updateEnvValue on this machine). Server BILLING
+  persist - had to append manually; watch updateEnvValue on this machine). VERIFIED on Arcscan
+  2026-06-28 (is_fully_verified=true) via scripts/verify-run-escrow.js (Blockscout flattened-code,
+  compiler v0.8.35+commit.47b9dedd, optimizer 200, evm default, autodetect ctor args).
+  ARC_TREASURY_PRIVATE_KEY now present in .env -> billing can sign (WORKFLOW_BILLING_ENABLED true
+  when server boots with all of: escrow addr + USDC + treasury key). Server BILLING
   INTEGRATION wired (branch run-escrow, commit 4fb7383, NOT merged/deployed to prod): run-escrow-
   client.js (read getRun, treasury release/refund), memo-util.buildWorkflowMemoText, server.js
   /api/workflows/:slug/quote (issues high-entropy runId + fixed price 50000=0.05 USDC) and /run
