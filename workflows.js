@@ -650,8 +650,8 @@ function renderRunPanel(slug, wf) {
       <div class="wf-run-price-tag">${esc(wf.price)} USDC / call</div>
     </div>
     <div class="wf-run-modes" role="group" aria-label="Input mode">
-      <button class="wf-run-mode-btn is-active" data-mode="own" type="button">Write my own</button>
-      <button class="wf-run-mode-btn" data-mode="build" type="button">Build for me</button>
+      <button class="wf-run-mode-btn is-active" data-mode="own" type="button">Write prompt</button>
+      <button class="wf-run-mode-btn" data-mode="build" type="button">Generate prompt</button>
     </div>
 
     <div id="wfModeOwn" class="wf-run-mode-panel">
