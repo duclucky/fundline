@@ -484,10 +484,32 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   recorded) and /run (501 not_implemented until phase 2), /api/config now returns
   workflowRunnerEnabled/workflowFreeRunsPerDay/workflowGenPromptsPerDay/workflowBetaNotice. Tests:
   test_v98_cost.js (14), test_workflow_limiter.js (23) pass; server requires cleanly with
-  FUNDLINE_NO_LISTEN; HTTP smoke test confirmed config fields + run 501 + build-prompt 503 (empty
-  key). .env.example documents all new vars. NOT YET DONE: real happy-path build-prompt call needs
-  the live key (costs ~$0.00002; user can test locally) + confirm key group_ratio; frontend not
-  wired (phase 2); /run execution (phase 2 = Tavily + GPT Researcher chain).
+  FUNDLINE_NO_LISTEN. VERIFIED END-TO-END 2026-06-28 with the real key: POST build-prompt returned
+  HTTP 200 + a real professional prompt, genCount 1/3 (remaining 2), cost 52 micro-USD ($0.000052)
+  recorded in BOTH data/workflow-usage.json (per-IP) and workflow-budget.json (global), matching
+  gpt-4o-mini at group 1x. Caveat: cost recorded at V98STORE_GROUP_RATIO=1; if the key is a higher
+  group the real credit burn is higher -> set V98STORE_GROUP_RATIO once confirmed from dashboard
+  (not blocking). Commits on branch workflow-runner-phase1: 9bd297c (docs) + 8ba2084 (code), local
+  only, NOT pushed/deployed. .env.example documents all new vars. Phase 2 next: Tavily + GPT
+  Researcher chain for /run + frontend wiring.
+- WORKFLOW RUNNER PHASE 2 (BACKEND) BUILT + VERIFIED LIVE (2026-06-28, branch
+  workflow-runner-phase1). New: `tavily-client.js` (POST api.tavily.com/search, Bearer auth,
+  returns results[{title,url,content,score}]); `workflow-research.js` = GPT Researcher chain
+  adapted (role select -> plan 3 queries -> Tavily retrieve -> write cited report), prompts close
+  to originals, dependency-injected callModel/searchWeb so it is testable; dedupes sources by URL;
+  sums cost in micro-USD. server.js: WORKFLOW_RUN_DEFS={client-research:research},
+  WORKFLOW_RESEARCH_CHEAP_MODEL (gpt-4o-mini), WORKFLOW_RESEARCH_WRITER_MODEL (gpt-4.1-mini),
+  TAVILY_API_KEY; handleWorkflowRun now executes the research chain (search OR paste mode), reserves
+  one run, records summed cost, rolls back on failure. Modes: search (needs Tavily) + paste
+  (user-pasted sources, no API). test_workflow_research.js (20) passes. LIVE E2E 2026-06-28: POST
+  /api/workflows/client-research/run search mode returned HTTP 200, a real ~1500-word cited
+  markdown report from real Tavily sources (wikipedia, zoominfo, company sites), 6 deduped sources,
+  cost $0.003218 (role 35 + plan 32 + writer 3151 micro-USD), remaining 2/3. Also confirmed:
+  unknown slug -> 501, paste + empty sources -> 400. .env.example documents TAVILY_API_KEY + model
+  vars. STILL TODO (phase 2 frontend): wire workflows.js to call /run + /build-prompt for real,
+  drive the canvas off the response, add paste-sources UI mode, show remaining quota + beta notice.
+  Then predeploy-check + decide deploy. Note: current WORKFLOWS frontend display still has mock
+  step labels/metrics; align client-research display with the real chain when wiring.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.

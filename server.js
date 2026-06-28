@@ -7,6 +7,8 @@ const { ethers } = require("ethers");
 const v98Client = require("./v98-client");
 const v98Models = require("./v98-models");
 const workflowLimiter = require("./workflow-limiter");
+const tavilyClient = require("./tavily-client");
+const workflowResearch = require("./workflow-research");
 
 const PORT = Number(process.env.PORT || 5190);
 const ROOT = __dirname;
@@ -94,6 +96,14 @@ const WORKFLOW_LIMITS = {
   gensPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
   spendCapMicros: Math.round(WORKFLOW_SPEND_PER_IP_PER_DAY_USD * 1000000),
   dailyBudgetMicros: Math.round(WORKFLOW_DAILY_BUDGET_USD * 1000000),
+};
+// Research workflow (GPT Researcher chain) models + Tavily retrieval (phase 2).
+const WORKFLOW_RESEARCH_CHEAP_MODEL = String(process.env.WORKFLOW_RESEARCH_CHEAP_MODEL || "gpt-4o-mini").trim();
+const WORKFLOW_RESEARCH_WRITER_MODEL = String(process.env.WORKFLOW_RESEARCH_WRITER_MODEL || "gpt-4.1-mini").trim();
+const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
+// Slugs runnable server-side and their chain type. Others return 501.
+const WORKFLOW_RUN_DEFS = {
+  "client-research": { type: "research" },
 };
 const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
@@ -554,10 +564,11 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
   }
 }
 
-// POST /api/workflows/:slug/run - live multi-step execution. The chains are not
-// wired server-side yet (phase 2), so this reserves nothing and reports
-// not-implemented; the limiter and provider plumbing it will use already exist.
-function handleWorkflowRun(req, res, slug) {
+// POST /api/workflows/:slug/run - live multi-step execution. Currently the
+// research chain (GPT Researcher adaptation) is wired for the runnable slugs in
+// WORKFLOW_RUN_DEFS; other slugs return 501. Reserves one run, executes the
+// chain, records the summed cost, and rolls back the reservation on failure.
+async function handleWorkflowRun(req, res, slug) {
   if (!WORKFLOW_RATE_LIMIT_ENABLED) {
     sendJson(res, 404, { error: "Not found" });
     return;
@@ -566,7 +577,78 @@ function handleWorkflowRun(req, res, slug) {
     sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
-  sendJson(res, 501, { error: "not_implemented", message: "Live workflow runs are coming soon." });
+  if (!V98STORE_API_KEY) {
+    sendJson(res, 503, { error: "service_unconfigured", message: "Workflow provider is not configured." });
+    return;
+  }
+  const def = WORKFLOW_RUN_DEFS[slug];
+  if (!def || def.type !== "research") {
+    sendJson(res, 501, { error: "not_implemented", message: "This workflow is not available for live runs yet." });
+    return;
+  }
+
+  let input;
+  try {
+    input = await readJsonBody(req);
+  } catch (error) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: error.message || "Invalid request" } });
+    return;
+  }
+
+  const query = String(input.prompt || input.query || "").trim().slice(0, 4000);
+  const mode = input.mode === "paste" ? "paste" : "search";
+  const pastedSources = input.sources;
+  if (mode === "search" && !query) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A prompt is required" } });
+    return;
+  }
+  if (mode === "search" && !TAVILY_API_KEY) {
+    sendJson(res, 503, { error: "search_unconfigured", message: "Web search is not configured. Paste your own sources instead." });
+    return;
+  }
+  if (mode === "paste" && (!pastedSources || (Array.isArray(pastedSources) && !pastedSources.length))) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Paste at least one source" } });
+    return;
+  }
+
+  const paths = workflowLimiterPaths();
+  const ipKey = workflowClientIpKey(req);
+  const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: WORKFLOW_LIMITS });
+  if (!reserve.ok) {
+    sendJson(res, reserve.status, { error: reserve.error, message: workflowLimitMessage(reserve.error), remaining: 0, resetsAt: reserve.resetsAt });
+    return;
+  }
+
+  const v98config = { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL };
+  try {
+    const result = await workflowResearch.runResearchWorkflow({
+      query,
+      mode,
+      pastedSources,
+      cheapModel: WORKFLOW_RESEARCH_CHEAP_MODEL,
+      writerModel: WORKFLOW_RESEARCH_WRITER_MODEL,
+      groupRatio: V98STORE_GROUP_RATIO,
+      callModel: (modelId, messages, maxTokens) =>
+        v98Client.callV98Chat(v98config, { model: modelId, messages, maxTokens })
+          .then((r) => ({ content: r.content, usage: r.usage })),
+      searchWeb: (q, maxResults) =>
+        tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults })
+          .then((r) => r.results),
+    });
+    workflowLimiter.recordCost({ ...paths, ipKey, costMicros: result.totalCostMicros });
+    sendJson(res, 200, {
+      output: result.report,
+      steps: result.steps,
+      sources: result.sources,
+      costUsd: (result.totalCostMicros / 1000000).toFixed(6),
+      remaining: reserve.remaining,
+      resetsAt: reserve.resetsAt,
+    });
+  } catch (error) {
+    workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "run" });
+    console.error("[Workflow] run error:", error.message);
+    sendJson(res, 502, { error: "provider_error", message: "The workflow could not complete right now." });
+  }
 }
 
 // Shared invoice-creation core used by both POST /api/invoices and the Telegram
