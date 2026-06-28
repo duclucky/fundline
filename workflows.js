@@ -286,6 +286,8 @@ async function fundWorkflowRun(slug, statusFn) {
   const accounts = await provider.request({ method: "eth_requestAccounts" });
   const from = accounts && accounts[0];
   if (!from) throw new Error("No wallet account available.");
+  WF_WALLET = from;
+  updateWalletChip();
   await ensureArcChain(provider);
 
   statusFn("Getting quote...");
@@ -331,6 +333,47 @@ function displayRunError(message) {
   if (actions) actions.style.display = "none";
   const body = document.getElementById("wfRunResultBody");
   if (body) body.textContent = message;
+}
+
+// --- Wallet connection state + UI (billing) ---
+let WF_WALLET = "";
+function shortAddr(a) { return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : ""; }
+function updateWalletChip() {
+  const btn = document.getElementById("wfConnectBtn");
+  const addr = document.getElementById("wfWalletAddr");
+  if (!btn || !addr) return;
+  if (WF_WALLET) {
+    btn.hidden = true;
+    addr.hidden = false;
+    addr.textContent = `${shortAddr(WF_WALLET)} (Arc Testnet)`;
+  } else {
+    btn.hidden = false;
+    addr.hidden = true;
+  }
+}
+async function connectWalletUI() {
+  const provider = getEthProvider();
+  if (!provider) throw new Error("No wallet found. Install a wallet to pay and run.");
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
+  WF_WALLET = (accounts && accounts[0]) || "";
+  updateWalletChip();
+  return WF_WALLET;
+}
+// Reflect an already-connected wallet without popping the wallet (eth_accounts).
+async function refreshWalletUI() {
+  const provider = getEthProvider();
+  if (!provider) return;
+  try {
+    const accounts = await provider.request({ method: "eth_accounts" });
+    WF_WALLET = (accounts && accounts[0]) || "";
+  } catch (err) {
+    WF_WALLET = "";
+  }
+  updateWalletChip();
+  if (provider.on && !provider._wfBound) {
+    provider._wfBound = true;
+    provider.on("accountsChanged", (accs) => { WF_WALLET = (accs && accs[0]) || ""; updateWalletChip(); });
+  }
 }
 
 function switchToTab(name) {
@@ -810,9 +853,17 @@ function renderRunPanel(slug, wf) {
 
     ${retrieval}
 
+    ${isBillingEnabled(wf) ? `
+    <div class="wf-wallet-row" id="wfWalletRow">
+      <span class="wf-wallet-label">Wallet</span>
+      <button class="wf-btn-secondary wf-wallet-btn" id="wfConnectBtn" type="button">Connect wallet</button>
+      <span class="wf-wallet-addr" id="wfWalletAddr" hidden></span>
+    </div>
+    <p class="wf-run-hint wf-muted">Pay ${esc(wf.price)} USDC per run from your wallet. Refunded if the run fails.</p>` : ""}
+
     <button class="wf-btn-run" id="wfRunBtn" type="button" data-slug="${esc(slug)}">
       <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
-      Run Workflow
+      ${isBillingEnabled(wf) ? `Pay ${esc(wf.price)} USDC and run` : "Run Workflow"}
     </button>
     <p class="wf-run-quota wf-muted" id="wfRunQuota" hidden></p>
 
@@ -861,6 +912,20 @@ function bindDetail(slug, wf) {
   // Run-panel bindings (only for live workflows; the coming-soon panel has none)
   if (isWorkflowLive(wf)) {
     let retrievalMode = "search";
+
+    // Wallet connect (billing only): reflect any existing connection and wire the button.
+    if (isBillingEnabled(wf)) {
+      refreshWalletUI();
+      const connectBtn = document.getElementById("wfConnectBtn");
+      if (connectBtn) {
+        connectBtn.addEventListener("click", () => {
+          connectBtn.disabled = true;
+          connectWalletUI()
+            .catch((err) => { displayRunError(err.message || "Could not connect wallet."); })
+            .finally(() => { connectBtn.disabled = false; });
+        });
+      }
+    }
 
     function flashOutline(el) {
       el.focus();
@@ -1099,8 +1164,10 @@ function runWorkflow(slug, wf, opts) {
       <div class="wf-receipt-row"><span>Status</span><span class="wf-status-done">Completed</span></div>
       <div class="wf-receipt-steps">${stepRows}</div>
       <div class="wf-receipt-row"><span>Sources</span><span>${sources.length}</span></div>
-      <div class="wf-receipt-row"><span>Est. cost</span><span>~$${esc(String(data.costUsd || "0"))}</span></div>
-      <div class="wf-receipt-row"><span>Settlement</span><span class="wf-muted">Pending on-chain (Arc Testnet)</span></div>`;
+      ${data.releaseTx ? `
+      <div class="wf-receipt-row"><span>Charged</span><span class="wf-receipt-price">${esc(wf.price)} USDC</span></div>
+      <div class="wf-receipt-row"><span>Invoice memo tx</span><a class="wf-link wf-mono" href="${esc((WF_CONFIG.explorerBase || "https://testnet.arcscan.app") + "/tx/" + data.releaseTx)}" target="_blank" rel="noopener">${esc(data.releaseTx.slice(0, 10) + "…" + data.releaseTx.slice(-8))}</a></div>`
+      : `<div class="wf-receipt-row"><span>Settlement</span><span class="wf-muted">Free run (no on-chain charge)</span></div>`}`;
 
     if (quotaEl && data.remaining != null) {
       quotaEl.hidden = false;
