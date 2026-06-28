@@ -416,6 +416,38 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Open threads / TODOs
 
+- PENDING DEPLOY (2026-06-28): local commit `935d61c` "Rename run-mode buttons to Write
+  prompt / Generate prompt" is committed but NOT pushed yet (user wants to deploy later).
+  It only relabels the two Run-panel mode buttons in workflows.js (data-mode own/build and
+  run logic unchanged). Earlier the same day the workflows-canvas series WAS pushed to main
+  (n8n-style Workflow Structure redesign + run animation `8495120`, tabs vertical-scrollbar
+  fix `3992f12`, node simplification to step/name/model `8495120`). Just `git push origin main`
+  from outputs/arc-invoice-usdc when ready; frontend-only, no cPanel restart needed.
+- SPEC (2026-06-28, DRAFT, NOT built): workflow free-run rate limiting + cost control. Full
+  spec in `.claude/workflow-rate-limit-spec.md` (FTP-excluded). Decisions locked with user:
+  D1 workflow runs = 3/IP/day HARD cap (then stop until reset, beta-quota messaging, no
+  pay-to-continue during beta; runs use USDC testnet now); D2 "Generate prompt" = its own
+  separate free 3/IP/day, stays free even after runs move to real USDC; D3 day boundary UTC;
+  D4 per-IP spend cap USD 0.50/day (hard, replaced the earlier token-count idea); D5 provider
+  = v98store (https://v98store.com, one key all models, use the EXACT model per workflow step).
+  Two-layer model: L1 per-IP hard caps (3 runs + 3 gen-prompts + USD 0.50 spend) + L2 global
+  daily API-spend ceiling (the real cost backstop vs VPN/CGNAT bypass). Enforced in NEW server
+  endpoints POST /api/workflows/:slug/run and .../build-prompt (run is pure frontend mock
+  today, no server run path yet). IP read from X-Forwarded-For on cPanel (WORKFLOW_TRUST_PROXY
+  =xff); Cloudflare NOT required. v98store CONFIRMED (user PDF, section 12 of the spec):
+  OpenAI-compatible, base URL https://v98store.com/v1, POST /v1/chat/completions for BOTH GPT
+  and Claude (gateway translates), Bearer auth, standard usage block. Model labels in WORKFLOWS
+  are NOT real ids - need a map: gpt-4.1-mini -> gpt-4.1-mini; claude-3-haiku ->
+  claude-3-haiku-20240307; claude-3.5-sonnet -> claude-3-5-sonnet-20241022 (date suffix
+  required). Price table USD/1M captured in spec; NewAPI markup, group_ratio Default 1x up to
+  16x (Direct Claude) - must confirm OUR key's group. Always send max_tokens (Claude needs it).
+  Q-A RESOLVED: global daily ceiling = USD 10/day for beta (WORKFLOW_DAILY_BUDGET_USD=10).
+  v98store integration contract + model registry + price table + cost formula extracted into a
+  NEW skill `.claude/skills/v98store-api/SKILL.md` (load-on-demand reference for expanding
+  workflows to new models; the spec covers the limiter, the skill covers the provider). STILL
+  OPEN before build: Q-B confirm prod XFF first entry is real client IP; one-off live v98store
+  request to lock exact usage fields, billing/balance path, the key's group_ratio, RPM/TPM. No
+  code written.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
