@@ -203,7 +203,7 @@ async function runResearchWorkflow(opts) {
       const found = await searchWeb(q, maxResults);
       if (Array.isArray(found)) sources = sources.concat(found);
     }
-    steps.push({ name: "Web research", model: null, costMicros: 0 });
+    steps.push({ name: "Web research", model: "Tavily", costMicros: 0 });
     if (!sources.length) throw new Error("No sources found for this query");
   }
   const topSources = selectTopSources(sources, maxSources);

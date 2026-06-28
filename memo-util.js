@@ -102,6 +102,24 @@
     return parts.join(" | ");
   }
 
+  // Build the workflow-run receipt memo emitted by FundlineRunEscrow.release.
+  // Professional, no per-node cost, no user name, no input/output. run: {
+  // workflowName, steps: [{ name, model }] }.
+  function buildWorkflowMemoText(run) {
+    if (!run || !run.workflowName) return "";
+    var lines = ["Fundline workflow receipt", "Workflow: " + run.workflowName];
+    var steps = Array.isArray(run.steps) ? run.steps : [];
+    if (steps.length) {
+      lines.push("Steps:");
+      steps.forEach(function (s, i) {
+        var label = " " + (i + 1) + ". " + (s.name || "step");
+        if (s.model) label += " - " + s.model;
+        lines.push(label);
+      });
+    }
+    return lines.join("\n");
+  }
+
   function encUint256(value) {
     var n = typeof value === "bigint" ? value : BigInt(String(value == null ? "0" : value));
     if (n < 0n) throw new Error("Amount cannot be negative.");
@@ -156,6 +174,7 @@
     canonicalInvoiceForHash: canonicalInvoiceForHash,
     normalizeMemoFields: normalizeMemoFields,
     buildInvoiceMemoText: buildInvoiceMemoText,
+    buildWorkflowMemoText: buildWorkflowMemoText,
     encodePayInvoiceWithMemo: encodePayInvoiceWithMemo,
   };
 

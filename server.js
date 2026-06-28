@@ -9,6 +9,8 @@ const v98Models = require("./v98-models");
 const workflowLimiter = require("./workflow-limiter");
 const tavilyClient = require("./tavily-client");
 const workflowResearch = require("./workflow-research");
+const runEscrowClient = require("./run-escrow-client");
+const fundlineMemo = require("./memo-util");
 
 const PORT = Number(process.env.PORT || 5190);
 const ROOT = __dirname;
@@ -105,10 +107,21 @@ const WORKFLOW_LIMITS = {
 const WORKFLOW_RESEARCH_CHEAP_MODEL = String(process.env.WORKFLOW_RESEARCH_CHEAP_MODEL || "gpt-4o-mini").trim();
 const WORKFLOW_RESEARCH_WRITER_MODEL = String(process.env.WORKFLOW_RESEARCH_WRITER_MODEL || "gpt-4.1-mini").trim();
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
-// Slugs runnable server-side and their chain type. Others return 501.
+// Slugs runnable server-side: chain type, display name (for the memo), and the
+// fixed price in USDC base units (6 decimals; 50000 = 0.05 USDC). Others return 501.
 const WORKFLOW_RUN_DEFS = {
-  "client-research": { type: "research" },
+  "client-research": { type: "research", name: "Client Research", priceUnits: 50000 },
 };
+// Treasury hot key that signs release/refund (Fundline-controlled, matches
+// ARC_TREASURY_ADDRESS). Secret; read-only escrow verification works without it.
+const ARC_TREASURY_PRIVATE_KEY = String(process.env.ARC_TREASURY_PRIVATE_KEY || "").trim();
+const runEscrow = runEscrowClient.createRunEscrowClient({
+  escrowAddress: ARC_RUN_ESCROW_ADDRESS,
+  rpcUrl: ARC_RPC_URL,
+  treasuryKey: ARC_TREASURY_PRIVATE_KEY,
+});
+// Billing is active only when the escrow is deployed AND the treasury can sign.
+const WORKFLOW_BILLING_ENABLED = Boolean(ARC_RUN_ESCROW_ADDRESS && ARC_USDC_TOKEN_ADDRESS && ARC_TREASURY_PRIVATE_KEY);
 const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
@@ -330,6 +343,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  const wfQuoteMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/quote$/i);
+  if (wfQuoteMatch) {
+    handleWorkflowQuote(req, res, wfQuoteMatch[1]);
+    return;
+  }
+
   const wfBuildPromptMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/build-prompt$/i);
   if (wfBuildPromptMatch) {
     handleWorkflowBuildPrompt(req, res, wfBuildPromptMatch[1]);
@@ -474,7 +493,8 @@ function handlePublicConfig(req, res) {
     batchPaymentsEnabled: Boolean(ARC_BATCH_ROUTER_ADDRESS && ARC_USDC_TOKEN_ADDRESS),
     maxBatchRecipients: MAX_BATCH_RECIPIENTS,
     runEscrowAddress: ARC_RUN_ESCROW_ADDRESS,
-    workflowBillingEnabled: Boolean(ARC_RUN_ESCROW_ADDRESS && ARC_USDC_TOKEN_ADDRESS),
+    workflowBillingEnabled: WORKFLOW_BILLING_ENABLED,
+    workflowPrices: Object.fromEntries(Object.entries(WORKFLOW_RUN_DEFS).map(([slug, d]) => [slug, { units: String(d.priceUnits), usdc: (d.priceUnits / 1000000).toFixed(6) }])),
     gatewayWalletAddress: GATEWAY_WALLET_ADDRESS,
     gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
     gatewayEnabled: Boolean(CIRCLE_GATEWAY_API_KEY),
@@ -570,10 +590,41 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
   }
 }
 
-// POST /api/workflows/:slug/run - live multi-step execution. Currently the
-// research chain (GPT Researcher adaptation) is wired for the runnable slugs in
-// WORKFLOW_RUN_DEFS; other slugs return 501. Reserves one run, executes the
-// chain, records the summed cost, and rolls back the reservation on failure.
+// POST /api/workflows/:slug/quote - issue a high-entropy runId + the fixed price so
+// the client can fund the escrow before running. Only when billing is active.
+async function handleWorkflowQuote(req, res, slug) {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED) {
+    sendJson(res, 404, { error: "Not found" });
+    return;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const def = WORKFLOW_RUN_DEFS[slug];
+  if (!def) {
+    sendJson(res, 501, { error: "not_implemented", message: "This workflow is not available for live runs yet." });
+    return;
+  }
+  if (!WORKFLOW_BILLING_ENABLED) {
+    sendJson(res, 503, { error: "billing_unconfigured", message: "Workflow billing is not configured." });
+    return;
+  }
+  const runId = `0x${crypto.randomBytes(32).toString("hex")}`;
+  sendJson(res, 200, {
+    runId,
+    amount: String(def.priceUnits),
+    amountUsdc: (def.priceUnits / 1000000).toFixed(6),
+    escrowAddress: ARC_RUN_ESCROW_ADDRESS,
+    usdc: ARC_USDC_TOKEN_ADDRESS,
+    chainId: ARC_CHAIN_ID,
+  });
+}
+
+// POST /api/workflows/:slug/run - live multi-step execution of a runnable slug.
+// When billing is active, the run must be funded in the escrow first (verified
+// on-chain); on success the treasury releases the escrow with a memo, on failure
+// it refunds. When billing is off, it runs free (beta) under the rate-limit caps.
 async function handleWorkflowRun(req, res, slug) {
   if (!WORKFLOW_RATE_LIMIT_ENABLED) {
     sendJson(res, 404, { error: "Not found" });
@@ -617,6 +668,37 @@ async function handleWorkflowRun(req, res, slug) {
     return;
   }
 
+  // Billing: verify the run is funded on-chain BEFORE doing any paid work.
+  const billing = WORKFLOW_BILLING_ENABLED;
+  let runId = "";
+  if (billing) {
+    runId = String(input.runId || "");
+    if (!/^0x[0-9a-fA-F]{64}$/.test(runId)) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A funded runId is required" } });
+      return;
+    }
+    let onchain;
+    try {
+      onchain = await runEscrow.readRun(runId);
+    } catch (error) {
+      console.error("[Workflow] escrow read error:", error.message);
+      sendJson(res, 502, { error: "escrow_error", message: "Could not verify the funded run." });
+      return;
+    }
+    if (/^0x0+$/.test(onchain.payer)) {
+      sendJson(res, 402, { error: "not_funded", message: "This run is not funded yet." });
+      return;
+    }
+    if (onchain.released || onchain.refunded) {
+      sendJson(res, 409, { error: "already_settled", message: "This run was already settled." });
+      return;
+    }
+    if (onchain.amount !== BigInt(def.priceUnits)) {
+      sendJson(res, 400, { error: "amount_mismatch", message: "Funded amount does not match the price." });
+      return;
+    }
+  }
+
   const paths = workflowLimiterPaths();
   const ipKey = workflowClientIpKey(req);
   const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: WORKFLOW_LIMITS });
@@ -641,19 +723,53 @@ async function handleWorkflowRun(req, res, slug) {
         tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults })
           .then((r) => r.results),
     });
+    // Record the real v98 cost (in micro-USD) for the rate-limit + budget caps.
+    // This is OUR provider cost, separate from the USDC the user paid via escrow.
     workflowLimiter.recordCost({ ...paths, ipKey, costMicros: result.totalCostMicros });
+
+    let releaseTx = null;
+    let memoText = null;
+    if (billing) {
+      memoText = fundlineMemo.buildWorkflowMemoText({
+        workflowName: def.name,
+        steps: result.steps.map((s) => ({ name: s.name, model: s.model })),
+      });
+      try {
+        releaseTx = await runEscrow.release(runId, memoText);
+      } catch (error) {
+        // The run succeeded and the output is delivered; only the on-chain release
+        // failed. Do NOT refund (we delivered). Funds stay in escrow until a retry
+        // or the payer's claimRefund window. Log and return the output.
+        console.error("[Workflow] release error:", error.message);
+      }
+    }
+
     sendJson(res, 200, {
       output: result.report,
       steps: result.steps,
       sources: result.sources,
       costUsd: (result.totalCostMicros / 1000000).toFixed(6),
+      releaseTx,
+      memo: memoText,
       remaining: reserve.remaining,
       resetsAt: reserve.resetsAt,
     });
   } catch (error) {
     workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "run" });
+    if (billing) {
+      try {
+        await runEscrow.refund(runId);
+      } catch (refundError) {
+        console.error("[Workflow] refund error:", refundError.message);
+      }
+    }
     console.error("[Workflow] run error:", error.message);
-    sendJson(res, 502, { error: "provider_error", message: "The workflow could not complete right now." });
+    sendJson(res, 502, {
+      error: "provider_error",
+      message: billing
+        ? "The workflow could not complete; your payment was refunded."
+        : "The workflow could not complete right now.",
+    });
   }
 }
 
