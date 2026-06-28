@@ -3147,16 +3147,6 @@ a.nav-item {
   text-overflow: ellipsis;
 }
 
-.wfg2-purpose {
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
 /* Status indicator inside node */
 
 .wfg2-state {

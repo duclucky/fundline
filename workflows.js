@@ -476,7 +476,6 @@ function renderCanvasNode(node, gCol, gRow) {
     </div>
     <div class="wfg2-name">${esc(node.name)}</div>
     ${model}
-    <div class="wfg2-purpose">${esc(node.purpose)}</div>
   </div>`;
 }
 
