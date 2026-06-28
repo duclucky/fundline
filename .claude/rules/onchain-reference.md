@@ -7,6 +7,10 @@
 - FundlineBatchRouter (Arc testnet, one-to-many payout for payroll): `0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4`
   (verified on Arcscan; payBatch / payBatchWithMemo, non-custodial, atomic; env
   `ARC_BATCH_ROUTER_ADDRESS`, returned as `batchRouterAddress` in GET /api/config).
+- FundlineRunEscrow (Arc testnet, non-custodial per-run workflow billing): `0xefDDfF01090404f1eC942d96346B00638339b8D5`
+  (deploy tx 0xecb2a6f2..., block 49154785; treasury beneficiary `0xee395f5bc60AE30b8279dfcf8cf0ABa392EC36FC`;
+  env `ARC_RUN_ESCROW_ADDRESS`, returned as `runEscrowAddress` in GET /api/config. fund/release/refund/
+  claimRefund, self-emits InvoiceMemo. Treasury signs release/refund via `ARC_TREASURY_PRIVATE_KEY`.)
 - PaymentRouter (Arc testnet, LEGACY, superseded by FundlineMemoRouter): `0x7f3bCf33711F981e2d67870D5Cdb5503f01e1a24`
 - Deployer wallet: `0x8124ca3f0ca935e6beb69f2857e33d32fa3b54ea`
 - USDC on Arc (system contract, 6 decimals): `0x3600000000000000000000000000000000000000`

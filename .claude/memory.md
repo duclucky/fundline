@@ -580,6 +580,21 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   memo-util buildWorkflowMemoText) on success / refund on failure; frontend approve+fund flow;
   (3) testnet lifecycle dry-run. Keep rate-limit + $10/day budget caps ON (testnet USDC billing
   does not cover real v98 cost).
+- FundlineRunEscrow DEPLOYED to Arc testnet 2026-06-28: `0xefDDfF01090404f1eC942d96346B00638339b8D5`
+  (treasury `0xee395f5bc60AE30b8279dfcf8cf0ABa392EC36FC`, deploy tx 0xecb2a6f2..., block 49154785).
+  ARC_RUN_ESCROW_ADDRESS in .env (the deploy script printed "Updated .env" but the write did NOT
+  persist - had to append manually; watch updateEnvValue on this machine). Server BILLING
+  INTEGRATION wired (branch run-escrow, commit 4fb7383, NOT merged/deployed to prod): run-escrow-
+  client.js (read getRun, treasury release/refund), memo-util.buildWorkflowMemoText, server.js
+  /api/workflows/:slug/quote (issues high-entropy runId + fixed price 50000=0.05 USDC) and /run
+  billing branch (verify funded on-chain: payer set, amount==price, not settled -> run -> treasury
+  release with memo on success / refund on failure). Free beta path preserved when billing off.
+  /api/config exposes workflowBillingEnabled + workflowPrices. WORKFLOW_BILLING_ENABLED requires
+  escrow addr + USDC + ARC_TREASURY_PRIVATE_KEY. Read path VERIFIED live against the deployed
+  contract. STILL TODO: (1) user must add ARC_TREASURY_PRIVATE_KEY (key for the treasury address)
+  to activate signing/billing; (2) FRONTEND approve+fund flow (quote -> approve USDC -> fund(runId)
+  via EIP-1193 -> /run with runId) - NOT built; (3) full lifecycle dry-run (fund/release/refund)
+  once treasury key present. v98 budget cap stays separate from USDC paid.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
