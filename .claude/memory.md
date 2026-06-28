@@ -587,7 +587,13 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   2026-06-28 (is_fully_verified=true) via scripts/verify-run-escrow.js (Blockscout flattened-code,
   compiler v0.8.35+commit.47b9dedd, optimizer 200, evm default, autodetect ctor args).
   ARC_TREASURY_PRIVATE_KEY now present in .env -> billing can sign (WORKFLOW_BILLING_ENABLED true
-  when server boots with all of: escrow addr + USDC + treasury key). Server BILLING
+  when server boots with all of: escrow addr + USDC + treasury key). LIFECYCLE DRY-RUN PASS 15/15
+  on the live contract (test_run_escrow_dryrun.js, 2026-06-28): fund->release (treasury receives,
+  InvoiceMemo emitted with exact memo body, RunReleased), fund->refund (payer refunded,
+  RunRefunded), double-release reverts, escrow USDC balance deltas exact. Env (first-wins loader,
+  same as server.js): ARC_DEPLOYER_PRIVATE_KEY=payer 0x8124ca3f...54ea (61 USDC), ARC_TREASURY_
+  PRIVATE_KEY=treasury 0xee395f...36fc (= contract beneficiary). Backend + contract fully proven;
+  only the FRONTEND approve+fund flow remains for end-to-end UX. Server BILLING
   INTEGRATION wired (branch run-escrow, commit 4fb7383, NOT merged/deployed to prod): run-escrow-
   client.js (read getRun, treasury release/refund), memo-util.buildWorkflowMemoText, server.js
   /api/workflows/:slug/quote (issues high-entropy runId + fixed price 50000=0.05 USDC) and /run
