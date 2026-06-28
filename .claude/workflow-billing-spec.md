@@ -29,8 +29,11 @@ per-run fixed-price billing case (build as its own minimal contract for audit si
 - Output produced -> Fundline TREASURY signs release; the escrow pays the treasury and emits the
   memo. Workflows are first-party and deterministic, so output = release (no user confirm, no AI
   gate, no review window for release).
-- Failure -> refund to the user (treasury-signed), PLUS a timeout so the user can self-refund if
-  the treasury neither releases nor refunds (protects the user; keeps it non-custodial).
+- Failure -> IMMEDIATE treasury-signed refund + an error shown to the user (so they rerun or try
+  another workflow). "Failure" = a node could not produce output after 3 retries, so the run is
+  aborted and refunded right away. The REFUND_WINDOW / claimRefund below is NOT this path; it is
+  only a stuck-funds backstop for the rare case the server dies AFTER fund() but BEFORE release or
+  refund (without it the user's USDC would be locked forever). REFUND_WINDOW ~1 hour.
 - Memo: FundlineEscrow self-emits it at release, in the SAME `InvoiceMemo` event format/topic as
   FundlineMemoRouter, reusing the memo-util builder (so the existing indexer/verify reads it).
 
@@ -122,6 +125,13 @@ input/output. Example:
 Fixed USDC price per workflow, quoted up-front from `/api/config`. The real v98 cost is internal
 (profit/loss is ours). Set per-workflow (e.g. client-research 0.05 USDC = 50000 units).
 
+BETA NOTE (important): during beta the user pays in Arc TESTNET USDC, which has no economic
+value - this exercises the on-chain billing flow, it is NOT real revenue. Critically, our
+v98store cost is REAL USD even when the user pays testnet USDC, so testnet billing does NOT cap
+our real spend. Therefore KEEP the per-IP rate-limit and the global daily budget cap
+(workflow-rate-limit-spec.md) ON as the real-cost guard during beta; billing runs alongside them,
+not instead of them. (Mainnet later swaps testnet USDC for real USDC = real revenue.)
+
 ## Build order (via escrow-build)
 
 1. escrow-engineer writes contracts/FundlineRunEscrow.sol + deploy script (mirror
@@ -133,9 +143,10 @@ Fixed USDC price per workflow, quoted up-front from `/api/config`. The real v98 
 5. predeploy-check, then deploy the contract (testnet first) + set cPanel env (escrow address,
    treasury key, enable billing) + restart.
 
-## Open questions
-- REFUND_WINDOW exact value (hours)?
-- Should billing replace the free beta immediately, or run alongside (first N free via the
-  limiter, then escrow-billed)?
-- One escrow contract for all workflows (fixed beneficiary = treasury, price per run passed in)
-  vs per-product - recommend ONE contract, price supplied at fund time, validated server-side.
+## Resolved 2026-06-28
+- REFUND_WINDOW = ~1 hour (stuck-funds backstop only; normal failure refunds immediately).
+- Normal failure = a node fails after 3 retries -> abort + immediate refund + error to the user.
+- Billing runs on TESTNET USDC = the beta; it tests the on-chain flow, not revenue, and does NOT
+  cover real v98 cost, so the rate-limit + global budget caps stay ON alongside it.
+- ONE shared escrow contract for all workflows: fixed beneficiary = treasury, price supplied at
+  fund time and validated server-side against the workflow's configured price.

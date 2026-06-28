@@ -556,8 +556,12 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   (constructor usdc+treasury immutable, fund/release/refund/claimRefund, SafeERC20, 6 decimals).
   Env: ARC_RUN_ESCROW_ADDRESS + ARC_TREASURY_PRIVATE_KEY (treasury is a Fundline hot key, NOT a
   user key). MUST build via escrow-build skill (escrow-engineer + MANDATORY contract-auditor on
-  the invariants) before any deploy. Open: REFUND_WINDOW value; billing-replaces-beta vs
-  free-then-billed; one contract for all workflows (recommended).
+  the invariants) before any deploy. RESOLVED 2026-06-28: normal failure (a node fails after 3
+  retries) -> immediate treasury refund + error to user; REFUND_WINDOW ~1h is ONLY a stuck-funds
+  backstop (server dies between fund and release/refund) via claimRefund. ONE shared contract for
+  all workflows (price passed at fund, server-validated). Billing runs on TESTNET USDC = beta
+  (tests on-chain flow, NOT revenue); since v98 cost is REAL USD even when user pays testnet USDC,
+  the per-IP + global budget caps STAY ON as the real-cost guard. Awaiting user "build" go.
 - Phase 1 (active): build, audit, and deploy FundlineEscrow per `escrow-spec.md`. No file
   yet. Use the escrow-engineer agent to write it and contract-auditor to review before any
   deploy; the no-withdraw and no-fee invariants are make-or-break.
