@@ -655,11 +655,6 @@ function renderDetail(slug, wf) {
   return `
     <header class="topbar">
       <div>
-        <p class="eyebrow">
-          <a href="/workflows" class="wf-back-link" data-nav="/workflows">Workflows</a>
-          <svg viewBox="0 0 24 24" aria-hidden="true" style="width:12px;height:12px;vertical-align:middle;margin:0 4px"><path d="M9 18l6-6-6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          ${esc(wf.category)}
-        </p>
         <h1>${esc(wf.name)}</h1>
       </div>
     </header>
