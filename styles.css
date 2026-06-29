@@ -3202,6 +3202,40 @@ a.nav-item {
 .wf-link { color: var(--gold); text-decoration: none; }
 .wf-link:hover { text-decoration: underline; }
 
+/* Run History table redesign */
+.wf-hist-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 12px 0;
+  padding: 0 2px;
+}
+.wf-runs-table td:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wf-hist-workflow {
+  font-weight: 600;
+  color: var(--gold);
+  cursor: pointer;
+  font-size: 13px;
+}
+.wf-hist-workflow:hover { text-decoration: underline; }
+.wf-hist-id {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.6;
+}
+.wf-hist-charged {
+  font-weight: 700;
+  font-size: 13px;
+}
+.wf-hist-date {
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* Settings placeholder */
 
 .wf-settings-placeholder {

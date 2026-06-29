@@ -1236,31 +1236,40 @@ function renderRuns() {
     </div>`;
   }
 
+  const explorer = WF_CONFIG.explorerBase || "https://testnet.arcscan.app";
   const rows = RUN_HISTORY.map((r, idx) => {
+    // Shorten run ID: "0x6d8f...b60e" or keep short randId as-is
+    const shortId = r.id.startsWith("0x")
+      ? r.id.slice(0, 6) + "..." + r.id.slice(-4)
+      : r.id;
     const tx = r.releaseTx
-      ? `<a class="wf-link wf-mono" href="${esc((WF_CONFIG.explorerBase || "https://testnet.arcscan.app") + "/tx/" + r.releaseTx)}" target="_blank" rel="noopener">${esc(r.releaseTx.slice(0, 8) + "..." + r.releaseTx.slice(-6))}</a>`
+      ? `<a class="wf-link wf-mono" href="${esc(explorer + "/tx/" + r.releaseTx)}" target="_blank" rel="noopener">${esc(r.releaseTx.slice(0, 6) + "..." + r.releaseTx.slice(-4))}</a>`
       : `<span class="wf-muted">-</span>`;
+    const statusCls = r.status === "completed" ? "wf-status-done" : "wf-status-failed";
     const viewBtn = r.output
       ? `<button class="wf-receipt-btn" type="button" data-idx="${idx}">View</button>`
-      : `<button class="wf-receipt-btn" type="button" disabled style="opacity:0.4;cursor:default">View</button>`;
+      : `<button class="wf-receipt-btn" type="button" disabled style="opacity:0.35;cursor:default">View</button>`;
     return `<tr>
-      <td class="wf-mono" style="font-size:12px">${esc(r.id)}</td>
-      <td><a href="/workflows/${esc(r.slug)}" class="wf-link" data-nav="/workflows/${esc(r.slug)}">${esc(r.workflow)}</a></td>
+      <td>
+        <span class="wf-hist-workflow" data-nav="/workflows/${esc(r.slug)}">${esc(r.workflow)}</span>
+        <span class="wf-hist-id wf-mono">${esc(shortId)}</span>
+      </td>
       <td>${tx}</td>
-      <td class="wf-num">${esc(r.charged)}</td>
-      <td><span class="wf-run-status ${r.status === "completed" ? "wf-status-done" : "wf-status-failed"}">${r.status}</span></td>
-      <td class="wf-muted" style="font-size:12px">${esc(r.at)}</td>
+      <td class="wf-num wf-hist-charged">${esc(r.charged)} <span class="wf-muted" style="font-size:11px;font-weight:400">USDC</span></td>
+      <td><span class="wf-run-status ${statusCls}">${r.status}</span></td>
+      <td class="wf-hist-date">${esc(r.at)}</td>
       <td>${viewBtn}</td>
     </tr>`;
   }).join("");
 
   return header + `
     <div class="wf-explore-body">
+      <p class="wf-hist-meta">${RUN_HISTORY.length} run${RUN_HISTORY.length === 1 ? "" : "s"} this session</p>
       <div class="wf-table-wrap">
         <table class="wf-runs-table">
           <thead><tr>
-            <th>Run ID</th><th>Workflow</th><th>Transaction</th>
-            <th class="wf-num">Charged (USDC)</th><th>Status</th><th>Date</th><th></th>
+            <th>Workflow</th><th>Transaction</th>
+            <th class="wf-num">Charged</th><th>Status</th><th>Date</th><th></th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
