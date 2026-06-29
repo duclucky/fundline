@@ -1,3 +1,10 @@
+// Returns whichever EIP-1193 provider the user selected in the wallet picker
+// (via wallet.js EIP-6963 discovery), falling back to window.ethereum so that
+// the single-wallet case keeps working exactly as before.
+function getActiveProvider() {
+  return (window.FundlineWallet && window.FundlineWallet.getProvider && window.FundlineWallet.getProvider()) || window.ethereum || null;
+}
+
 const STORAGE_KEY = "arc-invoice-usdc-invoices-v1";
 const SETTINGS_KEY = "arc-invoice-usdc-settings-v1";
 const ARC_EXPLORER_URL = "https://testnet.arcscan.app";
@@ -201,7 +208,7 @@ function bindEvents() {
   els.dialog?.addEventListener("click", (event) => {
     if (event.target === els.dialog) closeDialog();
   });
-  window.ethereum?.on?.("accountsChanged", handleAccountsChanged);
+  getActiveProvider()?.on?.("accountsChanged", handleAccountsChanged);
 }
 
 function isPayRoute() {
@@ -345,7 +352,7 @@ function handleWalletButton() {
 // This just triggers it; syncWalletFromShared mirrors the result into app state.
 async function connectWallet() {
   if (!window.FundlineWallet) {
-    showToast("No wallet extension found. Install or open OKX Wallet, MetaMask, or another EVM wallet.");
+    showToast("No wallet found. Install a wallet extension or configure WalletConnect.");
     return;
   }
   try {
@@ -385,7 +392,7 @@ async function requireWalletSignature(provider, address) {
 
 async function refreshWalletBalance(event) {
   event?.preventDefault();
-  const provider = window.ethereum;
+  const provider = getActiveProvider();
   const address = getConnectedWallet();
   if (!provider?.request || !address) return;
   state.wallet.balance = "Checking...";
@@ -870,11 +877,12 @@ async function getSellerSession(connected, forceNew = false) {
   ].join("\n");
 
   let signature = "";
+  const _p = getActiveProvider();
   try {
-    signature = await window.ethereum.request({ method: "personal_sign", params: [stringToHex(message), connected] });
+    signature = await _p.request({ method: "personal_sign", params: [stringToHex(message), connected] });
   } catch (e) {
     if (Number(e?.code) === 4001) throw e;
-    signature = await window.ethereum.request({ method: "personal_sign", params: [message, connected] });
+    signature = await _p.request({ method: "personal_sign", params: [message, connected] });
   }
 
   const session = { wallet: connected, signature, issuedAt };
@@ -1391,7 +1399,7 @@ async function payInvoiceWithWallet(id) {
     return;
   }
 
-  const provider = window.ethereum;
+  const provider = getActiveProvider();
   if (!provider?.request) {
     showToast("No wallet extension found. Install or open an EVM wallet.");
     return;
@@ -1466,7 +1474,7 @@ async function _retryDirectPay(id, fromStep) {
   renderBridgePayProgress(progress);
   const button = document.querySelector("#payWithWallet");
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
-  const provider = window.ethereum;
+  const provider = getActiveProvider();
   const payerWallet = ctx.payerWallet || getConnectedWallet();
   if (!payerWallet) return;
   try {
@@ -1505,7 +1513,7 @@ async function _retryDirectPay(id, fromStep) {
 // Legacy wrapper - kept for backward compat; bridge path calls this directly.
 // Direct pay path now calls submitArcPaymentWithProgress instead.
 async function submitArcPayment(invoice, payerWallet, button) {
-  const provider = window.ethereum;
+  const provider = getActiveProvider();
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
   await ensurePaymentNetwork(provider, config);
   const onchainDecimals = await readUsdcDecimals(provider, config.usdcTokenAddress);
@@ -1553,7 +1561,7 @@ async function submitArcPayment(invoice, payerWallet, button) {
 
 // Stepper-aware version used by direct pay path.
 async function submitArcPaymentWithProgress(invoice, payerWallet, button, progress) {
-  const provider = window.ethereum;
+  const provider = getActiveProvider();
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
   setProgressStep(progress, "pay", "active", "Switching to Arc network...");
   await ensurePaymentNetwork(provider, config);
@@ -1637,7 +1645,7 @@ async function bridgeAndPayInvoice(id, sourceKey) {
     await payInvoiceWithWallet(id);
     return;
   }
-  const provider = window.ethereum;
+  const provider = getActiveProvider();
   if (!provider?.request) {
     showToast("No wallet extension found. Install or open an EVM wallet.");
     return;
@@ -1746,7 +1754,7 @@ async function _retryBridgePay(id, sourceKey, fromStep) {
   if (!ctx) return;
   const progress = ctx.steps;
   const source = getPaymentSourceChain(sourceKey);
-  const provider = window.ethereum;
+  const provider = getActiveProvider();
   const payerWallet = ctx.payerWallet || getConnectedWallet();
   if (!payerWallet) return;
   const button = document.querySelector("#payWithWallet");
@@ -3340,7 +3348,7 @@ async function payBatchAll(id) {
     showToast("Batch helper failed to load. Hard refresh and try again.");
     return;
   }
-  const provider = window.ethereum;
+  const provider = getActiveProvider();
   if (!provider?.request) {
     showToast("No wallet extension found. Install or open an EVM wallet.");
     return;
