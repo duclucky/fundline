@@ -40,6 +40,12 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   env already has the runner keys from the 2026-06-28 deploy, so all 15 go live on restart; each
   workflow charges its tier price via the existing FundlineRunEscrow billing. Prompts are decent
   beta quality but not yet tuned against real outputs.
+- 2026-06-29: TAVILY REMOVED (commit ccc434e, local). It was never wired into the run path -
+  retrieval nodes do web search via the RESEARCH-alias search model (grok-deepsearch / grok-4 /
+  deepseek-r1-searching) directly; paste mode uses user sources. Deleted tavily-client.js, the
+  unused server.js require, and TAVILY_API_KEY from .env.example; updated public docs.html +
+  index.html diagram + create-workflow skill. cPanel no longer needs TAVILY_API_KEY (harmless if
+  left). Older memory entries below that mention Tavily are historical (pre-removal).
 
 ## User preferences (observed)
 
