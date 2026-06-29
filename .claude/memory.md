@@ -67,6 +67,46 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   no em dash/emoji. Also earlier this session: result download is now a formatted Word .doc
   (buildWordDoc, commit 54524ed, pushed) instead of raw .md.
 
+## Latest work (read first) - QA + pricing pass
+
+- 2026-06-30: ALL 26 workflows RUN LIVE (real v98), quality-reviewed, prompt-tuned, and
+  PRICED from measured per-mode cost (8 commits 6a5934d..5411e77, NOT pushed). Process per
+  user: build -> run each mode real -> review quality -> tune prompts (now carry a fixed
+  output-length directive) -> measure real cost -> round down to a clean USDC value
+  (user-favorable, floor 0.01) -> save tuned prompts so cost stays ~constant. Tools added:
+  run-workflow-once.js (real run: per-node tokens + output + 3-tier cost) and
+  estimate-workflow-cost.js (offline pre-check). Prices live in WORKFLOW_PRICE_OVERRIDES
+  (server.js, units) + WF_PRICE_OVERRIDES (workflows.js, display); client-research display is
+  hand-edited (not in WF_CATALOG). FINAL PRICES (normal/plus/pro USDC): call-recap .01/.01/.02,
+  proposal-sow .01/.01/.08, client-research .03/.03/.06, market-pain-research .03/.03/.06,
+  code-review .01/.01/.05, upwork-proposal .01/.01/.02, rfp-proposal .01/.01/.03, cold-outreach
+  .01/.01/.03, follow-up-nurture .01/.01/.02, timeline-from-sow .01/.01/.04, handover-report
+  .01/.01/.03, seo-content-brief .06/.06/.08 (2 web searches), seo-audit .03/.03/.06,
+  keyword-strategy .01/.01/.03, pr-diff-review .01/.01/.06, x-thread-writer .01/.01/.01,
+  newsletter-writer .01/.01/.03, linkedin-post .01/.01/.01, crypto-research .03/.03/.06,
+  tokenomics-analyzer .01/.01/.02, whitepaper-summary .01/.01/.02, narrative-scan .03/.03/.06,
+  competitor-analysis .03/.03/.05, gtm-plan .01/.01/.02, lean-canvas .01/.01/.02, swot-analysis
+  .01/.01/.02.
+- WEB SEARCH: v98 dedicated search models (deepseek-r1-searching, grok-3-deepsearch, grok-4-fast)
+  are DEAD (503). Use `gpt-4o-mini-search-preview` for the RESEARCH alias (all tiers) - it does
+  REAL live browsing (returns real source URLs with utm_source=openai). `gpt-5-search-api` also
+  works; gpt-4o-search-preview / o4-mini-deep-research are 429 rate-limited. The 7 retrieval
+  workflows (client-research, market-pain-research, seo-content-brief, seo-audit, crypto-research,
+  narrative-scan, competitor-analysis) now return real citations. v98-models.js added these search
+  models with a `perCallUsd` surcharge (~$0.027, the search fee dominates token cost) and
+  computeCostMicros applies it. CAVEAT: perCallUsd + group_ratio=1 are estimates; confirm real
+  charge on the v98 dashboard (the global $10/day budget cap is the backstop).
+- SYSTEMIC FIXES during the pass (benefit all): formatter no longer truncates (step() gives the
+  isFinal node a 4096 cap and NO length directive; the cheap FORMATTER model makes this ~free);
+  table/list nodes output the bare table/list (no preamble or code fence); FORMATTER_SYSTEM and
+  the X-thread/LinkedIn prompts forbid emojis (brand rule); v98-client retries 429 up to 5x with
+  1s..16s backoff (web-search models rate-limit harder; prevents spurious run failures + refunds).
+- PROCESS RULE (user): every NEW workflow must run this loop (run live per mode -> review -> tune
+  -> measure -> price -> save prompts) BEFORE publishing. Token counts are NOT perfectly
+  tier-independent (stronger models like claude write longer), so measure each mode for real.
+- NOT PUSHED yet: 8 commits on main local. Pushing auto-deploys (FTP + Passenger restart). Prod
+  still needs WORKFLOW_RATE_LIMIT_ENABLED + keys in cPanel for workflows to leave "coming soon".
+
 ## User preferences (observed)
 
 - Communicates in Vietnamese and wants my replies in Vietnamese.
