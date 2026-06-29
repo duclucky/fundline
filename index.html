@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fundline - The proof-of-payment layer for USDC invoices</title>
+    <title>Fundline - Freelance Desk for USDC work</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="description" content="Send a USDC invoice as one link. Your client pays from Arc, Base, or Ethereum, and Fundline confirms payment on-chain before it shows as paid. Funds go straight to your wallet, never with us." />
+    <meta name="description" content="Fundline is a freelance desk settled in USDC. Run AI workflows to do the work, invoice clients to get paid, and pay your team, all wallet to wallet with on-chain proof." />
 
     <!-- Open Graph -->
-    <meta property="og:title" content="Fundline - The proof-of-payment layer for USDC invoices" />
-    <meta property="og:description" content="Send a USDC invoice as one link. Fundline confirms payment on-chain before it shows as paid. Funds go straight to your wallet, never with us." />
+    <meta property="og:title" content="Fundline - Freelance Desk for USDC work" />
+    <meta property="og:description" content="Run AI workflows to do the work, invoice clients to get paid, and pay your team. Settled in USDC, wallet to wallet, with on-chain proof." />
     <meta property="og:image" content="/og-image.png" />
     <meta property="og:url" content="https://fundline.xyz" />
     <meta property="og:type" content="website" />
@@ -17,8 +17,8 @@
 
     <!-- Twitter / X Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Fundline - The proof-of-payment layer for USDC invoices" />
-    <meta name="twitter:description" content="Send a USDC invoice as one link. Fundline confirms payment on-chain before it shows as paid. Funds go straight to your wallet, never with us." />
+    <meta name="twitter:title" content="Fundline - Freelance Desk for USDC work" />
+    <meta name="twitter:description" content="Run AI workflows to do the work, invoice clients to get paid, and pay your team. Settled in USDC with on-chain proof." />
     <meta name="twitter:image" content="/og-image.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -39,14 +39,15 @@
       </a>
 
       <nav class="nav-links" aria-label="Primary navigation">
-        <a href="#product" class="nav-link">Product</a>
+        <a href="#workflows" class="nav-link">Workflows</a>
+        <a href="#product" class="nav-link">Payments</a>
         <a href="#developers" class="nav-link">Developers</a>
         <a href="/docs" class="nav-link">Docs</a>
         <a href="#pricing" class="nav-link">Pricing</a>
       </nav>
 
       <div class="nav-actions">
-        <a class="nav-button primary" href="/app" id="nav-cta">Create invoice</a>
+        <a class="nav-button primary" href="/app" id="nav-cta">Get started</a>
       </div>
 
       <button
@@ -66,11 +67,12 @@
     <!-- Mobile menu -->
     <div class="mobile-menu" id="mobile-menu" aria-hidden="true" role="dialog" aria-label="Mobile navigation">
       <nav class="mobile-nav">
-        <a href="#product" class="mobile-link">Product</a>
+        <a href="#workflows" class="mobile-link">Workflows</a>
+        <a href="#product" class="mobile-link">Payments</a>
         <a href="#developers" class="mobile-link">Developers</a>
         <a href="/docs" class="mobile-link">Docs</a>
         <a href="#pricing" class="mobile-link">Pricing</a>
-        <a class="mobile-cta-btn" href="/app" id="mobile-cta">Create invoice</a>
+        <a class="mobile-cta-btn" href="/app" id="mobile-cta">Get started</a>
       </nav>
     </div>
 
@@ -82,66 +84,200 @@
       <section class="hero-section" aria-labelledby="hero-title">
         <div class="live-pill" id="live-pill">
           <span class="live-dot" aria-hidden="true" style="background: var(--gold)"></span>
-          USDC invoicing on Arc, Testnet
+          Live on Arc Testnet
         </div>
 
         <h1 id="hero-title" class="reveal">
-          A transfer is <span class="hero-gradient">not a confirmation.</span>
+          Freelance <span class="hero-gradient">Desk</span>
         </h1>
 
         <p class="hero-copy reveal">
-          Send a USDC invoice as one link. Your client pays from Arc, Base, or Ethereum, and Fundline confirms the exact payment on-chain before it shows as paid. The money lands straight in your wallet, never with us.
+          The USDC desk for independent work. Run AI workflows to do the work, invoice clients to get paid, and pay your team, all settled wallet to wallet with on-chain proof.
         </p>
 
         <div class="hero-actions reveal">
-          <a class="launch-cta" href="/app" id="hero-cta-primary">Send your first invoice</a>
-          <a class="docs-cta" href="/pay/977ee16981ad275ee63f" id="hero-cta-secondary">See a real paid invoice</a>
+          <a class="launch-cta" href="/app" id="hero-cta-primary">Get started</a>
         </div>
-
-        <p class="hero-micro">
-          No signup needed &nbsp;&middot;&nbsp; No credit card &nbsp;&middot;&nbsp; Free on testnet
-        </p>
       </section>
 
       <!-- =============================================
-           3. HOW IT WORKS
+           3. WORKFLOWS (do the work, before payment)
+           ============================================= -->
+      <section class="workflows-section" id="workflows" aria-labelledby="wf-intro-title">
+        <div class="section-header">
+          <p class="eyebrow">Do the work</p>
+          <h2 id="wf-intro-title" class="single-line-title">AI workflows that do the work</h2>
+          <p class="section-sub">Run proven, multi-step AI workflows that chain models and live web search into a finished result. You see every step, model, and cost, and pay per run in USDC through a non-custodial escrow that refunds you if a run fails.</p>
+        </div>
+
+        <figure class="vision-graph-wrap reveal" aria-labelledby="wf-graph-cap">
+          <div class="vision-graph-scroll">
+            <svg class="vision-graph" viewBox="0 0 1180 380" role="img" aria-label="A node graph of the Client Research workflow: your prompt flows through role analysis and research planning, fans out to parallel web searches, merges into a dedupe step, then a report writer produces a cited report.">
+              <defs>
+                <pattern id="vgDots" width="22" height="22" patternUnits="userSpaceOnUse">
+                  <circle cx="1.5" cy="1.5" r="1.2" fill="rgba(212,175,55,0.14)" />
+                </pattern>
+                <linearGradient id="vgGold" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#f2d27a" />
+                  <stop offset="1" stop-color="#d4af37" />
+                </linearGradient>
+                <marker id="vgArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0L10 5L0 10z" fill="rgba(212,175,55,0.55)" />
+                </marker>
+              </defs>
+
+              <rect x="6" y="6" width="1168" height="368" rx="20" fill="url(#vgDots)" stroke="rgba(212,175,55,0.16)" />
+
+              <!-- connectors -->
+              <g class="vn-links" fill="none" stroke="rgba(212,175,55,0.45)" stroke-width="2" marker-end="url(#vgArrow)">
+                <path d="M166 190 H182" />
+                <path d="M332 190 H348" />
+                <!-- fan out from research plan to 3 searches -->
+                <path class="vn-flow" d="M498 190 C528 150, 500 92, 514 67" />
+                <path class="vn-flow" d="M498 190 H514" />
+                <path class="vn-flow" d="M498 190 C528 230, 500 288, 514 313" />
+                <!-- merge 3 searches into dedupe -->
+                <path d="M664 67 C700 92, 660 150, 680 190" />
+                <path d="M664 190 H680" />
+                <path d="M664 313 C700 288, 660 230, 680 190" />
+                <!-- dedupe -> writer -> output -->
+                <path d="M830 190 H846" />
+                <path d="M996 190 H1012" />
+              </g>
+
+              <g class="vnode vnode-io">
+                <rect x="16" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="91" y="187">Your prompt</text>
+                <text class="vn-sub" x="91" y="203">the request</text>
+              </g>
+              <g class="vnode">
+                <rect x="182" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="257" y="187">Role analysis</text>
+                <text class="vn-sub" x="257" y="203">gpt-4o-mini</text>
+              </g>
+              <g class="vnode">
+                <rect x="348" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="423" y="187">Research plan</text>
+                <text class="vn-sub" x="423" y="203">gpt-4o-mini</text>
+              </g>
+              <g class="vnode vnode-settle">
+                <rect x="514" y="40" width="150" height="54" rx="13" />
+                <text class="vn-label" x="589" y="64">Web search</text>
+                <text class="vn-sub" x="589" y="80">Tavily</text>
+              </g>
+              <g class="vnode vnode-settle">
+                <rect x="514" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="589" y="187">Web search</text>
+                <text class="vn-sub" x="589" y="203">Tavily</text>
+              </g>
+              <g class="vnode vnode-settle">
+                <rect x="514" y="286" width="150" height="54" rx="13" />
+                <text class="vn-label" x="589" y="310">Web search</text>
+                <text class="vn-sub" x="589" y="326">Tavily</text>
+              </g>
+              <g class="vnode">
+                <rect x="680" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="755" y="187">Dedupe sources</text>
+                <text class="vn-sub" x="755" y="203">rank and merge</text>
+              </g>
+              <g class="vnode vnode-worker">
+                <rect x="846" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="921" y="187">Report writer</text>
+                <text class="vn-sub" x="921" y="203">gpt-4.1-mini</text>
+              </g>
+              <g class="vnode vnode-io">
+                <rect x="1012" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="1087" y="187">Cited report</text>
+                <text class="vn-sub" x="1087" y="203">result</text>
+              </g>
+            </svg>
+          </div>
+          <figcaption class="vision-graph-cap" id="wf-graph-cap">A live workflow: Client Research plans queries, searches the web in parallel, dedupes sources, and writes a cited report. Every node, model, and cost is shown before you run.</figcaption>
+        </figure>
+
+        <div class="wf-intro-actions reveal">
+          <a class="launch-cta" href="/workflows">Explore workflows</a>
+          <p class="wf-intro-note">Live now: Client Research. More workflows are being added.</p>
+        </div>
+      </section>
+
+      <!-- =============================================
+           4. INVOICES AND PAYROLL (the payment side)
+           ============================================= -->
+      <section class="surfaces-section" aria-labelledby="surfaces-title">
+        <div class="section-header">
+          <p class="eyebrow">Get paid</p>
+          <h2 id="surfaces-title" class="single-line-title">Invoices and payroll in USDC</h2>
+          <p class="section-sub">Bill a client with one link, or pay your whole team in a single transaction. Funds move wallet to wallet and are verified on-chain before anything shows as paid.</p>
+        </div>
+        <div class="surface-grid">
+
+          <article class="surface-card reveal">
+            <p class="eyebrow">Get paid</p>
+            <h3>Invoices</h3>
+            <p>Send a USDC invoice as one shareable link. Your client pays from Arc, Base, or Ethereum, and the money lands straight in your wallet.</p>
+            <ul class="surface-list">
+              <li>One link per invoice at /pay/:id</li>
+              <li>Cross-chain pay via CCTP</li>
+              <li>PDF receipt and Telegram alert on payment</li>
+            </ul>
+            <a class="nav-button secondary" href="/app">Create an invoice</a>
+          </article>
+
+          <article class="surface-card reveal">
+            <p class="eyebrow">Pay others</p>
+            <h3>Payroll</h3>
+            <p>Pay your whole team or a list of contractors at once. Upload recipients and amounts, then settle everyone in a single non-custodial transaction.</p>
+            <ul class="surface-list">
+              <li>Bulk payout to many wallets in one tx</li>
+              <li>Optional on-chain memo per recipient</li>
+              <li>Funds land straight in each wallet, never with us</li>
+            </ul>
+            <a class="nav-button secondary" href="/app">Open the app</a>
+          </article>
+
+        </div>
+      </section>
+
+      <!-- =============================================
+           4. HOW IT WORKS
            ============================================= -->
       <section class="how-section" id="how" aria-labelledby="how-title">
         <div class="section-header">
           <p class="eyebrow">How it works</p>
-          <h2 id="how-title" class="single-line-title">Invoice to receipt in three steps</h2>
+          <h2 id="how-title" class="single-line-title">Work to receipt in 3 steps</h2>
         </div>
         <div class="how-grid how-grid-3">
 
           <article class="how-card reveal">
             <span class="step-num" aria-hidden="true">01</span>
-            <strong>Create your invoice</strong>
-            <p>Add client, amount, and due date. Your invoice is a single shareable link at <code>/pay/:id</code>, ready in seconds.</p>
+            <strong>Do the work</strong>
+            <p>Run an AI workflow to produce the deliverable, or just deliver your own service. Then turn it into a USDC invoice as a single shareable link.</p>
           </article>
 
           <article class="how-card reveal">
             <span class="step-num" aria-hidden="true">02</span>
-            <strong>Client pays from any chain</strong>
-            <p>They connect a wallet and pay USDC from Arc, Ethereum, or Base. The payment goes straight to your wallet, not through Fundline.</p>
+            <strong>Get paid in USDC</strong>
+            <p>Your client pays from Arc, Ethereum, or Base, straight to your wallet. Paying others instead? Send to your whole team in one transaction.</p>
           </article>
 
           <article class="how-card reveal">
             <span class="step-num" aria-hidden="true">03</span>
-            <strong>Fundline confirms it arrived</strong>
-            <p>Arcscan checks the transaction on-chain. Once confirmed, the invoice flips to paid and you get a PDF receipt and Telegram alert.</p>
+            <strong>Proof on-chain</strong>
+            <p>Arcscan checks the exact transaction before anything shows as paid. You get a PDF receipt and a Telegram alert the moment it confirms.</p>
           </article>
 
         </div>
       </section>
 
       <!-- =============================================
-           4. LIVE PROOF BLOCK
+           5. LIVE PROOF BLOCK
            ============================================= -->
       <section class="proof-section" id="product" aria-labelledby="proof-title">
         <div class="proof-section-inner">
         <div class="section-header">
           <p class="eyebrow">Live on testnet</p>
-          <h2 id="proof-title">Every payment, confirmed on-chain.</h2>
+          <h2 id="proof-title">Payments confirmed on-chain</h2>
           <p class="section-sub">These are real USDC payments on Arc Testnet. One is a plain payment, one is paid cross-chain via CCTP, and one writes the invoice details on-chain as a public, permanent memo. Anyone can verify them.</p>
         </div>
         <div class="proof-grid proof-grid-3">
@@ -254,23 +390,41 @@
             </div>
           </div>
         </div>
+
+        <div class="contracts-strip reveal">
+          <p class="contracts-strip-label">Every Fundline contract is non-custodial and verifiable on Arcscan</p>
+          <div class="contracts-strip-grid">
+            <a class="contract-chip" href="https://testnet.arcscan.app/address/0x5613D701D2e6A70643680eabBeEdc0e924b30848" target="_blank" rel="noopener">
+              <span class="contract-chip-name">FundlineMemoRouter</span>
+              <span class="contract-chip-role">Invoices, wallet to wallet</span>
+            </a>
+            <a class="contract-chip" href="https://testnet.arcscan.app/address/0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4" target="_blank" rel="noopener">
+              <span class="contract-chip-name">FundlineBatchRouter</span>
+              <span class="contract-chip-role">Payroll, one to many in one tx</span>
+            </a>
+            <a class="contract-chip" href="https://testnet.arcscan.app/address/0xefDDfF01090404f1eC942d96346B00638339b8D5" target="_blank" rel="noopener">
+              <span class="contract-chip-name">FundlineRunEscrow</span>
+              <span class="contract-chip-role">Workflow billing, release or refund</span>
+            </a>
+          </div>
+        </div>
         </div>
       </section>
 
       <!-- =============================================
-           5. FEATURES GRID
+           6. FEATURES GRID
            ============================================= -->
       <section class="features-section" aria-labelledby="features-title">
         <div class="section-header">
           <p class="eyebrow">Features</p>
-          <h2 id="features-title" class="single-line-title">Everything you need to bill in USDC</h2>
+          <h2 id="features-title" class="single-line-title">Built for independent work</h2>
         </div>
         <div class="features-grid">
 
           <article class="feature-card reveal" id="payments">
             <p class="eyebrow">Payments</p>
             <h3>The payment goes wallet to wallet</h3>
-            <p>USDC transfers from your client's wallet directly to yours. Nothing passes through Fundline; the contract holds no balance at any point.</p>
+            <p>USDC transfers from your client's wallet directly to yours. Nothing passes through Fundline; the contracts hold no balance at any point.</p>
           </article>
 
           <article class="feature-card reveal" id="settlement">
@@ -279,10 +433,22 @@
             <p>They can pay from Ethereum or Base and the USDC still lands on Arc, real and unwrapped, in one flow. No manual bridging required.</p>
           </article>
 
+          <article class="feature-card reveal" id="payroll">
+            <p class="eyebrow">Payroll</p>
+            <h3>Pay your whole team in one transaction</h3>
+            <p>Upload a list of recipients and amounts, then settle everyone at once through the non-custodial batch router. One signature, one payout.</p>
+          </article>
+
+          <article class="feature-card reveal" id="workflow-feature">
+            <p class="eyebrow">AI Workflows</p>
+            <h3>Tools that do the work, paid per run</h3>
+            <p>Run multi-step AI workflows and pay per use in USDC through an escrow that releases on success and refunds on failure. The result comes back as a clean report.</p>
+          </article>
+
           <article class="feature-card reveal" id="agents">
             <p class="eyebrow">Agents</p>
             <h3>Let software pay per request</h3>
-            <p>Software and AI agents can create invoices, receive payment links, and get pinged the moment payment confirms, all via the REST API.</p>
+            <p>Software and AI agents can create invoices, receive payment links, and get pinged the moment payment confirms, all via the REST API and x402.</p>
           </article>
 
           <article class="feature-card reveal" id="security">
@@ -295,13 +461,13 @@
       </section>
 
       <!-- =============================================
-           6. BUILD ON FUNDLINE
+           7. BUILD ON FUNDLINE
            ============================================= -->
       <section class="dev-section" id="developers" aria-labelledby="dev-title">
         <div class="section-header section-header-left">
           <p class="eyebrow">Build on Fundline</p>
-          <h2 id="dev-title" class="single-line-title">The API does what the dashboard does.</h2>
-          <p class="section-sub">Create invoices, receive a payment event the moment a transaction confirms, and let agents pay per request, all from the REST API.</p>
+          <h2 id="dev-title" class="single-line-title">One API for the whole desk</h2>
+          <p class="section-sub">Create invoices, receive a payment event the moment a transaction confirms, run workflows, and let agents pay per request, all from the REST API.</p>
         </div>
         <div class="dev-band reveal">
           <div class="dev-code-block">
@@ -329,7 +495,7 @@ Content-Type: application/json
           </div>
         </div>
         <div class="dev-terminal reveal">
-          <p class="code-label">Agent pays automatically — HTTP 402 protocol</p>
+          <p class="code-label">Agent pays automatically via the HTTP 402 protocol</p>
           <pre class="dev-terminal-pre"><code>GET /api/x402/invoices/abc123
 
   &lt;- 402 Payment Required
@@ -345,19 +511,19 @@ X-PAYMENT: [signed on-chain payment proof]
       </section>
 
       <!-- =============================================
-           7. TRUST AND SECURITY
+           9. TRUST AND SECURITY
            ============================================= -->
       <section class="trust-section" aria-labelledby="trust-title">
         <div class="section-header">
           <p class="eyebrow">Trust and security</p>
-          <h2 id="trust-title" class="single-line-title">Claims you can verify yourself</h2>
+          <h2 id="trust-title" class="single-line-title">Verify every claim yourself</h2>
         </div>
         <div class="trust-proof-list reveal">
 
           <div class="trust-proof-row">
             <div class="trust-proof-left">
               <strong>Funds never touch Fundline</strong>
-              <p>USDC transfers from your client's wallet to yours in one transaction. The FundlineMemoRouter contract holds no balance and has no withdrawal path.</p>
+              <p>USDC transfers from your client's wallet to yours in one transaction. The router and escrow contracts hold no balance and have no owner withdrawal path.</p>
             </div>
             <a class="trust-proof-link" href="https://testnet.arcscan.app/address/0x5613D701D2e6A70643680eabBeEdc0e924b30848" target="_blank" rel="noopener">Verify contract on Arcscan</a>
           </div>
@@ -382,13 +548,13 @@ X-PAYMENT: [signed on-chain payment proof]
       </section>
 
       <!-- =============================================
-           8. LIVE NOW VS COMING
+           10. LIVE NOW VS COMING
            ============================================= -->
       <section class="status-section" aria-labelledby="status-title">
         <div class="section-header">
           <p class="eyebrow">Current status</p>
           <h2 id="status-title" class="single-line-title">Live now, more coming</h2>
-          <p class="section-sub">Everything below is on Arc Testnet today. Nothing here is a roadmap promise disguised as a feature.</p>
+          <p class="section-sub">Everything in the left column is on Arc Testnet today. Nothing here is a roadmap promise disguised as a feature.</p>
         </div>
         <div class="status-grid">
           <div class="status-col">
@@ -397,17 +563,18 @@ X-PAYMENT: [signed on-chain payment proof]
               <li class="status-item status-live">Invoice creation and sharing</li>
               <li class="status-item status-live">Wallet-to-wallet USDC payment on Arc</li>
               <li class="status-item status-live">Cross-chain payment from Ethereum and Base</li>
+              <li class="status-item status-live">Bulk payout and payroll in one transaction</li>
+              <li class="status-item status-live">AI workflows with per-run escrow billing</li>
               <li class="status-item status-live">On-chain payment verification via Arcscan</li>
-              <li class="status-item status-live">PDF receipts and CSV export</li>
-              <li class="status-item status-live">Telegram payment alerts</li>
-              <li class="status-item status-live">REST API for backends and agents</li>
-              <li class="status-item status-live">Creator storefronts at /s/:slug</li>
+              <li class="status-item status-live">PDF receipts and styled Excel export</li>
+              <li class="status-item status-live">Telegram alerts, REST API, and creator storefronts</li>
             </ul>
           </div>
           <div class="status-col">
             <p class="status-col-label">In development</p>
             <ul class="status-list">
               <li class="status-item status-coming">Mainnet: live USDC settlement</li>
+              <li class="status-item status-coming">Agent trust layer: competence, reputation, matching</li>
               <li class="status-item status-coming">Escrow for milestone and held payments</li>
               <li class="status-item status-coming">Custom domains for pay pages</li>
             </ul>
@@ -416,13 +583,13 @@ X-PAYMENT: [signed on-chain payment proof]
       </section>
 
       <!-- =============================================
-           9. PRICING
+           11. PRICING
            ============================================= -->
       <section class="pricing-section" id="pricing" aria-labelledby="pricing-title">
         <div class="section-header">
           <p class="eyebrow">Pricing</p>
-          <h2 id="pricing-title">Free during testnet</h2>
-          <p class="section-sub">All features are available at no cost on testnet. Mainnet pricing will be announced before launch.</p>
+          <h2 id="pricing-title">Simple while on testnet</h2>
+          <p class="section-sub">Invoices and payroll are free; you only pay on-chain gas. AI workflows are paid per run in USDC, refunded if a run fails. Mainnet pricing will be announced before launch.</p>
         </div>
         <div class="pricing-grid">
 
@@ -431,14 +598,14 @@ X-PAYMENT: [signed on-chain payment proof]
             <p class="pricing-price">Free</p>
             <p class="pricing-note">No signup required. No credit card.</p>
             <ul class="pricing-list">
-              <li>Unlimited invoices</li>
-              <li>PDF receipts and CSV export</li>
-              <li>Telegram payment alerts</li>
-              <li>Agent API access</li>
-              <li>Payment webhooks</li>
-              <li>On-chain payment verification</li>
+              <li>Unlimited invoices and payroll</li>
+              <li>You pay only on-chain gas</li>
+              <li>AI workflows: pay per run in USDC, refund on failure</li>
+              <li>PDF receipts and styled Excel export</li>
+              <li>Telegram alerts and payment webhooks</li>
+              <li>Agent API and on-chain verification</li>
             </ul>
-            <a class="launch-cta" href="/app" id="pricing-cta">Start now</a>
+            <a class="launch-cta" href="/app" id="pricing-cta">Get started</a>
           </article>
 
           <article class="pricing-card pricing-card-future reveal">
@@ -458,7 +625,7 @@ X-PAYMENT: [signed on-chain payment proof]
       </section>
 
       <!-- =============================================
-           10. FAQ
+           12. FAQ
            ============================================= -->
       <section class="faq-section" aria-labelledby="faq-title">
         <div class="section-header">
@@ -469,10 +636,28 @@ X-PAYMENT: [signed on-chain payment proof]
 
           <article class="faq-item reveal" role="listitem">
             <button class="faq-question" aria-expanded="false" type="button">
-              What is USDC and why use it for invoices?
+              What can I do on Fundline?
             </button>
             <div class="faq-answer" hidden>
-              <p>USDC is a regulated stablecoin issued by Circle, pegged 1:1 to the US dollar and backed by fully reserved assets. Unlike a bank transfer, a USDC payment is settled on a public blockchain — Fundline checks the transaction on Arcscan before marking an invoice paid, so you have verifiable proof it actually happened, not just a number that changed in a ledger.</p>
+              <p>Three things, all in USDC: run AI workflows to produce work like research or proposals, send invoices to get paid by clients across Arc, Ethereum, or Base, and pay your team or contractors in a single bulk transaction. Every payment is verified on-chain, and funds always move wallet to wallet, never through Fundline.</p>
+            </div>
+          </article>
+
+          <article class="faq-item reveal" role="listitem">
+            <button class="faq-question" aria-expanded="false" type="button">
+              How does workflow billing work?
+            </button>
+            <div class="faq-answer" hidden>
+              <p>You fund a single run into the FundlineRunEscrow contract from your own wallet. The workflow runs, and on success the payment is released and an on-chain receipt is written. If the run fails, the escrow refunds you. Fundline never holds the money; the contract releases or refunds by rule, and you can verify every step on Arcscan.</p>
+            </div>
+          </article>
+
+          <article class="faq-item reveal" role="listitem">
+            <button class="faq-question" aria-expanded="false" type="button">
+              Is payroll non-custodial too?
+            </button>
+            <div class="faq-answer" hidden>
+              <p>Yes. Bulk payout uses the FundlineBatchRouter, which sends USDC from your wallet directly to every recipient in one atomic transaction. The contract holds no balance and has no owner withdrawal path, so the funds are never in Fundline's custody.</p>
             </div>
           </article>
 
@@ -481,7 +666,7 @@ X-PAYMENT: [signed on-chain payment proof]
               What wallet do I need?
             </button>
             <div class="faq-answer" hidden>
-              <p>Any EVM-compatible wallet with custom RPC support: MetaMask, Rabby, or Coinbase Wallet all work. Add Arc Testnet as a custom network (RPC: rpc.testnet.arc.network, Chain ID: 5042002), get some testnet USDC from the faucet, and you can create and pay invoices immediately. The docs have step-by-step setup instructions.</p>
+              <p>Any EVM-compatible wallet with custom RPC support: MetaMask, Rabby, or Coinbase Wallet all work. Add Arc Testnet as a custom network (RPC: rpc.testnet.arc.network, Chain ID: 5042002), get some testnet USDC from the faucet, and you can create, pay, and run workflows immediately. The docs have step-by-step setup instructions.</p>
             </div>
           </article>
 
@@ -494,34 +679,25 @@ X-PAYMENT: [signed on-chain payment proof]
             </div>
           </article>
 
-          <article class="faq-item reveal" role="listitem">
-            <button class="faq-question" aria-expanded="false" type="button">
-              What are the fees?
-            </button>
-            <div class="faq-answer" hidden>
-              <p>Zero on testnet. You pay only the on-chain gas fee for each transaction, which is negligible on Arc Testnet. Mainnet fees have not been set and will be disclosed in full before any live USDC settlement goes live.</p>
-            </div>
-          </article>
-
         </div>
       </section>
 
       <!-- =============================================
-           11. FINAL CTA
+           13. FINAL CTA
            ============================================= -->
       <section class="final-cta-section" aria-labelledby="final-cta-title">
-        <h2 id="final-cta-title">Your clients can pay from any chain.</h2>
-        <p class="final-cta-sub">Send a USDC invoice as one link. They pay from Arc, Base, or Ethereum. You get proof it arrived, straight in your wallet.</p>
+        <h2 id="final-cta-title">Open your freelance desk.</h2>
+        <p class="final-cta-sub">Do the work, get paid, and pay your team in USDC. Every payment lands straight in the wallet, with proof on-chain.</p>
         <div class="hero-actions">
-          <a class="launch-cta" href="/app" id="final-cta-primary">Send your first invoice</a>
-          <a class="docs-cta" href="/pay/977ee16981ad275ee63f" id="final-cta-secondary">See a real paid invoice</a>
+          <a class="launch-cta" href="/app" id="final-cta-primary">Get started</a>
+          <a class="docs-cta" href="/workflows" id="final-cta-secondary">Explore workflows</a>
         </div>
       </section>
 
     </main>
 
     <!-- =============================================
-         12. FOOTER
+         14. FOOTER
          ============================================= -->
     <footer class="home-footer" role="contentinfo">
       <div class="footer-inner">
@@ -531,13 +707,14 @@ X-PAYMENT: [signed on-chain payment proof]
             <img src="/assets/fundline-logo.png?v=2" alt="Fundline Logo" style="height: 32px; margin-right: 8px;">
             <span class="brand-word">Fundline</span>
           </a>
-          <p class="footer-tagline">The proof-of-payment layer for USDC invoices.</p>
+          <p class="footer-tagline">Freelance desk for USDC work. Do it, get paid, pay your team.</p>
         </div>
 
         <nav class="footer-nav" aria-label="Footer navigation">
           <div class="footer-col">
             <p class="footer-col-title">Product</p>
-            <a href="/app">Create invoice</a>
+            <a href="/app">Get started</a>
+            <a href="/workflows">AI Workflows</a>
             <a href="#product">How it works</a>
             <a href="#pricing">Pricing</a>
           </div>
@@ -550,7 +727,9 @@ X-PAYMENT: [signed on-chain payment proof]
           <div class="footer-col">
             <p class="footer-col-title">Network</p>
             <a href="https://testnet.arcscan.app" target="_blank" rel="noopener">Arcscan Explorer</a>
-            <a href="https://testnet.arcscan.app/address/0x5613D701D2e6A70643680eabBeEdc0e924b30848" target="_blank" rel="noopener">FundlineMemoRouter contract</a>
+            <a href="https://testnet.arcscan.app/address/0x5613D701D2e6A70643680eabBeEdc0e924b30848" target="_blank" rel="noopener">FundlineMemoRouter</a>
+            <a href="https://testnet.arcscan.app/address/0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4" target="_blank" rel="noopener">FundlineBatchRouter</a>
+            <a href="https://testnet.arcscan.app/address/0xefDDfF01090404f1eC942d96346B00638339b8D5" target="_blank" rel="noopener">FundlineRunEscrow</a>
             <a href="https://github.com/duclucky/fundline" target="_blank" rel="noopener">GitHub (open source)</a>
           </div>
 

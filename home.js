@@ -37,7 +37,7 @@ fetch("/api/config")
       }
       if (textNode) {
         textNode.textContent = config.onchainPaymentsEnabled
-          ? " PaymentRouter live on Arc Testnet"
+          ? " Live on Arc Testnet"
           : " Fundline ready on Arc Testnet";
       }
     }

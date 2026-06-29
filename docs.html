@@ -23,6 +23,7 @@
         <a href="#quick-start">Quick start</a>
         <a href="#payment-flow">Payment</a>
         <a href="#payroll">Payroll</a>
+        <a href="#workflows">Workflows</a>
         <a href="#settlement">Settlement</a>
         <a href="#agent-api">API</a>
         <a href="#contracts">Contracts</a>
@@ -49,6 +50,7 @@
         <a class="side-link" href="#telegram">Telegram bot</a>
         <a class="side-link" href="#settlement">Cross-chain settlement</a>
         <a class="side-link" href="#payroll">Bulk payout</a>
+        <a class="side-link" href="#workflows">AI Workflows</a>
 
         <p class="nav-label">// Developers and agents</p>
         <a class="side-link" href="#agent-api">Agent API</a>
@@ -68,9 +70,10 @@
           <p class="breadcrumb"><a href="/">Home</a><span>/</span><span>Documentation</span></p>
           <h1>Fundline Documentation</h1>
           <p class="lead">
-            The operating guide for non-custodial USDC invoices on Arc. Fundline helps freelancers, service providers,
-            SaaS tools and agents create invoices, send payment links, verify on-chain payments, pay a whole team in one
-            transaction, issue receipts and trigger Telegram or webhook alerts when a customer pays.
+            The operating guide for the Fundline Freelance Desk on Arc. Fundline lets freelancers, service providers,
+            SaaS tools, and agents run AI workflows to produce deliverables, invoice clients to get paid in USDC,
+            and pay their whole team in a single on-chain transaction. Every payment is settled non-custodially,
+            wallet to wallet, and verified on Arcscan before anything shows as paid.
           </p>
           <div class="status-row" aria-label="Project status">
             <span><i></i>Arc Testnet</span>
@@ -79,6 +82,8 @@
             <span>On-chain memo</span>
             <span>Batch payroll</span>
             <span>CCTP fast transfer</span>
+            <span>AI Workflows</span>
+            <span>Workflow escrow billing</span>
             <span>Agent API</span>
           </div>
           <div class="doc-cards">
@@ -106,6 +111,10 @@
               <strong>Settlement</strong>
               <span>Bring Sepolia or Base Sepolia USDC into Arc with CCTP fast transfer.</span>
             </a>
+            <a class="doc-card" href="#workflows">
+              <strong>AI Workflows</strong>
+              <span>Run multi-step AI research workflows and pay per run through a non-custodial escrow.</span>
+            </a>
           </div>
         </section>
 
@@ -119,18 +128,18 @@
           <div class="surface-grid">
             <article>
               <span>Browser app</span>
-              <strong>Invoice UI and payment page</strong>
-              <p>Create invoices, connect wallet, view payment status and download receipts.</p>
+              <strong>Invoice UI, payment page, and workflow runner</strong>
+              <p>Create invoices, run AI workflows, connect wallet, view payment status and download receipts.</p>
             </article>
             <article>
-              <span>Local server</span>
-              <strong>Storage, alerts and API</strong>
-              <p>Stores invoices, verifies Arcscan payments, sends Telegram bot notifications and dispatches webhooks.</p>
+              <span>Server</span>
+              <strong>Storage, alerts, workflow execution, and API</strong>
+              <p>Stores invoices and batches, verifies Arcscan payments, runs AI workflow chains, sends Telegram alerts and dispatches webhooks.</p>
             </article>
             <article>
               <span>Arc contracts</span>
-              <strong>USDC and settlement routers</strong>
-              <p>Approve exact USDC spend, call <code>payInvoice</code> or <code>payBatch</code>, emit a clear payment event.</p>
+              <strong>USDC settlement and workflow escrow</strong>
+              <p>Approve USDC spend, call <code>payInvoice</code>, <code>payBatch</code>, or <code>fund</code> a run escrow. Each contract emits a clear event and holds no balance.</p>
             </article>
           </div>
           <table>
@@ -144,12 +153,12 @@
             <tbody>
               <tr>
                 <td>Merchant wallet</td>
-                <td>Receives USDC directly</td>
+                <td>Receives USDC directly from invoice or batch payment</td>
                 <td>User-controlled</td>
               </tr>
               <tr>
                 <td>Payer wallet</td>
-                <td>Approves and sends USDC</td>
+                <td>Approves and sends USDC; funds workflow runs from escrow</td>
                 <td>User-controlled</td>
               </tr>
               <tr>
@@ -158,8 +167,13 @@
                 <td>Do not hold funds</td>
               </tr>
               <tr>
+                <td>FundlineRunEscrow</td>
+                <td>Holds USDC for a single workflow run; releases to treasury on success or refunds payer on failure</td>
+                <td>Non-custodial; no owner withdraw path</td>
+              </tr>
+              <tr>
                 <td>Server</td>
-                <td>Stores invoice state and alerts</td>
+                <td>Stores invoice state, runs workflow chains, signs escrow release or refund</td>
                 <td>No token custody</td>
               </tr>
             </tbody>
@@ -281,11 +295,12 @@
 
         <section class="doc-section" id="receipts">
           <p class="eyebrow">Receipts</p>
-          <h2>PDF receipt and CSV export</h2>
+          <h2>PDF receipt and Excel export</h2>
           <p>
             Paid invoices can generate a professional PDF receipt. The receipt includes invoice number, payer wallet,
-            receiving wallet, transaction hash, verification source and paid timestamp. Merchants can also export CSV
-            for bookkeeping.
+            receiving wallet, transaction hash, verification source and paid timestamp. Merchants can also export a
+            styled Excel workbook (.xls) from the dashboard: gold header row, status-coloured cells (green for paid,
+            amber for open, red for overdue), and zebra-row shading for easy bookkeeping.
           </p>
         </section>
 
@@ -316,11 +331,12 @@
 
         <section class="doc-section" id="settlement">
           <p class="eyebrow">Settlement</p>
-          <h2>CCTP and Bridge Kit pilot</h2>
+          <h2>Cross-chain settlement via CCTP</h2>
           <p>
-            Fundline's next settlement layer is native USDC movement into Arc Testnet through Circle CCTP. The pilot
-            starts with Ethereum Sepolia and Base Sepolia because they let us test cross-chain USDC without wrapped
-            bridge tokens or custodial routing.
+            Payers on Ethereum Sepolia or Base Sepolia can pay an Arc invoice without bridging manually.
+            Fundline starts a CCTP fast-transfer flow: approve Circle's TokenMessengerV2, burn source USDC,
+            fetch the attestation from the IRIS API, mint native USDC on Arc, then pay the invoice through
+            FundlineMemoRouter. The whole flow completes in roughly 30 to 60 seconds at the Fast finality tier.
           </p>
           <table>
             <thead>
@@ -360,8 +376,7 @@ MessageTransmitterV2=0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275</code></pre>
             then pay the invoice through the settlement router.
           </p>
           <p>
-            Circle Wallets should be layered in after this pilot so non-crypto users can access an embedded wallet
-            before paying or receiving USDC.
+            Arc payers who already hold USDC on Arc pay directly in a single transaction without any bridging step.
           </p>
         </section>
 
@@ -394,6 +409,56 @@ payBatchWithMemo(bytes32 batchId, address[] recipients, uint256[] amounts, bytes
           <div class="note">
             <strong>Payer wallet required</strong>
             <span>The batch payout page is wallet-only by design. There is no QR and no manual transfer, because the payer is a business treasury settling many recipients in one signed transaction.</span>
+          </div>
+        </section>
+
+        <section class="doc-section" id="workflows">
+          <p class="eyebrow">AI Workflows</p>
+          <h2>Multi-step AI workflows with per-run billing</h2>
+          <p>
+            AI Workflows run proven, multi-step chains of language model calls and live web search to produce a
+            finished deliverable. Each workflow runs server-side; you see every step, model, and cost before and
+            after the run. Billing is per run in USDC through the non-custodial FundlineRunEscrow contract.
+          </p>
+          <p>
+            <strong>How a run works:</strong> connect your wallet, click Run, approve USDC if needed, sign a
+            <code>fund(runId, amount)</code> call to lock the fixed price into escrow. The server verifies the
+            on-chain funding, executes the workflow chain, then the treasury key signs <code>release(runId)</code>
+            on success (with an on-chain memo in the same format as FundlineMemoRouter). If the run fails at any
+            step, the treasury signs <code>refund(runId)</code> and the USDC returns to your wallet.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Workflow</th>
+                <th>Steps</th>
+                <th>Price</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Client Research</td>
+                <td>Role analysis, research plan, parallel web searches (Tavily), report writer</td>
+                <td>0.05 USDC per run</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="flow">
+            <span>Connect wallet</span>
+            <span>Fund escrow</span>
+            <span>Run workflow chain</span>
+            <span>Release or refund</span>
+          </div>
+          <div class="code-card">
+            <div class="code-head"><span>Escrow calls</span><button data-copy="#escrow-calls" type="button">Copy</button></div>
+            <pre id="escrow-calls"><code>fund(bytes32 runId, uint256 amount)
+release(bytes32 runId, bytes memo)
+refund(bytes32 runId)
+claimRefund(bytes32 runId)  // user backstop after 1h timeout</code></pre>
+          </div>
+          <div class="note">
+            <strong>Rate limits (beta)</strong>
+            <span>3 runs per IP per day during beta. The daily cap resets at 00:00 UTC. A global spend ceiling also applies to keep total API costs bounded.</span>
           </div>
         </section>
 
@@ -604,6 +669,11 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
                 <td><a href="https://testnet.arcscan.app/address/0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4" target="_blank" rel="noreferrer"><code>0x8d838Cee79e3F8a500d9C1dDEf12DF2f33e84cc4</code></a></td>
                 <td>One-to-many payout (payroll)</td>
               </tr>
+              <tr>
+                <td>FundlineRunEscrow</td>
+                <td><a href="https://testnet.arcscan.app/address/0xefDDfF01090404f1eC942d96346B00638339b8D5" target="_blank" rel="noreferrer"><code>0xefDDfF01090404f1eC942d96346B00638339b8D5</code></a></td>
+                <td>Per-run workflow billing: fund, release or refund</td>
+              </tr>
             </tbody>
           </table>
           <p>
@@ -657,8 +727,8 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
             <p>No. It is useful for demo and local development. Production should use a database.</p>
           </details>
           <details>
-            <summary>What should be built next?</summary>
-            <p>A non-custodial escrow for milestone and agent-job payments, Circle Wallet onboarding for non-crypto users, a hosted database, invoice email delivery, and a hosted admin UI for webhook delivery logs.</p>
+            <summary>What is coming next?</summary>
+            <p>Mainnet deployment with live USDC settlement, additional AI workflows beyond Client Research, milestone and held-payment escrow, and Circle Wallet onboarding for non-crypto payers.</p>
           </details>
         </section>
       </main>
@@ -676,6 +746,7 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
         <a href="#telegram">Telegram</a>
         <a href="#settlement">Settlement</a>
         <a href="#payroll">Bulk payout</a>
+        <a href="#workflows">AI Workflows</a>
         <a href="#agent-api">Agent API</a>
         <a href="#webhooks">Webhooks</a>
         <a href="#webhook-logs">Webhook logs</a>

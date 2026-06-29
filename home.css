@@ -1,5 +1,5 @@
 /* ====================================================
-   FUNDLINE HOME — Design System + Landing Page CSS
+   FUNDLINE HOME - Design System + Landing Page CSS
    ==================================================== */
 
 :root {
@@ -150,6 +150,8 @@ h3 {
 .how-section,
 .showcase-section,
 .features-section,
+.surfaces-section,
+.workflows-section,
 .dev-section,
 .trust-section,
 .pricing-section,
@@ -1817,7 +1819,7 @@ h3 {
 }
 
 /* ====================================================
-   RESPONSIVE — Tablet (640px – 1024px)
+   RESPONSIVE - Tablet (640px to 1024px)
    ==================================================== */
 @media (max-width: 1024px) {
   .nav-links { display: none; }
@@ -1860,7 +1862,7 @@ h3 {
 }
 
 /* ====================================================
-   RESPONSIVE — Mobile (< 640px)
+   RESPONSIVE - Mobile (< 640px)
    ==================================================== */
 @media (max-width: 640px) {
   :root { --section-y: 44px; }
@@ -2003,4 +2005,335 @@ h3 {
 .mock-tg-highlight {
   color: var(--green);
   font-weight: 700;
+}
+
+/* ====================================================
+   SURFACES (the desk: two tools, one engine)
+   ==================================================== */
+.surface-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.surface-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 32px 28px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.surface-card:hover {
+  border-color: rgba(212, 175, 55, 0.4);
+  transform: translateY(-3px);
+}
+
+.surface-card h3 {
+  font-size: clamp(20px, 2.6vw, 26px);
+  margin-bottom: 2px;
+}
+
+.surface-card > p {
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.65;
+  margin-bottom: 4px;
+}
+
+.surface-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 6px;
+}
+
+.surface-list li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.surface-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: linear-gradient(135deg, var(--gold), var(--gold-bright));
+}
+
+.surface-card .nav-button {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+/* ====================================================
+   CONTRACTS STRIP (under the proof grid)
+   ==================================================== */
+.contracts-strip {
+  margin-top: 32px;
+  text-align: center;
+}
+
+.contracts-strip-label {
+  color: var(--muted-2);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.contracts-strip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.contract-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.contract-chip:hover {
+  border-color: rgba(212, 175, 55, 0.4);
+  transform: translateY(-2px);
+  color: var(--ink);
+}
+
+.contract-chip-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.contract-chip-role {
+  font-size: 12px;
+  color: var(--muted-2);
+}
+
+/* ====================================================
+   VISION (trust layer, n8n-style node graph)
+   ==================================================== */
+.vision-badge,
+.vision-layer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.vision-badge {
+  margin: 0 auto 14px;
+  color: var(--gold);
+  background: rgba(212, 175, 55, 0.1);
+  border: 1px solid var(--line-strong);
+}
+
+.vision-graph-wrap {
+  margin: 0 auto;
+  max-width: 1120px;
+}
+
+.vision-graph-scroll {
+  overflow-x: auto;
+  border-radius: var(--radius-lg);
+  background: rgba(6, 12, 22, 0.55);
+  border: 1px solid var(--line);
+}
+
+.vision-graph {
+  display: block;
+  width: 100%;
+  min-width: 760px;
+  height: auto;
+}
+
+/* graph nodes */
+.vnode rect {
+  fill: rgba(20, 21, 26, 0.96);
+  stroke: var(--line-strong);
+  stroke-width: 1.5;
+}
+
+.vnode-io rect {
+  fill: rgba(212, 175, 55, 0.12);
+  stroke: rgba(212, 175, 55, 0.5);
+}
+
+.vnode-worker rect {
+  fill: url(#vgGold);
+  stroke: rgba(255, 255, 255, 0.5);
+}
+
+.vnode-worker .vn-label,
+.vnode-worker .vn-sub {
+  fill: #100c05;
+}
+
+.vnode-settle rect {
+  fill: rgba(26, 27, 32, 0.96);
+  stroke: rgba(212, 175, 55, 0.32);
+}
+
+.vnode-live rect {
+  stroke: #72f6a6;
+  stroke-width: 2;
+}
+
+.vnode-refund rect {
+  fill: rgba(40, 22, 22, 0.9);
+  stroke: rgba(255, 150, 150, 0.4);
+}
+
+.vn-label {
+  fill: var(--ink);
+  font-family: "Plus Jakarta Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  text-anchor: middle;
+}
+
+.vn-sub {
+  fill: var(--muted-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-anchor: middle;
+}
+
+.vn-flow {
+  stroke-dasharray: 5 6;
+  animation: vgFlow 1.1s linear infinite;
+}
+
+@keyframes vgFlow {
+  to { stroke-dashoffset: -22; }
+}
+
+.vision-graph-cap {
+  margin-top: 14px;
+  text-align: center;
+  color: var(--muted-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* layer legend */
+.vision-legend {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 36px;
+}
+
+.vision-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 18px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.vision-layer-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+
+.vision-layer strong {
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.vision-layer p {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.55;
+  margin-bottom: 0;
+}
+
+.vls-live {
+  color: #72f6a6;
+  background: rgba(114, 246, 166, 0.12);
+  border: 1px solid rgba(114, 246, 166, 0.3);
+  align-self: flex-start;
+}
+
+.vls-coming {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  align-self: flex-start;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 860px) {
+  .surface-grid { grid-template-columns: 1fr; }
+  .contracts-strip-grid { grid-template-columns: 1fr; }
+  .vision-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .vision-legend { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vn-flow { animation: none; }
+}
+
+/* ---- Workflows intro CTA ---- */
+.wf-intro-actions {
+  text-align: center;
+  margin-top: 30px;
+}
+
+.wf-intro-note {
+  margin: 14px 0 0;
+  color: var(--muted-2);
+  font-size: 13px;
+}
+
+/* ====================================================
+   SECTION TITLES: always one line
+   Remove the 720px header clamp and force nowrap; the font
+   scales with the viewport so long titles never wrap and
+   never overflow the page width.
+   ==================================================== */
+.section-header,
+.section-header.section-header-left {
+  max-width: none;
+}
+
+.section-header h2,
+.section-header .single-line-title,
+.final-cta-section h2,
+#pricing-title,
+#proof-title,
+#faq-title {
+  white-space: nowrap;
+  font-size: clamp(14px, 4vw, 46px);
 }
