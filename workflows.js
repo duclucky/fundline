@@ -186,8 +186,19 @@ const CATEGORY_COLORS = {
   Business: "#ff9a8b",
 };
 
-// In-session run history; populated by showRunResult / showRunError in runWorkflow.
-const RUN_HISTORY = [];
+// In-session run history; persisted to sessionStorage so sidebar navigation (which
+// reloads the page) does not wipe it. Populated via pushRunHistory().
+const RUN_HISTORY_KEY = "fundline_wf_run_history";
+const RUN_HISTORY = (() => {
+  try {
+    const saved = sessionStorage.getItem(RUN_HISTORY_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch (_) { return []; }
+})();
+function pushRunHistory(entry) {
+  RUN_HISTORY.unshift(entry);
+  try { sessionStorage.setItem(RUN_HISTORY_KEY, JSON.stringify(RUN_HISTORY.slice(0, 50))); } catch (_) {}
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -761,9 +772,8 @@ function renderTabSteps(wf) {
   });
 
   const summaryRows = nodes.map((node) => {
-    const p = node.type === "ai" ? pricing[node.stepNum - 1] : null;
     const label = node.type === "input" ? "Input" : node.type === "output" ? "Output" : "Step " + String(node.stepNum).padStart(2, "0");
-    return { label, name: node.name, model: node.model || null, purpose: node.purpose, cost: p ? p.cost : null };
+    return { label, name: node.name, model: node.model || null, purpose: node.purpose };
   });
 
   const summaryHtml = summaryRows.map((r, i) => `
@@ -771,7 +781,6 @@ function renderTabSteps(wf) {
       <td><span class="wfg-row-label">${esc(r.label)}</span><span class="wfg-row-name">${esc(r.name)}</span></td>
       <td>${r.model ? `<span class="wf-graph-model-tag">${esc(r.model)}</span>` : '<span class="wf-muted">-</span>'}</td>
       <td class="wf-muted" style="font-size:12px;line-height:1.5">${esc(r.purpose)}</td>
-      <td class="wf-num">${r.cost ? `<span class="wfg-cost">~$${esc(r.cost)}</span>` : '<span class="wf-muted">-</span>'}</td>
       <td><span class="wfg-step-status wfg-step-status--pending">Pending</span></td>
     </tr>`).join("");
 
@@ -780,7 +789,7 @@ function renderTabSteps(wf) {
       <div class="wfg-canvas-head">
         <div>
           <div class="wfg-canvas-title">Workflow Structure</div>
-          <div class="wfg-canvas-sub">Transparent execution steps, models, and estimated cost.</div>
+          <div class="wfg-canvas-sub">Transparent execution steps and models.</div>
         </div>
         <div class="wfg-chips">
           <span class="wfg-chip">${total} nodes</span>
@@ -797,7 +806,7 @@ function renderTabSteps(wf) {
         <div class="wfg-summary-hd">Execution Summary</div>
         <div class="wf-table-wrap">
           <table class="wfg-sum-table">
-            <thead><tr><th>Step</th><th>Model</th><th>Purpose</th><th class="wf-num">Est. cost</th><th>Status</th></tr></thead>
+            <thead><tr><th>Step</th><th>Model</th><th>Purpose</th><th>Status</th></tr></thead>
             <tbody>${summaryHtml}</tbody>
           </table>
         </div>
@@ -1144,7 +1153,7 @@ function runWorkflow(slug, wf, opts) {
 
   function showRunError(data) {
     const msg = (data && (data.message || data.error)) || "The workflow could not complete.";
-    RUN_HISTORY.unshift({
+    pushRunHistory({
       id: opts.runId || randId(),
       slug: slug,
       workflow: wf.name,
@@ -1159,7 +1168,7 @@ function runWorkflow(slug, wf, opts) {
 
   function showRunResult(data) {
     const output = String(data.output || "");
-    RUN_HISTORY.unshift({
+    pushRunHistory({
       id: opts.runId || randId(),
       slug: slug,
       workflow: wf.name,
@@ -1331,5 +1340,16 @@ window.addEventListener("DOMContentLoaded", () => {
     if (!el) return;
     e.preventDefault();
     navigate(el.dataset.nav);
+  });
+
+  // Intercept sidebar nav-item anchor clicks so they use SPA navigation instead
+  // of a full page reload (which would reset the in-memory RUN_HISTORY).
+  document.addEventListener("click", (e) => {
+    const link = e.target.closest(".nav-item[href]");
+    if (!link) return;
+    const href = link.getAttribute("href");
+    if (!href || !href.startsWith("/workflows")) return;
+    e.preventDefault();
+    navigate(href);
   });
 });
