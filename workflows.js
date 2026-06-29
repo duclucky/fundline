@@ -23,7 +23,7 @@ const WORKFLOWS = {
     steps: [
       { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
       { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
-      { serverKey: "web_research", name: "Web research", model: "gpt-4o-mini-search-preview", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+      { serverKey: "web_research", name: "Web research", model: "deepseek-r1", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
       { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3", purpose: "Write a structured, cited research report.", tokens: "~1500" },
     ],
     tiers: {
@@ -32,7 +32,7 @@ const WORKFLOWS = {
         steps: [
           { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
           { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
-          { serverKey: "web_research", name: "Web research", model: "gpt-4o-mini-search-preview", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "web_research", name: "Web research", model: "deepseek-r1", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
           { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3", purpose: "Write a structured, cited research report.", tokens: "~1500" },
         ],
       },
@@ -41,7 +41,7 @@ const WORKFLOWS = {
         steps: [
           { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
           { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
-          { serverKey: "web_research", name: "Web research", model: "gpt-4o-mini-search-preview", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "web_research", name: "Web research", model: "deepseek-r1", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
           { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3.2", purpose: "Write a structured, cited research report.", tokens: "~1500" },
         ],
       },
@@ -50,7 +50,7 @@ const WORKFLOWS = {
         steps: [
           { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
           { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
-          { serverKey: "web_research", name: "Web research", model: "gpt-4o-mini-search-preview", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "web_research", name: "Web research", model: "deepseek-r1", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
           { serverKey: "report_writer", name: "Report writer", model: "claude-sonnet-4-6", purpose: "Write a structured, cited research report.", tokens: "~1500" },
         ],
       },
@@ -72,9 +72,9 @@ const WORKFLOWS = {
 // the selected tier. Node `key` MUST match the node id in workflow-defs.js so the
 // SSE progress animation lines up. Display only; the server runs the real chain.
 const WF_TIER_MODELS = {
-  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "gpt-4o-mini-search-preview", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
-  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "gpt-4o-mini-search-preview", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
-  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "gpt-4o-mini-search-preview", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
+  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "deepseek-r1", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
+  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "deepseek-r1", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
+  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "deepseek-r1", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
 };
 const WF_PRICE_BANDS = {
   light: { normal: "0.03", plus: "0.05", pro: "0.10" },
@@ -648,31 +648,32 @@ const WF_CATALOG = {
 // Filled in as each workflow is run and finalized (real cost rounded to a clean
 // value). Overrides the band price for the explore card and tier selector.
 const WF_PRICE_OVERRIDES = {
-  "swot-analysis": { normal: "0.01", plus: "0.01", pro: "0.02" },
-  "lean-canvas": { normal: "0.01", plus: "0.01", pro: "0.02" },
-  "gtm-plan": { normal: "0.01", plus: "0.01", pro: "0.02" },
-  "competitor-analysis": { normal: "0.03", plus: "0.03", pro: "0.05" },
-  "narrative-scan": { normal: "0.03", plus: "0.03", pro: "0.06" },
-  "whitepaper-summary": { normal: "0.01", plus: "0.01", pro: "0.02" },
-  "tokenomics-analyzer": { normal: "0.01", plus: "0.01", pro: "0.02" },
-  "crypto-research": { normal: "0.03", plus: "0.03", pro: "0.06" },
-  "linkedin-post": { normal: "0.01", plus: "0.01", pro: "0.01" },
-  "newsletter-writer": { normal: "0.01", plus: "0.01", pro: "0.03" },
-  "x-thread-writer": { normal: "0.01", plus: "0.01", pro: "0.01" },
-  "pr-diff-review": { normal: "0.01", plus: "0.01", pro: "0.06" },
-  "keyword-strategy": { normal: "0.01", plus: "0.01", pro: "0.03" },
-  "seo-audit": { normal: "0.03", plus: "0.03", pro: "0.06" },
-  "seo-content-brief": { normal: "0.06", plus: "0.06", pro: "0.08" },
-  "handover-report": { normal: "0.01", plus: "0.01", pro: "0.03" },
-  "timeline-from-sow": { normal: "0.01", plus: "0.01", pro: "0.04" },
-  "follow-up-nurture": { normal: "0.01", plus: "0.01", pro: "0.02" },
-  "cold-outreach": { normal: "0.01", plus: "0.01", pro: "0.03" },
-  "rfp-proposal": { normal: "0.01", plus: "0.01", pro: "0.03" },
-  "upwork-proposal": { normal: "0.01", plus: "0.01", pro: "0.02" },
-  "code-review": { normal: "0.01", plus: "0.01", pro: "0.05" },
-  "market-pain-research": { normal: "0.03", plus: "0.03", pro: "0.06" },
-  "call-recap": { normal: "0.01", plus: "0.01", pro: "0.02" },
-  "proposal-sow": { normal: "0.01", plus: "0.01", pro: "0.08" },
+  "call-recap":           { normal: "0.01", plus: "0.02", pro: "0.03" },
+  "proposal-sow":         { normal: "0.03", plus: "0.04", pro: "0.08" },
+  "client-research":      { normal: "0.03", plus: "0.04", pro: "0.05" },
+  "market-pain-research": { normal: "0.01", plus: "0.02", pro: "0.06" },
+  "code-review":          { normal: "0.01", plus: "0.10", pro: "0.12" },
+  "upwork-proposal":      { normal: "0.01", plus: "0.02", pro: "0.03" },
+  "rfp-proposal":         { normal: "0.01", plus: "0.02", pro: "0.04" },
+  "cold-outreach":        { normal: "0.03", plus: "0.04", pro: "0.05" },
+  "follow-up-nurture":    { normal: "0.01", plus: "0.02", pro: "0.03" },
+  "timeline-from-sow":    { normal: "0.01", plus: "0.02", pro: "0.04" },
+  "handover-report":      { normal: "0.02", plus: "0.03", pro: "0.05" },
+  "seo-content-brief":    { normal: "0.08", plus: "0.10", pro: "0.12" },
+  "seo-audit":            { normal: "0.02", plus: "0.03", pro: "0.05" },
+  "keyword-strategy":     { normal: "0.01", plus: "0.02", pro: "0.04" },
+  "pr-diff-review":       { normal: "0.01", plus: "0.10", pro: "0.12" },
+  "x-thread-writer":      { normal: "0.01", plus: "0.02", pro: "0.03" },
+  "newsletter-writer":    { normal: "0.01", plus: "0.02", pro: "0.03" },
+  "linkedin-post":        { normal: "0.03", plus: "0.04", pro: "0.05" },
+  "crypto-research":      { normal: "0.02", plus: "0.03", pro: "0.06" },
+  "tokenomics-analyzer":  { normal: "0.01", plus: "0.02", pro: "0.04" },
+  "whitepaper-summary":   { normal: "0.01", plus: "0.02", pro: "0.03" },
+  "narrative-scan":       { normal: "0.02", plus: "0.03", pro: "0.06" },
+  "competitor-analysis":  { normal: "0.02", plus: "0.03", pro: "0.06" },
+  "gtm-plan":             { normal: "0.01", plus: "0.02", pro: "0.04" },
+  "lean-canvas":          { normal: "0.01", plus: "0.02", pro: "0.03" },
+  "swot-analysis":        { normal: "0.04", plus: "0.05", pro: "0.06" },
 };
 Object.keys(WF_CATALOG).forEach((slug) => {
   WORKFLOWS[slug] = makeWorkflow(WF_CATALOG[slug].meta, WF_CATALOG[slug].specs);
