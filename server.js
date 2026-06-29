@@ -854,6 +854,9 @@ async function handleWorkflowRun(req, res, slug) {
   const ipKey = workflowClientIpKey(req);
   const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: WORKFLOW_LIMITS });
   if (!reserve.ok) {
+    if (billing) {
+      runEscrow.refund(runId).catch((e) => console.error("[Workflow] refund on rate-limit:", e.message));
+    }
     sendJson(res, reserve.status, { error: reserve.error, message: workflowLimitMessage(reserve.error), remaining: 0, resetsAt: reserve.resetsAt });
     return;
   }

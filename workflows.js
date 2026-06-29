@@ -1751,7 +1751,13 @@ function runWorkflow(slug, wf, opts) {
       setNodeState(1, "failed");
       setStepRowState(1, "failed");
       showRunError(errData);
-      restoreBtn();
+      if (errData.error === "daily_limit" || errData.error === "spend_limit") {
+        runBtn.disabled = true;
+        runBtn.innerHTML = "Daily limit reached";
+        if (quotaEl) { quotaEl.hidden = false; quotaEl.textContent = "Daily limit reached. Resets at 00:00 UTC."; }
+      } else {
+        restoreBtn();
+      }
       return;
     }
 
@@ -1824,7 +1830,12 @@ function runWorkflow(slug, wf, opts) {
       setNodeState(outputIdx, "completed");
       setStepRowState(outputIdx, "completed");
       showRunResult(resultData);
-      restoreBtn();
+      if (resultData.remaining === 0) {
+        runBtn.disabled = true;
+        runBtn.innerHTML = "Daily limit reached";
+      } else {
+        restoreBtn();
+      }
     }
   })();
 
