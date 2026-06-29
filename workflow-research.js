@@ -134,11 +134,10 @@ function buildPlannerMessages(query, maxQueries, today) {
 // The model is expected to perform real web retrieval and return findings with source URLs.
 function buildSearchMessages(query, queries, today) {
   const angles = queries.map((q, i) => `${i + 1}. ${q}`).join("\n");
-  const content = `You are a research assistant with web search capability.\n\n`
-    + `Research the following topic thoroughly: "${query}"\n\n`
+  const content = `You are a research assistant with live web search. Search the web and research the following topic thoroughly: "${query}"\n\n`
     + `Cover these specific angles:\n${angles}\n\n`
-    + `Provide comprehensive, factual findings with specific data points, statistics, and quotes. `
-    + `Include source URLs inline where available. Assume today is ${today}.`;
+    + `Provide comprehensive, factual findings with specific data points and statistics, and include the REAL source URLs you actually found, inline. `
+    + `Do not fabricate URLs, figures, or quotes; report only what you actually find. Assume today is ${today}.`;
   return [{ role: "user", content }];
 }
 
@@ -149,10 +148,9 @@ function buildWriterMessages(persona, contextText, query, totalWords, today) {
     + "Guidelines:\n"
     + "- Determine your own concrete opinion based on the information; do not defer to vague conclusions.\n"
     + "- Write in markdown using #, ##, ### headers; use tables for structured comparisons.\n"
-    + "- Prioritize reliable and recent sources.\n"
     + "- Do NOT include a table of contents.\n"
-    + "- Use in-text citations as markdown hyperlinks at the end of the relevant sentence: ([source](url)).\n"
-    + "- Add a references list at the end with full URLs, no duplicates, each hyperlinked [url](url).\n"
+    + "- Use in-text citations as markdown links to the REAL source URLs from the information above; do NOT invent URLs, statistics, or quotes.\n"
+    + "- Add a references list at the end of the actual source URLs used, no duplicates.\n"
     + `Write in english. Assume the current date is ${today}.`;
   return [
     { role: "system", content: persona.agent_role_prompt },

@@ -52,6 +52,12 @@ const V98_MODELS = {
   "kimi-k2.5": { inputPer1M: 0.50, outputPer1M: 2.50 },
   "kimi-k2.6": { inputPer1M: 0.50, outputPer1M: 2.50 },
   "kimi-k2.7-code": { inputPer1M: 0.50, outputPer1M: 2.50 },
+  // OpenAI web-search models (live browsing). perCallUsd is the web-search tool
+  // surcharge per request, which dominates the token cost; confirm against the
+  // v98 dashboard. These return real source URLs.
+  "gpt-4o-mini-search-preview": { inputPer1M: 0.15, outputPer1M: 0.60, perCallUsd: 0.027 },
+  "gpt-4o-search-preview": { inputPer1M: 2.50, outputPer1M: 10.00, perCallUsd: 0.035 },
+  "gpt-5-search-api": { inputPer1M: 1.25, outputPer1M: 10.00, perCallUsd: 0.03 },
   // Claude series
   "claude-3-haiku-20240307": { inputPer1M: 0.25, outputPer1M: 1.25 },
   "claude-3-5-sonnet-20241022": { inputPer1M: 3.00, outputPer1M: 15.00 },
@@ -96,7 +102,9 @@ function computeCostMicros(modelId, promptTokens, completionTokens, groupRatio) 
   const ratio = Number(groupRatio) > 0 ? Number(groupRatio) : 1;
   const pt = Math.max(0, Number(promptTokens) || 0);
   const ct = Math.max(0, Number(completionTokens) || 0);
-  const micros = (pt * price.inputPer1M + ct * price.outputPer1M) * ratio;
+  // Some models (web search) charge a per-request surcharge on top of tokens.
+  const perCall = price.perCallUsd ? price.perCallUsd * 1000000 : 0;
+  const micros = (pt * price.inputPer1M + ct * price.outputPer1M + perCall) * ratio;
   return Math.round(micros);
 }
 

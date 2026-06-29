@@ -113,9 +113,9 @@ const WORKFLOW_LIMITS = {
 // and cost scale up from Normal to Pro. The FORMATTER alias stays cheap on every
 // tier (it only assembles prior outputs).
 const WORKFLOW_TIER_MODELS = {
-  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "deepseek-r1-searching", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
-  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "grok-3-deepsearch", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
-  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "grok-4", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
+  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "gpt-4o-mini-search-preview", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
+  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "gpt-4o-mini-search-preview", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
+  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "gpt-4o-mini-search-preview", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
 };
 // Fixed USDC price per tier by workflow weight (6-decimal base units).
 const WORKFLOW_PRICE_BANDS = {
@@ -151,7 +151,7 @@ const WORKFLOW_RUN_DEFS = {
         priceUnits: 30000,   // 0.03 USDC
         models: {
           FAST: "gpt-4o-mini",
-          RESEARCH: "deepseek-r1-searching",
+          RESEARCH: "gpt-4o-mini-search-preview",
           STRONG: "deepseek-v3",
         },
       },
@@ -159,7 +159,7 @@ const WORKFLOW_RUN_DEFS = {
         priceUnits: 50000,   // 0.05 USDC
         models: {
           FAST: "gpt-4o-mini",
-          RESEARCH: "grok-3-deepsearch",
+          RESEARCH: "gpt-4o-mini-search-preview",
           STRONG: "deepseek-v3.2",
         },
       },
@@ -167,7 +167,7 @@ const WORKFLOW_RUN_DEFS = {
         priceUnits: 100000,  // 0.10 USDC
         models: {
           FAST: "gpt-4o-mini",
-          RESEARCH: "grok-4",
+          RESEARCH: "gpt-4o-mini-search-preview",
           STRONG: "claude-sonnet-4-6",
         },
       },
@@ -217,6 +217,7 @@ Object.entries(WORKFLOW_BANDS).forEach(([slug, [name, band]]) => {
 const WORKFLOW_PRICE_OVERRIDES = {
   "call-recap": { normal: 10000, plus: 10000, pro: 20000 },
   "proposal-sow": { normal: 10000, plus: 10000, pro: 80000 },
+  "client-research": { normal: 30000, plus: 30000, pro: 60000 },
 };
 Object.entries(WORKFLOW_PRICE_OVERRIDES).forEach(([slug, p]) => {
   const def = WORKFLOW_RUN_DEFS[slug];

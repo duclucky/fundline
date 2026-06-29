@@ -17,9 +17,9 @@ const v98 = require("./v98-models");
 
 // Mirror server.js WORKFLOW_TIER_MODELS (alias -> model per tier).
 const TIER_MODELS = {
-  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "deepseek-r1-searching", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
-  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "grok-3-deepsearch", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
-  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "grok-4", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
+  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "gpt-4o-mini-search-preview", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
+  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "gpt-4o-mini-search-preview", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
+  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "gpt-4o-mini-search-preview", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
 };
 
 const GROUP_RATIO = Number(process.env.V98STORE_GROUP_RATIO) > 0 ? Number(process.env.V98STORE_GROUP_RATIO) : 1;

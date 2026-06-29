@@ -23,7 +23,7 @@ const WORKFLOWS = {
     steps: [
       { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
       { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
-      { serverKey: "web_research", name: "Web research", model: "deepseek-r1-searching", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+      { serverKey: "web_research", name: "Web research", model: "gpt-4o-mini-search-preview", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
       { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3", purpose: "Write a structured, cited research report.", tokens: "~1500" },
     ],
     tiers: {
@@ -32,25 +32,25 @@ const WORKFLOWS = {
         steps: [
           { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
           { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
-          { serverKey: "web_research", name: "Web research", model: "deepseek-r1-searching", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "web_research", name: "Web research", model: "gpt-4o-mini-search-preview", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
           { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3", purpose: "Write a structured, cited research report.", tokens: "~1500" },
         ],
       },
       plus: {
-        price: "0.05",
+        price: "0.03",
         steps: [
           { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
           { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
-          { serverKey: "web_research", name: "Web research", model: "grok-3-deepsearch", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "web_research", name: "Web research", model: "gpt-4o-mini-search-preview", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
           { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3.2", purpose: "Write a structured, cited research report.", tokens: "~1500" },
         ],
       },
       pro: {
-        price: "0.10",
+        price: "0.06",
         steps: [
           { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
           { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
-          { serverKey: "web_research", name: "Web research", model: "grok-4", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "web_research", name: "Web research", model: "gpt-4o-mini-search-preview", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
           { serverKey: "report_writer", name: "Report writer", model: "claude-sonnet-4-6", purpose: "Write a structured, cited research report.", tokens: "~1500" },
         ],
       },
@@ -58,7 +58,7 @@ const WORKFLOWS = {
     pricing: [
       { step: "Role analysis", model: "gpt-4o-mini", inputTokens: 50, outputTokens: 20, cost: "0.00002" },
       { step: "Research plan", model: "gpt-4o-mini", inputTokens: 60, outputTokens: 40, cost: "0.00003" },
-      { step: "Web research", model: "grok-3-deepsearch", inputTokens: 800, outputTokens: 1200, cost: "0.025" },
+      { step: "Web research", model: "deepseek-r1", inputTokens: 800, outputTokens: 1200, cost: "0.025" },
       { step: "Report writer", model: "deepseek-v3.2", inputTokens: 1200, outputTokens: 1200, cost: "0.0015" },
     ],
     examplePrompt: "Research Notion Inc for a partnership outreach call. We want to integrate our product with their API.",
@@ -72,9 +72,9 @@ const WORKFLOWS = {
 // the selected tier. Node `key` MUST match the node id in workflow-defs.js so the
 // SSE progress animation lines up. Display only; the server runs the real chain.
 const WF_TIER_MODELS = {
-  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "deepseek-r1-searching", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
-  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "grok-3-deepsearch", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
-  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "grok-4", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
+  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "gpt-4o-mini-search-preview", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
+  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "gpt-4o-mini-search-preview", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
+  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "gpt-4o-mini-search-preview", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
 };
 const WF_PRICE_BANDS = {
   light: { normal: "0.03", plus: "0.05", pro: "0.10" },
