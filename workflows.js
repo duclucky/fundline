@@ -648,6 +648,10 @@ const WF_CATALOG = {
 // Filled in as each workflow is run and finalized (real cost rounded to a clean
 // value). Overrides the band price for the explore card and tier selector.
 const WF_PRICE_OVERRIDES = {
+  "swot-analysis": { normal: "0.01", plus: "0.01", pro: "0.02" },
+  "lean-canvas": { normal: "0.01", plus: "0.01", pro: "0.02" },
+  "gtm-plan": { normal: "0.01", plus: "0.01", pro: "0.02" },
+  "competitor-analysis": { normal: "0.03", plus: "0.03", pro: "0.05" },
   "narrative-scan": { normal: "0.03", plus: "0.03", pro: "0.06" },
   "whitepaper-summary": { normal: "0.01", plus: "0.01", pro: "0.02" },
   "tokenomics-analyzer": { normal: "0.01", plus: "0.01", pro: "0.02" },
