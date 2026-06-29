@@ -47,6 +47,26 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   index.html diagram + create-workflow skill. cPanel no longer needs TAVILY_API_KEY (harmless if
   left). Older memory entries below that mention Tavily are historical (pre-removal).
 
+## Latest work (read first) - continued
+
+- 2026-06-29: CATALOG EXPANDED to 26 workflows + dynamic category filter (commit ab25edd +
+  test fix, NOT pushed). Added 11 workflows via the same engine pattern (graph in
+  workflow-defs.js + WORKFLOW_BANDS entry in server.js + WF_CATALOG entry in workflows.js,
+  serverKeys cross-checked): Content = x-thread-writer, newsletter-writer, linkedin-post;
+  Crypto = crypto-research (retrieval), tokenomics-analyzer, whitepaper-summary, narrative-scan
+  (retrieval); Business = competitor-analysis (retrieval), gtm-plan, lean-canvas, swot-analysis.
+  Retrieval workflows now total 6 (also client-research, market-pain-research, seo-content-brief,
+  seo-audit). UI FIX: the explore category filter was a HARDCODED list (All/Freelance/Content/
+  Research/Code/Crypto/Business) - replaced with a list DERIVED from the actual workflows
+  (`["All"].concat(unique categories sorted)`), so every category with workflows gets a chip
+  (previously SEO/Proposal/Sales/Operations/Delivery/Client Communication had none) and the
+  Content/Crypto/Business chips are no longer empty. `.wf-filters` + `.wf-explore-top` already
+  had `flex-wrap: wrap` so chips wrap to new lines (no horizontal scroll) - no CSS change needed.
+  Verified: engine smoke test 148/148 (26 graphs run, step/progress counts, alias coverage),
+  serverKeys match node ids (14+11), frontend builds 26 in vm sandbox, server requires cleanly,
+  no em dash/emoji. Also earlier this session: result download is now a formatted Word .doc
+  (buildWordDoc, commit 54524ed, pushed) instead of raw .md.
+
 ## User preferences (observed)
 
 - Communicates in Vietnamese and wants my replies in Vietnamese.
