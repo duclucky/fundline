@@ -123,7 +123,7 @@ const tierModels = { FAST: "gpt-4o-mini", RESEARCH: "grok-3-deepsearch", STRONG:
     return Promise.resolve({ content: "Generated section content for testing.", usage: genericUsage });
   }
   const slugs = Object.keys(defs.WORKFLOW_GRAPHS);
-  eq("catalog has 15 graphs", slugs.length, 15);
+  eq("catalog has 26 graphs", slugs.length, 26);
   for (const slug of slugs) {
     const g = defs.getGraph(slug);
     const aliases = defs.graphAliases(slug);
