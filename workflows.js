@@ -1250,12 +1250,12 @@ function renderRuns() {
       ? `<button class="wf-receipt-btn" type="button" data-idx="${idx}">View</button>`
       : `<button class="wf-receipt-btn" type="button" disabled style="opacity:0.35;cursor:default">View</button>`;
     return `<tr>
-      <td>
+      <td><div class="wf-hist-cell">
         <span class="wf-hist-workflow" data-nav="/workflows/${esc(r.slug)}">${esc(r.workflow)}</span>
         <span class="wf-hist-id wf-mono">${esc(shortId)}</span>
-      </td>
+      </div></td>
       <td>${tx}</td>
-      <td class="wf-num wf-hist-charged">${esc(r.charged)} <span class="wf-muted" style="font-size:11px;font-weight:400">USDC</span></td>
+      <td class="wf-hist-charged">${esc(r.charged)} <span class="wf-muted" style="font-size:11px;font-weight:400">USDC</span></td>
       <td><span class="wf-run-status ${statusCls}">${r.status}</span></td>
       <td class="wf-hist-date">${esc(r.at)}</td>
       <td>${viewBtn}</td>
@@ -1269,7 +1269,7 @@ function renderRuns() {
         <table class="wf-runs-table">
           <thead><tr>
             <th>Workflow</th><th>Transaction</th>
-            <th class="wf-num">Charged</th><th>Status</th><th>Date</th><th></th>
+            <th>Charged</th><th>Status</th><th>Date</th><th></th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>

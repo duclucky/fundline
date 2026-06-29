@@ -3209,7 +3209,7 @@ a.nav-item {
   margin: 0 0 12px 0;
   padding: 0 2px;
 }
-.wf-runs-table td:first-child {
+.wf-hist-cell {
   display: flex;
   flex-direction: column;
   gap: 3px;
