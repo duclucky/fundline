@@ -483,6 +483,269 @@ const clientResearch = {
   ],
 };
 
+// ===== Content =====
+
+// X / Twitter Thread Writer
+const xThreadWriter = {
+  name: "X / Twitter Thread Writer",
+  nodes: [
+    step({ id: "content_extractor", name: "Content Extractor", alias: "FAST", maxTokens: 600,
+      system: "You extract the core ideas, angle, and any data points from the input that should drive a thread.",
+      user: (ctx) => `Extract the main idea, supporting points, and the single sharpest angle for a thread.\n\nInput:\n${ctx.input}` }),
+    step({ id: "thread_architect", name: "Thread Architect", alias: "FAST", maxTokens: 500,
+      system: "You plan a high-engagement X thread: a strong hook, an ordered list of point tweets, and a closing CTA.",
+      user: (ctx) => `Plan the thread structure (hook, 5-9 point beats, CTA).\n\nIdeas:\n${out(ctx, "content_extractor")}` }),
+    step({ id: "tweet_writer", name: "Tweet Writer", alias: "STRONG", maxTokens: 1000,
+      system: "You write X threads. Each tweet is punchy and under 280 characters, numbered (1/, 2/, ...), with line breaks for readability. No hashtags spam.",
+      user: (ctx) => `Write the full thread following the plan.\n\nPlan:\n${out(ctx, "thread_architect")}\n\nIdeas:\n${out(ctx, "content_extractor")}` }),
+    step({ id: "hook_optimizer", name: "Hook Optimizer", alias: "FAST", maxTokens: 300,
+      system: "You write scroll-stopping first lines for X threads.",
+      user: (ctx) => `Give 3 alternative hook tweets for this thread.\n\nThread:\n${out(ctx, "tweet_writer")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 1400, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble: the final Thread (numbered, ready to post) and an Alternative Hooks list.\n\nThread:\n${out(ctx, "tweet_writer")}\n\nAlt hooks:\n${out(ctx, "hook_optimizer")}` }),
+  ],
+};
+
+// Newsletter Issue Writer
+const newsletterWriter = {
+  name: "Newsletter Issue Writer",
+  nodes: [
+    step({ id: "brief_extractor", name: "Brief Extractor", alias: "FAST", maxTokens: 500,
+      system: "You extract the topic, audience, key points, and goal for a newsletter issue.",
+      user: (ctx) => `Extract topic, audience, key points, and the issue's goal.\n\nInput:\n${ctx.input}` }),
+    step({ id: "outline_builder", name: "Outline Builder", alias: "FAST", maxTokens: 500,
+      system: "You outline a skimmable newsletter: subject angle, intro, 2-4 body sections, and a CTA.",
+      user: (ctx) => `Outline the issue.\n\nBrief:\n${out(ctx, "brief_extractor")}` }),
+    step({ id: "draft_writer", name: "Draft Writer", alias: "STRONG", maxTokens: 1600,
+      system: "You write engaging, skimmable newsletter issues with short paragraphs, subheadings, and a clear voice.",
+      user: (ctx) => `Write the full newsletter body following the outline.\n\nOutline:\n${out(ctx, "outline_builder")}\n\nBrief:\n${out(ctx, "brief_extractor")}` }),
+    step({ id: "subject_lines", name: "Subject Line Generator", alias: "FAST", maxTokens: 300,
+      system: "You write high-open-rate subject lines and preview text.",
+      user: (ctx) => `Give 5 subject line options and 2 preview-text options.\n\nDraft:\n${out(ctx, "draft_writer")}` }),
+    step({ id: "polish_editor", name: "Polish Editor", alias: "STRONG", maxTokens: 1200,
+      system: "You tighten newsletters for clarity and skimmability without changing meaning.",
+      user: (ctx) => `Return a tightened version of the draft.\n\nDraft:\n${out(ctx, "draft_writer")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 2000, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble: Subject Line options, Preview Text, and the final Newsletter Body.\n\nSubjects:\n${out(ctx, "subject_lines")}\n\nBody:\n${out(ctx, "polish_editor")}` }),
+  ],
+};
+
+// LinkedIn Post Writer
+const linkedinPost = {
+  name: "LinkedIn Post Writer",
+  nodes: [
+    step({ id: "angle_extractor", name: "Angle Extractor", alias: "FAST", maxTokens: 400,
+      system: "You extract the core message, audience, and goal for a LinkedIn post.",
+      user: (ctx) => `Extract the core message, target audience, and goal.\n\nInput:\n${ctx.input}` }),
+    step({ id: "hook_writer", name: "Hook Writer", alias: "FAST", maxTokens: 300,
+      system: "You write scroll-stopping first lines for LinkedIn (the visible line before 'see more').",
+      user: (ctx) => `Give 3 strong opening lines.\n\nAngle:\n${out(ctx, "angle_extractor")}` }),
+    step({ id: "post_writer", name: "Post Writer", alias: "STRONG", maxTokens: 800,
+      system: "You write professional LinkedIn posts: a hook, short one-to-two line paragraphs, a concrete takeaway, and a soft CTA. No hashtag spam.",
+      user: (ctx) => `Write the full post using the best hook.\n\nHooks:\n${out(ctx, "hook_writer")}\n\nAngle:\n${out(ctx, "angle_extractor")}` }),
+    step({ id: "hashtag_cta", name: "Hashtag & CTA Helper", alias: "FAST", maxTokens: 250,
+      system: "You suggest 3-5 relevant hashtags and 2 CTA variants for a LinkedIn post.",
+      user: (ctx) => `Suggest hashtags and CTA variants.\n\nPost:\n${out(ctx, "post_writer")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 1200, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble: the final Post (ready to paste), Alternative Hooks, and Hashtags & CTA options.\n\nPost:\n${out(ctx, "post_writer")}\n\nHooks:\n${out(ctx, "hook_writer")}\n\nHashtags/CTA:\n${out(ctx, "hashtag_cta")}` }),
+  ],
+};
+
+// ===== Crypto =====
+
+// Crypto Project Research Report (retrieval)
+const cryptoResearch = {
+  name: "Crypto Project Research Report",
+  nodes: [
+    step({ id: "scope_planner", name: "Scope Planner", alias: "FAST", maxTokens: 400,
+      system: "You frame a crypto due-diligence scope: identify the project and the key questions to answer.",
+      user: (ctx) => `Identify the project and list the key due-diligence questions (product, team, tokenomics, traction, risks).\n\nInput:\n${ctx.input}` }),
+    step({ id: "web_research", name: "Web Research", alias: "RESEARCH", maxTokens: 3500, retrieval: true,
+      system: "You are a crypto research assistant with web search capability.",
+      user: (ctx) => `Research this project thoroughly: what it does, team/backers, traction, token, and recent news. Provide factual findings with source URLs inline. Assume today is ${ctx.today}.\n\nProject + angle:\n${ctx.input}\n\nScope:\n${out(ctx, "scope_planner")}` }),
+    step({ id: "tokenomics_analyst", name: "Tokenomics Analyst", alias: "STRONG", maxTokens: 800,
+      system: "You analyze a crypto project's tokenomics from research: supply, distribution, utility, emissions, and dilution risk. Flag what is unverifiable.",
+      user: (ctx) => `Analyze the tokenomics.\n\nFindings:\n${out(ctx, "web_research")}` }),
+    step({ id: "tech_team_analyst", name: "Tech & Team Analyst", alias: "STRONG", maxTokens: 700,
+      system: "You assess a crypto project's technology and team/backers from research.",
+      user: (ctx) => `Assess the technology and the team/backers.\n\nFindings:\n${out(ctx, "web_research")}` }),
+    step({ id: "risk_assessor", name: "Risk Assessor", alias: "STRONG", maxTokens: 700,
+      system: "You assign a risk rating (Low/Medium/High) and list red flags for a crypto project.",
+      user: (ctx) => `Give a risk rating with rationale and a red-flags list.\n\nTokenomics:\n${out(ctx, "tokenomics_analyst")}\n\nTech & team:\n${out(ctx, "tech_team_analyst")}\n\nFindings:\n${out(ctx, "web_research")}` }),
+    step({ id: "formatter", name: "Final Report Formatter", alias: "FORMATTER", maxTokens: 2200, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble a Crypto Research Report: Overview, Tokenomics, Tech & Team, Risk Rating & Red Flags, and Sources.\n\nTokenomics:\n${out(ctx, "tokenomics_analyst")}\n\nTech & team:\n${out(ctx, "tech_team_analyst")}\n\nRisk:\n${out(ctx, "risk_assessor")}\n\nFindings (overview + sources):\n${out(ctx, "web_research")}` }),
+  ],
+};
+
+// Tokenomics Analyzer
+const tokenomicsAnalyzer = {
+  name: "Tokenomics Analyzer",
+  nodes: [
+    step({ id: "input_normalizer", name: "Input Normalizer", alias: "FAST", maxTokens: 600,
+      system: "You structure provided tokenomics data (supply, allocations, vesting, utility) into clean notes.",
+      user: (ctx) => `Structure the provided tokenomics details. Mark anything missing as 'Not specified'.\n\nInput:\n${ctx.input}` }),
+    step({ id: "supply_analyst", name: "Supply Analyst", alias: "STRONG", maxTokens: 600,
+      system: "You analyze total/max/circulating supply and emission/inflation schedule.",
+      user: (ctx) => `Analyze supply and emissions.\n\nData:\n${out(ctx, "input_normalizer")}` }),
+    step({ id: "distribution_analyst", name: "Distribution Analyst", alias: "STRONG", maxTokens: 700,
+      system: "You analyze allocation (team/investors/community/treasury), vesting, and unlock/dilution risk.",
+      user: (ctx) => `Analyze distribution, vesting, and unlock risk.\n\nData:\n${out(ctx, "input_normalizer")}` }),
+    step({ id: "utility_demand", name: "Utility & Demand Analyst", alias: "STRONG", maxTokens: 600,
+      system: "You analyze token utility and the real demand drivers (or lack thereof).",
+      user: (ctx) => `Analyze utility and demand drivers.\n\nData:\n${out(ctx, "input_normalizer")}` }),
+    step({ id: "risk_rating", name: "Risk & Rating", alias: "FAST", maxTokens: 500,
+      system: "You summarize tokenomics risks and give a simple rating.",
+      user: (ctx) => `Summarize the main risks and give a rating (Low/Medium/High).\n\nSupply:\n${out(ctx, "supply_analyst")}\n\nDistribution:\n${out(ctx, "distribution_analyst")}\n\nUtility:\n${out(ctx, "utility_demand")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 1800, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble a Tokenomics Analysis: Supply & Emissions, Distribution & Vesting, Utility & Demand, and Risks & Rating.\n\nSupply:\n${out(ctx, "supply_analyst")}\n\nDistribution:\n${out(ctx, "distribution_analyst")}\n\nUtility:\n${out(ctx, "utility_demand")}\n\nRisk:\n${out(ctx, "risk_rating")}` }),
+  ],
+};
+
+// Whitepaper Summarizer
+const whitepaperSummary = {
+  name: "Whitepaper Summarizer",
+  nodes: [
+    step({ id: "section_splitter", name: "Section Splitter", alias: "FAST", maxTokens: 600,
+      system: "You identify the main sections and central claims of a whitepaper.",
+      user: (ctx) => `List the main sections and the central claims.\n\nWhitepaper:\n${ctx.input}` }),
+    step({ id: "core_summary", name: "Core Summary", alias: "STRONG", maxTokens: 900,
+      system: "You summarize a whitepaper's thesis: the problem, the proposed solution, and who it is for.",
+      user: (ctx) => `Summarize the thesis, problem, and solution.\n\nSections:\n${out(ctx, "section_splitter")}\n\nWhitepaper:\n${ctx.input}` }),
+    step({ id: "mechanism_summary", name: "Mechanism & Token Summary", alias: "STRONG", maxTokens: 900,
+      system: "You summarize the technical mechanism and tokenomics highlights of a whitepaper.",
+      user: (ctx) => `Summarize the mechanism/architecture and the tokenomics highlights.\n\nWhitepaper:\n${ctx.input}` }),
+    step({ id: "claims_flags", name: "Claims & Flags", alias: "FAST", maxTokens: 500,
+      system: "You list notable claims, assumptions, and items a reader should independently verify.",
+      user: (ctx) => `List notable claims, assumptions, and things to verify.\n\nCore:\n${out(ctx, "core_summary")}\n\nMechanism:\n${out(ctx, "mechanism_summary")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 1800, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble a Whitepaper Summary: Thesis, Problem & Solution, Mechanism, Tokenomics, and Claims to Verify.\n\nCore:\n${out(ctx, "core_summary")}\n\nMechanism:\n${out(ctx, "mechanism_summary")}\n\nClaims:\n${out(ctx, "claims_flags")}` }),
+  ],
+};
+
+// Narrative / Sector Scan (retrieval)
+const narrativeScan = {
+  name: "Narrative / Sector Scan",
+  nodes: [
+    step({ id: "narrative_framer", name: "Narrative Framer", alias: "FAST", maxTokens: 400,
+      system: "You frame a crypto narrative/sector and the key questions to scan for.",
+      user: (ctx) => `Frame the narrative/sector and list key questions (leading projects, trends, catalysts, risks).\n\nInput:\n${ctx.input}` }),
+    step({ id: "web_research", name: "Web Research", alias: "RESEARCH", maxTokens: 3500, retrieval: true,
+      system: "You are a crypto market research assistant with web search capability.",
+      user: (ctx) => `Research this narrative/sector: leading projects, recent trends, catalysts, and risks. Provide findings with source URLs inline. Assume today is ${ctx.today}.\n\nNarrative:\n${ctx.input}\n\nFrame:\n${out(ctx, "narrative_framer")}` }),
+    step({ id: "project_mapper", name: "Project Mapper", alias: "STRONG", maxTokens: 800,
+      system: "You map the key projects in a narrative and what differentiates each.",
+      user: (ctx) => `Map the key projects (table: Project | What it does | Edge).\n\nFindings:\n${out(ctx, "web_research")}` }),
+    step({ id: "trend_catalyst", name: "Trends & Catalysts", alias: "STRONG", maxTokens: 700,
+      system: "You identify the trends, catalysts, and risks shaping a narrative.",
+      user: (ctx) => `List trends, catalysts, and risks.\n\nFindings:\n${out(ctx, "web_research")}` }),
+    step({ id: "opportunity_take", name: "Opportunity & Take", alias: "STRONG", maxTokens: 700,
+      system: "You give a balanced take and the opportunities in a narrative. Not financial advice.",
+      user: (ctx) => `Give opportunities and a balanced take (note this is not financial advice).\n\nProjects:\n${out(ctx, "project_mapper")}\n\nTrends:\n${out(ctx, "trend_catalyst")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 2000, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble a Narrative Scan: Overview, Key Projects (keep the table), Trends & Catalysts, Risks, Opportunities & Take, and Sources.\n\nProjects:\n${out(ctx, "project_mapper")}\n\nTrends:\n${out(ctx, "trend_catalyst")}\n\nTake:\n${out(ctx, "opportunity_take")}\n\nFindings (sources):\n${out(ctx, "web_research")}` }),
+  ],
+};
+
+// ===== Business =====
+
+// Competitor Analysis (retrieval)
+const competitorAnalysis = {
+  name: "Competitor Analysis",
+  nodes: [
+    step({ id: "scope_extractor", name: "Scope Extractor", alias: "FAST", maxTokens: 500,
+      system: "You identify the company/product, its market, and the competitors to analyze.",
+      user: (ctx) => `Identify the company/product, market, and competitors (named or to be discovered).\n\nInput:\n${ctx.input}` }),
+    step({ id: "web_research", name: "Web Research", alias: "RESEARCH", maxTokens: 3500, retrieval: true,
+      system: "You are a competitive research assistant with web search capability.",
+      user: (ctx) => `Research the competitors: offerings, pricing, positioning, and notable strengths/weaknesses. Provide findings with source URLs inline. Assume today is ${ctx.today}.\n\nScope:\n${out(ctx, "scope_extractor")}\n\nInput:\n${ctx.input}` }),
+    step({ id: "positioning_map", name: "Positioning Map", alias: "STRONG", maxTokens: 900,
+      system: "You compare competitors in a clear matrix.",
+      user: (ctx) => `Build a comparison table: Competitor | Offering | Pricing | Strengths | Weaknesses | Positioning.\n\nFindings:\n${out(ctx, "web_research")}` }),
+    step({ id: "gap_finder", name: "Gap Finder", alias: "STRONG", maxTokens: 600,
+      system: "You find market gaps and differentiation opportunities.",
+      user: (ctx) => `List market gaps and how the company can differentiate.\n\nPositioning:\n${out(ctx, "positioning_map")}` }),
+    step({ id: "swot", name: "SWOT vs Competitors", alias: "STRONG", maxTokens: 600,
+      system: "You write a SWOT for the user's company relative to the competition.",
+      user: (ctx) => `Write a SWOT for the company given the competitive landscape.\n\nPositioning:\n${out(ctx, "positioning_map")}\n\nGaps:\n${out(ctx, "gap_finder")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 2200, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble a Competitor Analysis: Landscape, Comparison (keep the table), Market Gaps, SWOT, and Sources.\n\nPositioning:\n${out(ctx, "positioning_map")}\n\nGaps:\n${out(ctx, "gap_finder")}\n\nSWOT:\n${out(ctx, "swot")}\n\nFindings (sources):\n${out(ctx, "web_research")}` }),
+  ],
+};
+
+// Go-to-Market Plan
+const gtmPlan = {
+  name: "Go-to-Market Plan",
+  nodes: [
+    step({ id: "product_extractor", name: "Product Extractor", alias: "FAST", maxTokens: 500,
+      system: "You extract the product, target audience, and goals from the input.",
+      user: (ctx) => `Extract the product, audience, goals, and any constraints.\n\nInput:\n${ctx.input}` }),
+    step({ id: "segment_targeting", name: "Segment & Targeting", alias: "STRONG", maxTokens: 700,
+      system: "You define target segments and an ideal customer profile.",
+      user: (ctx) => `Define 2-3 target segments and an ICP.\n\nProduct:\n${out(ctx, "product_extractor")}` }),
+    step({ id: "positioning_messaging", name: "Positioning & Messaging", alias: "STRONG", maxTokens: 700,
+      system: "You write positioning and key messages per segment.",
+      user: (ctx) => `Write positioning and key messages per segment.\n\nSegments:\n${out(ctx, "segment_targeting")}` }),
+    step({ id: "channel_plan", name: "Channel Plan", alias: "STRONG", maxTokens: 700,
+      system: "You select GTM channels and concrete tactics.",
+      user: (ctx) => `Recommend channels and tactics per segment.\n\nSegments:\n${out(ctx, "segment_targeting")}\n\nPositioning:\n${out(ctx, "positioning_messaging")}` }),
+    step({ id: "milestones_metrics", name: "Milestones & Metrics", alias: "FAST", maxTokens: 500,
+      system: "You set launch milestones and the metrics/KPIs to track.",
+      user: (ctx) => `List launch milestones and the KPIs to track.\n\nChannels:\n${out(ctx, "channel_plan")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 2000, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble a Go-to-Market Plan: Segments & ICP, Positioning & Messaging, Channels & Tactics, and Milestones & KPIs.\n\nSegments:\n${out(ctx, "segment_targeting")}\n\nPositioning:\n${out(ctx, "positioning_messaging")}\n\nChannels:\n${out(ctx, "channel_plan")}\n\nMilestones:\n${out(ctx, "milestones_metrics")}` }),
+  ],
+};
+
+// Lean Canvas / Business Model
+const leanCanvas = {
+  name: "Lean Canvas / Business Model",
+  nodes: [
+    step({ id: "idea_extractor", name: "Idea Extractor", alias: "FAST", maxTokens: 500,
+      system: "You extract the business idea, the customer, and the core problem from the input.",
+      user: (ctx) => `Extract the idea, target customer, and core problem.\n\nInput:\n${ctx.input}` }),
+    step({ id: "canvas_builder", name: "Canvas Builder", alias: "STRONG", maxTokens: 1100,
+      system: "You fill a Lean Canvas: Problem, Customer Segments, Unique Value Proposition, Solution, Channels, Revenue Streams, Cost Structure, Key Metrics, Unfair Advantage.",
+      user: (ctx) => `Fill all nine Lean Canvas blocks.\n\nIdea:\n${out(ctx, "idea_extractor")}\n\nOriginal input:\n${ctx.input}` }),
+    step({ id: "assumptions_risks", name: "Assumptions & Risks", alias: "STRONG", maxTokens: 600,
+      system: "You surface the riskiest assumptions in a business model.",
+      user: (ctx) => `List the riskiest assumptions, most-critical first.\n\nCanvas:\n${out(ctx, "canvas_builder")}` }),
+    step({ id: "experiments", name: "Validation Experiments", alias: "FAST", maxTokens: 500,
+      system: "You propose cheap, fast experiments to test risky assumptions.",
+      user: (ctx) => `Propose a cheap experiment for each top assumption.\n\nAssumptions:\n${out(ctx, "assumptions_risks")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 1800, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble a Lean Canvas (present the nine blocks as a table or clear sections), then Riskiest Assumptions and Validation Experiments.\n\nCanvas:\n${out(ctx, "canvas_builder")}\n\nAssumptions:\n${out(ctx, "assumptions_risks")}\n\nExperiments:\n${out(ctx, "experiments")}` }),
+  ],
+};
+
+// SWOT Analysis
+const swotAnalysis = {
+  name: "SWOT Analysis",
+  nodes: [
+    step({ id: "context_extractor", name: "Context Extractor", alias: "FAST", maxTokens: 500,
+      system: "You extract the company/product and relevant context for a SWOT.",
+      user: (ctx) => `Summarize the company/product and context.\n\nInput:\n${ctx.input}` }),
+    step({ id: "swot_generator", name: "SWOT Generator", alias: "STRONG", maxTokens: 900,
+      system: "You produce a specific, evidence-grounded SWOT (Strengths, Weaknesses, Opportunities, Threats).",
+      user: (ctx) => `Produce the SWOT with concrete points in each quadrant.\n\nContext:\n${out(ctx, "context_extractor")}` }),
+    step({ id: "strategy_actions", name: "Strategies & Actions", alias: "STRONG", maxTokens: 700,
+      system: "You derive SO/WO/ST/WT strategies and a short prioritized action list from a SWOT.",
+      user: (ctx) => `Derive strategies (SO/WO/ST/WT) and 5 prioritized actions.\n\nSWOT:\n${out(ctx, "swot_generator")}` }),
+    step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 1600, isFinal: true,
+      system: FORMATTER_SYSTEM,
+      user: (ctx) => `Assemble a SWOT Analysis: a SWOT matrix (table), Strategies (SO/WO/ST/WT), and Prioritized Actions.\n\nSWOT:\n${out(ctx, "swot_generator")}\n\nStrategies:\n${out(ctx, "strategy_actions")}` }),
+  ],
+};
+
 const WORKFLOW_GRAPHS = {
   "call-recap": callRecap,
   "proposal-sow": proposalSow,
@@ -499,6 +762,17 @@ const WORKFLOW_GRAPHS = {
   "seo-audit": seoAudit,
   "keyword-strategy": keywordStrategy,
   "pr-diff-review": prDiffReview,
+  "x-thread-writer": xThreadWriter,
+  "newsletter-writer": newsletterWriter,
+  "linkedin-post": linkedinPost,
+  "crypto-research": cryptoResearch,
+  "tokenomics-analyzer": tokenomicsAnalyzer,
+  "whitepaper-summary": whitepaperSummary,
+  "narrative-scan": narrativeScan,
+  "competitor-analysis": competitorAnalysis,
+  "gtm-plan": gtmPlan,
+  "lean-canvas": leanCanvas,
+  "swot-analysis": swotAnalysis,
 };
 
 function getGraph(slug) {

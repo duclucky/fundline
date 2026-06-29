@@ -418,6 +418,231 @@ const WF_CATALOG = {
       { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble the review as Markdown + JSON.", tokens: "~1400" },
     ],
   },
+  "x-thread-writer": {
+    meta: {
+      name: "X / Twitter Thread Writer", category: "Content", band: "light", runtime: "~40s",
+      description: "Turn an idea, article, or insight into a high-engagement X/Twitter thread.",
+      longDesc: "Extracts the core idea, plans a hook and beats, writes a numbered thread, and offers alternative hooks.",
+      inputLabel: "Idea or article",
+      inputHint: "Paste your idea, insight, or the content to turn into a thread.",
+      outputHint: "A numbered, ready-to-post thread plus alternative hooks.",
+      limits: { inputChars: 6000, outputWords: 700 },
+      examplePrompt: "Write a thread on why most devs underestimate the cost of building auth from scratch.",
+      exampleOutput: "# X Thread\n\n1/ Most developers think auth is a weekend project. It is not.\n\n2/ The happy path takes 2 days. The edge cases take 6 weeks: token invalidation, MFA, OAuth, rate limiting.\n\n3/ The real cost is maintenance: every security update and new provider is your problem.\n\n4/ Use a proven solution and ship your product, not your auth layer.\n\n## Alternative Hooks\n- Auth is the most underestimated build in software.",
+    },
+    specs: [
+      { key: "content_extractor", name: "Content Extractor", alias: "FAST", purpose: "Extract core ideas and the sharpest angle.", tokens: "~400" },
+      { key: "thread_architect", name: "Thread Architect", alias: "FAST", purpose: "Plan hook, beats, and CTA.", tokens: "~300" },
+      { key: "tweet_writer", name: "Tweet Writer", alias: "STRONG", purpose: "Write the numbered thread.", tokens: "~800" },
+      { key: "hook_optimizer", name: "Hook Optimizer", alias: "FAST", purpose: "Offer alternative hooks.", tokens: "~250" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble thread + hooks as Markdown + JSON.", tokens: "~1000" },
+    ],
+  },
+  "newsletter-writer": {
+    meta: {
+      name: "Newsletter Issue Writer", category: "Content", band: "medium", runtime: "~60s",
+      description: "Turn a topic or notes into a polished, skimmable newsletter issue.",
+      longDesc: "Extracts the brief, outlines the issue, writes and polishes the draft, and generates subject lines and preview text.",
+      inputLabel: "Topic or notes",
+      inputHint: "Describe the topic, audience, key points, and goal of the issue.",
+      outputHint: "Subject line options, preview text, and a ready-to-send newsletter body.",
+      limits: { inputChars: 6000, outputWords: 1500 },
+      examplePrompt: "Newsletter issue for freelancers about getting paid faster with USDC. Friendly, practical.",
+      exampleOutput: "# Newsletter Issue\n\n## Subject Lines\n- Get paid in seconds, not weeks\n- The fee that eats 7% of your invoices\n\n## Preview Text\nA faster way to get paid across borders.\n\n## Body\nHey there,\n\nIf international payments take a week and cost a fortune, this one is for you...\n\n### Why USDC\nStable, instant, low fees.\n\n### How to start\n1. Set up a wallet. 2. Invoice in USDC. 3. Get paid.",
+    },
+    specs: [
+      { key: "brief_extractor", name: "Brief Extractor", alias: "FAST", purpose: "Extract topic, audience, key points, goal.", tokens: "~300" },
+      { key: "outline_builder", name: "Outline Builder", alias: "FAST", purpose: "Outline subject, intro, sections, CTA.", tokens: "~300" },
+      { key: "draft_writer", name: "Draft Writer", alias: "STRONG", purpose: "Write the full newsletter draft.", tokens: "~1100" },
+      { key: "subject_lines", name: "Subject Line Generator", alias: "FAST", purpose: "Subject lines and preview text.", tokens: "~200" },
+      { key: "polish_editor", name: "Polish Editor", alias: "STRONG", purpose: "Tighten for clarity and skimmability.", tokens: "~800" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble issue as Markdown + JSON.", tokens: "~1400" },
+    ],
+  },
+  "linkedin-post": {
+    meta: {
+      name: "LinkedIn Post Writer", category: "Content", band: "light", runtime: "~35s",
+      description: "Turn an idea into a professional, high-engagement LinkedIn post.",
+      longDesc: "Extracts the angle, writes scroll-stopping hooks and a full post, and suggests hashtags and CTAs.",
+      inputLabel: "Idea or message",
+      inputHint: "Describe what you want to say, your audience, and your goal.",
+      outputHint: "A ready-to-paste post plus alternative hooks and hashtag/CTA options.",
+      limits: { inputChars: 4000, outputWords: 500 },
+      examplePrompt: "A post about a lesson learned shipping my first SaaS: charge earlier than feels comfortable.",
+      exampleOutput: "# LinkedIn Post\n\nI waited 6 months to charge for my SaaS. Big mistake.\n\nHere is what I learned:\n\nFree users are not customers. They give different feedback.\n\nThe day I added a price, I learned what people actually valued.\n\nCharge earlier than feels comfortable.\n\n## Hashtags & CTA\n#SaaS #Startups - What is the earliest you have charged?",
+    },
+    specs: [
+      { key: "angle_extractor", name: "Angle Extractor", alias: "FAST", purpose: "Extract core message, audience, goal.", tokens: "~250" },
+      { key: "hook_writer", name: "Hook Writer", alias: "FAST", purpose: "Write scroll-stopping opening lines.", tokens: "~200" },
+      { key: "post_writer", name: "Post Writer", alias: "STRONG", purpose: "Write the full LinkedIn post.", tokens: "~600" },
+      { key: "hashtag_cta", name: "Hashtag & CTA Helper", alias: "FAST", purpose: "Suggest hashtags and CTAs.", tokens: "~200" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble post as Markdown + JSON.", tokens: "~900" },
+    ],
+  },
+  "crypto-research": {
+    meta: {
+      name: "Crypto Project Research Report", category: "Crypto", band: "heavy", runtime: "~85s",
+      description: "Due-diligence report on a crypto project: overview, tokenomics, team, tech, risks, and a rating.",
+      longDesc: "Plans the scope, researches the project online, analyzes tokenomics and tech/team, assesses risk with a rating, and assembles a cited report.",
+      inputLabel: "Project name",
+      inputHint: "Enter the project name and any angle to focus on (e.g. 'focus on tokenomics').",
+      outputHint: "A structured report with risk rating, tokenomics, team/tech, and cited sources.",
+      limits: { inputChars: 2000, outputWords: 2000 },
+      examplePrompt: "Research report on Arc by Circle, focus on the USDC-as-gas model and risks.",
+      exampleOutput: "# Crypto Research Report: Arc by Circle\n\n**Risk Rating:** Low-Medium\n\n## Overview\nArc is an EVM chain where USDC is the native gas token.\n\n## Tokenomics\nNo speculative governance token; fees paid in USDC.\n\n## Tech & Team\nBacked by Circle; sub-second finality, CCTP native.\n\n## Risk Rating & Red Flags\nCentralization around Circle; regulatory exposure of USDC.\n\n## Sources\n- (URLs gathered during research)",
+    },
+    specs: [
+      { key: "scope_planner", name: "Scope Planner", alias: "FAST", purpose: "Frame the due-diligence questions.", tokens: "~300" },
+      { key: "web_research", name: "Web Research", alias: "RESEARCH", purpose: "Research the project online.", tokens: "~2500" },
+      { key: "tokenomics_analyst", name: "Tokenomics Analyst", alias: "STRONG", purpose: "Analyze supply, distribution, utility.", tokens: "~700" },
+      { key: "tech_team_analyst", name: "Tech & Team Analyst", alias: "STRONG", purpose: "Assess technology and team/backers.", tokens: "~600" },
+      { key: "risk_assessor", name: "Risk Assessor", alias: "STRONG", purpose: "Risk rating and red flags.", tokens: "~600" },
+      { key: "formatter", name: "Final Report Formatter", alias: "FORMATTER", purpose: "Assemble the report as Markdown + JSON.", tokens: "~1600" },
+    ],
+  },
+  "tokenomics-analyzer": {
+    meta: {
+      name: "Tokenomics Analyzer", category: "Crypto", band: "medium", runtime: "~55s",
+      description: "Analyze a token's supply, distribution, vesting, utility, and dilution risk.",
+      longDesc: "Structures the tokenomics data, analyzes supply/emissions, distribution/vesting, and utility/demand, then summarizes risks with a rating.",
+      inputLabel: "Tokenomics details",
+      inputHint: "Paste the tokenomics (supply, allocations, vesting, utility) or a link's content.",
+      outputHint: "Analysis of supply, distribution, utility, and a risk rating.",
+      limits: { inputChars: 6000, outputWords: 1500 },
+      examplePrompt: "Token: 1B max supply, 20% team (4y vest, 1y cliff), 15% investors, 40% community, utility = gas + staking.",
+      exampleOutput: "# Tokenomics Analysis\n\n## Supply & Emissions\n1B max; emissions taper over 4 years.\n\n## Distribution & Vesting\nTeam 20% (1y cliff, 4y vest) reduces early dump risk.\n\n## Utility & Demand\nGas + staking create recurring demand.\n\n## Risks & Rating\nModerate unlock pressure in year 2. Rating: Medium.",
+    },
+    specs: [
+      { key: "input_normalizer", name: "Input Normalizer", alias: "FAST", purpose: "Structure the tokenomics data.", tokens: "~400" },
+      { key: "supply_analyst", name: "Supply Analyst", alias: "STRONG", purpose: "Analyze supply and emissions.", tokens: "~500" },
+      { key: "distribution_analyst", name: "Distribution Analyst", alias: "STRONG", purpose: "Analyze allocation, vesting, unlock risk.", tokens: "~600" },
+      { key: "utility_demand", name: "Utility & Demand Analyst", alias: "STRONG", purpose: "Analyze utility and demand drivers.", tokens: "~500" },
+      { key: "risk_rating", name: "Risk & Rating", alias: "FAST", purpose: "Summarize risks and rate.", tokens: "~400" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble analysis as Markdown + JSON.", tokens: "~1400" },
+    ],
+  },
+  "whitepaper-summary": {
+    meta: {
+      name: "Whitepaper Summarizer", category: "Crypto", band: "medium", runtime: "~55s",
+      description: "Turn a long whitepaper into a structured summary with claims to verify.",
+      longDesc: "Splits the whitepaper into sections, summarizes the thesis and the mechanism/tokenomics, and flags notable claims and assumptions.",
+      inputLabel: "Whitepaper text",
+      inputHint: "Paste the whitepaper text (or the key sections).",
+      outputHint: "A structured summary: thesis, mechanism, tokenomics, and claims to verify.",
+      limits: { inputChars: 16000, outputWords: 1500 },
+      examplePrompt: "Summarize this whitepaper (text pasted) for a busy investor.",
+      exampleOutput: "# Whitepaper Summary\n\n## Thesis\nA decentralized compute marketplace matching idle GPUs with AI workloads.\n\n## Problem & Solution\nGPU scarcity; a token-incentivized network of providers.\n\n## Mechanism\nProof-of-compute validation; on-chain settlement.\n\n## Tokenomics\nToken pays for compute and rewards providers.\n\n## Claims to Verify\n- Provider supply at launch; validation cost; real demand.",
+    },
+    specs: [
+      { key: "section_splitter", name: "Section Splitter", alias: "FAST", purpose: "Identify sections and central claims.", tokens: "~400" },
+      { key: "core_summary", name: "Core Summary", alias: "STRONG", purpose: "Summarize thesis, problem, solution.", tokens: "~700" },
+      { key: "mechanism_summary", name: "Mechanism & Token Summary", alias: "STRONG", purpose: "Summarize mechanism and tokenomics.", tokens: "~700" },
+      { key: "claims_flags", name: "Claims & Flags", alias: "FAST", purpose: "List claims and things to verify.", tokens: "~400" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble summary as Markdown + JSON.", tokens: "~1400" },
+    ],
+  },
+  "narrative-scan": {
+    meta: {
+      name: "Narrative / Sector Scan", category: "Crypto", band: "heavy", runtime: "~85s",
+      description: "Research a crypto narrative or sector: key projects, trends, catalysts, and risks.",
+      longDesc: "Frames the narrative, researches it online, maps the key projects, identifies trends and catalysts, and gives a balanced take with sources.",
+      inputLabel: "Narrative or sector",
+      inputHint: "Name the narrative or sector (e.g. 'restaking', 'RWA', 'AI agents on-chain').",
+      outputHint: "Key projects, trends, catalysts, risks, opportunities, and sources.",
+      limits: { inputChars: 2000, outputWords: 2000 },
+      examplePrompt: "Scan the on-chain AI agents narrative: who is building, trends, and risks.",
+      exampleOutput: "# Narrative Scan: On-chain AI Agents\n\n## Overview\nAgents that hold wallets and transact autonomously.\n\n## Key Projects\n| Project | What it does | Edge |\n|---|---|---|\n| Example | Agent payments | First mover |\n\n## Trends & Catalysts\nAgent payment rails, x402 adoption.\n\n## Risks\nHype, thin revenue, security of autonomous spend.\n\n## Sources\n- (URLs gathered during research)",
+    },
+    specs: [
+      { key: "narrative_framer", name: "Narrative Framer", alias: "FAST", purpose: "Frame the narrative and questions.", tokens: "~300" },
+      { key: "web_research", name: "Web Research", alias: "RESEARCH", purpose: "Research projects, trends, catalysts.", tokens: "~2500" },
+      { key: "project_mapper", name: "Project Mapper", alias: "STRONG", purpose: "Map key projects and their edge.", tokens: "~700" },
+      { key: "trend_catalyst", name: "Trends & Catalysts", alias: "STRONG", purpose: "Identify trends, catalysts, risks.", tokens: "~600" },
+      { key: "opportunity_take", name: "Opportunity & Take", alias: "STRONG", purpose: "Opportunities and a balanced take.", tokens: "~600" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble scan as Markdown + JSON.", tokens: "~1600" },
+    ],
+  },
+  "competitor-analysis": {
+    meta: {
+      name: "Competitor Analysis", category: "Business", band: "heavy", runtime: "~80s",
+      description: "Research competitors and produce a positioning comparison, gaps, and a SWOT.",
+      longDesc: "Identifies the competitors, researches them online, builds a comparison matrix, finds market gaps, and writes a SWOT relative to the competition.",
+      inputLabel: "Your company + competitors",
+      inputHint: "Describe your company/product and name competitors (or the market to scan).",
+      outputHint: "A comparison table, market gaps, a SWOT, and cited sources.",
+      limits: { inputChars: 4000, outputWords: 2000 },
+      examplePrompt: "Analyze competitors for a USDC invoicing tool for freelancers vs Request, Coinbase Commerce.",
+      exampleOutput: "# Competitor Analysis\n\n## Comparison\n| Competitor | Offering | Pricing | Strengths | Weaknesses |\n|---|---|---|---|---|\n| Request | Crypto invoicing | Free/fee | Brand | UX |\n\n## Market Gaps\nFiat-grade UX with instant USDC settlement.\n\n## SWOT\nStrengths: speed. Threats: incumbents.\n\n## Sources\n- (URLs gathered during research)",
+    },
+    specs: [
+      { key: "scope_extractor", name: "Scope Extractor", alias: "FAST", purpose: "Identify company, market, competitors.", tokens: "~300" },
+      { key: "web_research", name: "Web Research", alias: "RESEARCH", purpose: "Research competitors online.", tokens: "~2500" },
+      { key: "positioning_map", name: "Positioning Map", alias: "STRONG", purpose: "Build the comparison matrix.", tokens: "~700" },
+      { key: "gap_finder", name: "Gap Finder", alias: "STRONG", purpose: "Find gaps and differentiation.", tokens: "~500" },
+      { key: "swot", name: "SWOT vs Competitors", alias: "STRONG", purpose: "SWOT relative to competition.", tokens: "~500" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble analysis as Markdown + JSON.", tokens: "~1600" },
+    ],
+  },
+  "gtm-plan": {
+    meta: {
+      name: "Go-to-Market Plan", category: "Business", band: "medium", runtime: "~65s",
+      description: "Turn a product into a GTM plan: segments, positioning, channels, and milestones.",
+      longDesc: "Extracts the product and goals, defines target segments and ICP, writes positioning and messaging, plans channels and tactics, and sets milestones and KPIs.",
+      inputLabel: "Product + goals",
+      inputHint: "Describe the product, target audience, and launch goals.",
+      outputHint: "Segments and ICP, positioning, channels, and milestones with KPIs.",
+      limits: { inputChars: 4000, outputWords: 2000 },
+      examplePrompt: "GTM plan for a USDC payroll tool aimed at remote-first startups.",
+      exampleOutput: "# Go-to-Market Plan\n\n## Segments & ICP\nRemote-first startups, 10-50 staff, paying contractors globally.\n\n## Positioning & Messaging\nPay your global team in minutes, not days.\n\n## Channels & Tactics\nFounder communities, content, partnerships.\n\n## Milestones & KPIs\nBeta 20 teams; activation rate; payroll volume.",
+    },
+    specs: [
+      { key: "product_extractor", name: "Product Extractor", alias: "FAST", purpose: "Extract product, audience, goals.", tokens: "~300" },
+      { key: "segment_targeting", name: "Segment & Targeting", alias: "STRONG", purpose: "Define segments and ICP.", tokens: "~600" },
+      { key: "positioning_messaging", name: "Positioning & Messaging", alias: "STRONG", purpose: "Positioning and messages per segment.", tokens: "~600" },
+      { key: "channel_plan", name: "Channel Plan", alias: "STRONG", purpose: "Channels and tactics.", tokens: "~600" },
+      { key: "milestones_metrics", name: "Milestones & Metrics", alias: "FAST", purpose: "Milestones and KPIs.", tokens: "~400" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble the plan as Markdown + JSON.", tokens: "~1400" },
+    ],
+  },
+  "lean-canvas": {
+    meta: {
+      name: "Lean Canvas / Business Model", category: "Business", band: "medium", runtime: "~55s",
+      description: "Turn an idea into a Lean Canvas with riskiest assumptions and validation experiments.",
+      longDesc: "Extracts the idea, fills all nine Lean Canvas blocks, surfaces the riskiest assumptions, and proposes cheap experiments to validate them.",
+      inputLabel: "Business idea",
+      inputHint: "Describe the idea, the customer, and the problem it solves.",
+      outputHint: "A filled Lean Canvas, riskiest assumptions, and validation experiments.",
+      limits: { inputChars: 4000, outputWords: 1800 },
+      examplePrompt: "Lean canvas for a tool that auto-invoices freelancers in USDC when a milestone is marked done.",
+      exampleOutput: "# Lean Canvas\n\n| Block | Notes |\n|---|---|\n| Problem | Freelancers chase payments |\n| Solution | Auto-invoice on milestone |\n| UVP | Get paid the moment work is done |\n| Segments | Solo freelancers |\n| Revenue | Small fee per invoice |\n\n## Riskiest Assumptions\nFreelancers will let a tool trigger invoices.\n\n## Experiments\nLanding page + 20 interviews.",
+    },
+    specs: [
+      { key: "idea_extractor", name: "Idea Extractor", alias: "FAST", purpose: "Extract idea, customer, problem.", tokens: "~300" },
+      { key: "canvas_builder", name: "Canvas Builder", alias: "STRONG", purpose: "Fill the nine Lean Canvas blocks.", tokens: "~900" },
+      { key: "assumptions_risks", name: "Assumptions & Risks", alias: "STRONG", purpose: "Surface riskiest assumptions.", tokens: "~500" },
+      { key: "experiments", name: "Validation Experiments", alias: "FAST", purpose: "Propose cheap experiments.", tokens: "~400" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble the canvas as Markdown + JSON.", tokens: "~1400" },
+    ],
+  },
+  "swot-analysis": {
+    meta: {
+      name: "SWOT Analysis", category: "Business", band: "light", runtime: "~45s",
+      description: "Produce a SWOT plus SO/WO/ST/WT strategies and prioritized actions.",
+      longDesc: "Extracts the context, produces a specific SWOT, derives strategies for each quadrant pairing, and lists prioritized actions.",
+      inputLabel: "Company or product",
+      inputHint: "Describe the company/product and any relevant context.",
+      outputHint: "A SWOT matrix, strategies, and prioritized actions.",
+      limits: { inputChars: 4000, outputWords: 1500 },
+      examplePrompt: "SWOT for a small design studio moving into Web3 branding.",
+      exampleOutput: "# SWOT Analysis\n\n| | Helpful | Harmful |\n|---|---|---|\n| Internal | Strong design craft | No Web3 network |\n| External | Growing Web3 demand | Crowded freelancers |\n\n## Strategies\nSO: showcase Web3 case studies. WT: niche down.\n\n## Prioritized Actions\n1. Publish 2 Web3 brand case studies.",
+    },
+    specs: [
+      { key: "context_extractor", name: "Context Extractor", alias: "FAST", purpose: "Extract company/product and context.", tokens: "~300" },
+      { key: "swot_generator", name: "SWOT Generator", alias: "STRONG", purpose: "Produce a specific SWOT.", tokens: "~700" },
+      { key: "strategy_actions", name: "Strategies & Actions", alias: "STRONG", purpose: "Derive strategies and actions.", tokens: "~600" },
+      { key: "formatter", name: "Final Formatter", alias: "FORMATTER", purpose: "Assemble the SWOT as Markdown + JSON.", tokens: "~1200" },
+    ],
+  },
 };
 Object.keys(WF_CATALOG).forEach((slug) => {
   WORKFLOWS[slug] = makeWorkflow(WF_CATALOG[slug].meta, WF_CATALOG[slug].specs);
@@ -849,8 +1074,8 @@ function renderExplore() {
           <input type="search" class="wf-search" id="wfSearch" placeholder="Search workflows..." autocomplete="off" />
         </div>
         <div class="wf-filters" id="wfFilters" role="group" aria-label="Category filters">
-          ${["All","Freelance","Content","Research","Code","Crypto","Business"].map((c) =>
-            `<button class="wf-filter-btn${c==="All"?" is-active":""}" data-cat="${c}" type="button">${c}</button>`
+          ${["All"].concat(Array.from(new Set(Object.values(WORKFLOWS).map((wf) => wf.category))).sort()).map((c) =>
+            `<button class="wf-filter-btn${c==="All"?" is-active":""}" data-cat="${esc(c)}" type="button">${esc(c)}</button>`
           ).join("")}
         </div>
       </div>

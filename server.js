@@ -194,6 +194,17 @@ const WORKFLOW_BANDS = {
   "seo-audit": ["Website / SEO Audit Report", "heavy"],
   "keyword-strategy": ["Keyword Strategy Map", "light"],
   "pr-diff-review": ["PR Code Review / Diff Review", "heavy"],
+  "x-thread-writer": ["X / Twitter Thread Writer", "light"],
+  "newsletter-writer": ["Newsletter Issue Writer", "medium"],
+  "linkedin-post": ["LinkedIn Post Writer", "light"],
+  "crypto-research": ["Crypto Project Research Report", "heavy"],
+  "tokenomics-analyzer": ["Tokenomics Analyzer", "medium"],
+  "whitepaper-summary": ["Whitepaper Summarizer", "medium"],
+  "narrative-scan": ["Narrative / Sector Scan", "heavy"],
+  "competitor-analysis": ["Competitor Analysis", "heavy"],
+  "gtm-plan": ["Go-to-Market Plan", "medium"],
+  "lean-canvas": ["Lean Canvas / Business Model", "medium"],
+  "swot-analysis": ["SWOT Analysis", "light"],
 };
 Object.entries(WORKFLOW_BANDS).forEach(([slug, [name, band]]) => {
   WORKFLOW_RUN_DEFS[slug] = { name, tiers: workflowTiers(band, workflowDefs.graphAliases(slug)) };
