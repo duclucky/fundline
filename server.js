@@ -209,6 +209,19 @@ const WORKFLOW_BANDS = {
 Object.entries(WORKFLOW_BANDS).forEach(([slug, [name, band]]) => {
   WORKFLOW_RUN_DEFS[slug] = { name, tiers: workflowTiers(band, workflowDefs.graphAliases(slug)) };
 });
+
+// Measured per-run prices (priceUnits, 6-decimal USDC), from running each
+// workflow's tuned chain once per mode with real v98 calls (see
+// run-workflow-once.js) and rounding the real cost down to a clean value. These
+// override the rough band prices as each workflow is measured and finalized.
+const WORKFLOW_PRICE_OVERRIDES = {
+  "call-recap": { normal: 10000, plus: 10000, pro: 20000 },
+};
+Object.entries(WORKFLOW_PRICE_OVERRIDES).forEach(([slug, p]) => {
+  const def = WORKFLOW_RUN_DEFS[slug];
+  if (!def || !def.tiers) return;
+  ["normal", "plus", "pro"].forEach((t) => { if (def.tiers[t] && p[t] != null) def.tiers[t].priceUnits = p[t]; });
+});
 // Treasury hot key that signs release/refund (Fundline-controlled, matches
 // ARC_TREASURY_ADDRESS). Secret; read-only escrow verification works without it.
 const ARC_TREASURY_PRIVATE_KEY = String(process.env.ARC_TREASURY_PRIVATE_KEY || "").trim();

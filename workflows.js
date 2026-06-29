@@ -644,8 +644,20 @@ const WF_CATALOG = {
     ],
   },
 };
+// Measured per-run display prices, mirroring server.js WORKFLOW_PRICE_OVERRIDES.
+// Filled in as each workflow is run and finalized (real cost rounded to a clean
+// value). Overrides the band price for the explore card and tier selector.
+const WF_PRICE_OVERRIDES = {
+  "call-recap": { normal: "0.01", plus: "0.01", pro: "0.02" },
+};
 Object.keys(WF_CATALOG).forEach((slug) => {
   WORKFLOWS[slug] = makeWorkflow(WF_CATALOG[slug].meta, WF_CATALOG[slug].specs);
+  const ov = WF_PRICE_OVERRIDES[slug];
+  if (ov) {
+    const wf = WORKFLOWS[slug];
+    ["normal", "plus", "pro"].forEach((t) => { if (wf.tiers[t] && ov[t]) wf.tiers[t].price = ov[t]; });
+    if (ov.normal) wf.price = ov.normal;
+  }
 });
 
 const CATEGORY_COLORS = {

@@ -26,16 +26,22 @@ function out(ctx, id) {
 }
 
 // Build an LLM (or local) node from a compact spec.
-// spec: { id, name, alias, maxTokens, system, user(ctx), retrieval, parse, isFinal, run }
+// spec: { id, name, alias, maxTokens, outWords, system, user(ctx), retrieval, parse, isFinal, run }
+// outWords is the node's target output length in words. It is appended to the
+// prompt as a length directive (so the model produces a roughly known size) AND
+// stored on the node so the cost estimator can predict cost. It defaults from the
+// token cap with headroom (maxTokens is the hard ceiling; outWords is the target).
 function step(spec) {
-  const node = { id: spec.id, name: spec.name, alias: spec.alias, maxTokens: spec.maxTokens || 1200 };
+  const maxTokens = spec.maxTokens || 1200;
+  const outWords = spec.outWords || Math.round(maxTokens / 1.7);
+  const node = { id: spec.id, name: spec.name, alias: spec.alias, maxTokens, outWords };
   if (typeof spec.run === "function") {
     node.kind = "local";
     node.run = spec.run;
   } else {
     node.build = (ctx) => [
       { role: "system", content: spec.system },
-      { role: "user", content: spec.user(ctx) },
+      { role: "user", content: spec.user(ctx) + "\n\nKeep your response to about " + outWords + " words." },
     ];
   }
   if (spec.retrieval) node.retrieval = true;
@@ -47,7 +53,7 @@ function step(spec) {
 // Standard instruction appended to every final formatter node so the deliverable
 // is a clean client-ready Markdown document that also carries machine-readable
 // JSON at the end (Markdown + JSON in one output).
-const FORMATTER_SYSTEM = "You are a meticulous editor. You assemble the working notes from earlier steps into a single, clean, client-ready Markdown document. Do not invent facts beyond the notes. Use #, ##, ### headers and tables where helpful. After the Markdown, append a fenced code block labelled json containing a structured summary of the key fields. Output only the document.";
+const FORMATTER_SYSTEM = "You are a meticulous editor. You assemble the working notes from earlier steps into a single, clean, client-ready Markdown document. Do not invent facts beyond the notes. Use #, ##, ### headers. Preserve any Markdown tables from the notes as real tables; never wrap a table in a code fence. After the Markdown, append a fenced code block labelled json with a SHORT structured summary: only the top-level key fields and counts, not a full restatement of the document. Keep the entire response complete and never cut it off mid-way; if space runs low, shorten the JSON first. Output only the document, with no commentary.";
 
 // --- 1. Client Call Recap & Action Plan -----------------------------------
 const callRecap = {
@@ -64,7 +70,7 @@ const callRecap = {
       user: (ctx) => `List the confirmed decisions as bullets. Quote the basis briefly.\n\nSummary:\n${out(ctx, "meeting_summary")}\n\nTranscript:\n${out(ctx, "transcript_cleaner")}` }),
     step({ id: "action_items", name: "Action Item Extractor", alias: "FAST", maxTokens: 600,
       system: "You turn a call into actionable tasks. Each task has an owner, a deadline (or 'TBD'), and a priority (High/Medium/Low).",
-      user: (ctx) => `Produce a Markdown table of action items with columns Task | Owner | Deadline | Priority.\n\nSummary:\n${out(ctx, "meeting_summary")}\n\nTranscript:\n${out(ctx, "transcript_cleaner")}` }),
+      user: (ctx) => `Output ONLY a Markdown table (no code fence, no surrounding commentary or summary) with columns Task | Owner | Deadline | Priority.\n\nSummary:\n${out(ctx, "meeting_summary")}\n\nTranscript:\n${out(ctx, "transcript_cleaner")}` }),
     step({ id: "risk_blocker", name: "Risk & Blocker Detector", alias: "STRONG", maxTokens: 500,
       system: "You spot risks, open questions, and blockers a freelancer should not miss.",
       user: (ctx) => `List risks, open questions, and blockers as bullets, each with a one-line suggested mitigation.\n\nSummary:\n${out(ctx, "meeting_summary")}\n\nTranscript:\n${out(ctx, "transcript_cleaner")}` }),
@@ -73,8 +79,8 @@ const callRecap = {
       user: (ctx) => `Write a follow-up email recapping the call and confirming next steps.\n\nSummary:\n${out(ctx, "meeting_summary")}\n\nDecisions:\n${out(ctx, "decision_extractor")}\n\nAction items:\n${out(ctx, "action_items")}` }),
     step({ id: "billables", name: "Suggested Billables Detector", alias: "FAST", maxTokens: 400,
       system: "You identify work discussed on the call that could become a billable line item or invoice. Be conservative; only flag clear scope.",
-      user: (ctx) => `List suggested billable items as bullets (description + rough basis). If nothing is clearly billable, say so.\n\nAction items:\n${out(ctx, "action_items")}\n\nTranscript:\n${out(ctx, "transcript_cleaner")}` }),
-    step({ id: "formatter", name: "Final Output Formatter", alias: "FORMATTER", maxTokens: 2000, isFinal: true,
+      user: (ctx) => `List suggested billable items as concise bullets (item + one-line basis). If nothing is clearly billable, say so. Do not add disclaimers or extra commentary.\n\nAction items:\n${out(ctx, "action_items")}\n\nTranscript:\n${out(ctx, "transcript_cleaner")}` }),
+    step({ id: "formatter", name: "Final Output Formatter", alias: "FORMATTER", maxTokens: 2600, isFinal: true,
       system: FORMATTER_SYSTEM,
       user: (ctx) => `Assemble a Call Recap & Action Plan document with sections: Summary, Decisions, Action Items (keep the table), Risks & Blockers, Suggested Billables, and the Follow-up Email.\n\nSummary:\n${out(ctx, "meeting_summary")}\n\nDecisions:\n${out(ctx, "decision_extractor")}\n\nAction items:\n${out(ctx, "action_items")}\n\nRisks:\n${out(ctx, "risk_blocker")}\n\nBillables:\n${out(ctx, "billables")}\n\nFollow-up email:\n${out(ctx, "followup_email")}` }),
   ],
@@ -457,21 +463,21 @@ const clientResearch = {
   name: "Client Research",
   nodes: [
   {
-    id: "role_analysis", name: "Role analysis", alias: "FAST", maxTokens: 300,
+    id: "role_analysis", name: "Role analysis", alias: "FAST", maxTokens: 300, outWords: 40,
     build: (ctx) => research.buildPersonaMessages(ctx.input),
     parse: (content) => research.parsePersona(content) || research.FALLBACK_PERSONA,
   },
   {
-    id: "research_plan", name: "Research plan", alias: "FAST", maxTokens: 300,
+    id: "research_plan", name: "Research plan", alias: "FAST", maxTokens: 300, outWords: 50,
     build: (ctx) => research.buildPlannerMessages(ctx.input, ctx.maxQueries, ctx.today),
     parse: (content, ctx) => research.parsePlannerQueries(content, ctx.input, ctx.maxQueries),
   },
   {
-    id: "web_research", name: "Web research", alias: "RESEARCH", maxTokens: 4000, retrieval: true,
+    id: "web_research", name: "Web research", alias: "RESEARCH", maxTokens: 4000, outWords: 1500, retrieval: true,
     build: (ctx) => research.buildSearchMessages(ctx.input, ctx.parsed.research_plan || [ctx.input], ctx.today),
   },
   {
-    id: "report_writer", name: "Report writer", alias: "STRONG", maxTokens: 4000, isFinal: true,
+    id: "report_writer", name: "Report writer", alias: "STRONG", maxTokens: 4000, outWords: 1200, isFinal: true,
     build: (ctx) => research.buildWriterMessages(
       ctx.parsed.role_analysis || research.FALLBACK_PERSONA,
       ctx.outputs.web_research || "",
