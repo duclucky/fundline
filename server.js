@@ -215,6 +215,10 @@ Object.entries(WORKFLOW_BANDS).forEach(([slug, [name, band]]) => {
 // run-workflow-once.js) and rounding the real cost down to a clean value. These
 // override the rough band prices as each workflow is measured and finalized.
 const WORKFLOW_PRICE_OVERRIDES = {
+  "narrative-scan": { normal: 30000, plus: 30000, pro: 60000 },
+  "whitepaper-summary": { normal: 10000, plus: 10000, pro: 20000 },
+  "tokenomics-analyzer": { normal: 10000, plus: 10000, pro: 20000 },
+  "crypto-research": { normal: 30000, plus: 30000, pro: 60000 },
   "linkedin-post": { normal: 10000, plus: 10000, pro: 10000 },
   "newsletter-writer": { normal: 10000, plus: 10000, pro: 30000 },
   "x-thread-writer": { normal: 10000, plus: 10000, pro: 10000 },
