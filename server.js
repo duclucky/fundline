@@ -109,6 +109,36 @@ const WORKFLOW_LIMITS = {
 // part of the workflow definition, not global env vars, so different workflows
 // can use different search providers or writers depending on their data needs.
 // priceUnits: fixed USDC base units (6 decimals; 50000 = 0.05 USDC).
+// Per-tier alias -> model matrix. Each workflow lists the aliases its graph uses
+// (see workflow-defs.js); the tier decides the concrete v98store model so quality
+// and cost scale up from Normal to Pro. The FORMATTER alias stays cheap on every
+// tier (it only assembles prior outputs).
+const WORKFLOW_TIER_MODELS = {
+  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "deepseek-r1-searching", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
+  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "grok-3-deepsearch", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
+  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "grok-4", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
+};
+// Fixed USDC price per tier by workflow weight (6-decimal base units).
+const WORKFLOW_PRICE_BANDS = {
+  light: { normal: 30000, plus: 50000, pro: 100000 },   // 0.03 / 0.05 / 0.10
+  medium: { normal: 40000, plus: 60000, pro: 120000 },  // 0.04 / 0.06 / 0.12
+  heavy: { normal: 50000, plus: 80000, pro: 150000 },   // 0.05 / 0.08 / 0.15
+};
+// Build a tiers config for a workflow from a price band + the aliases it uses.
+function workflowTiers(band, aliases) {
+  const prices = WORKFLOW_PRICE_BANDS[band];
+  const pick = (tier) => {
+    const m = {};
+    aliases.forEach((a) => { m[a] = WORKFLOW_TIER_MODELS[tier][a]; });
+    return m;
+  };
+  return {
+    normal: { priceUnits: prices.normal, models: pick("normal") },
+    plus: { priceUnits: prices.plus, models: pick("plus") },
+    pro: { priceUnits: prices.pro, models: pick("pro") },
+  };
+}
+
 const WORKFLOW_RUN_DEFS = {
   "client-research": {
     name: "Client Research",
@@ -145,6 +175,30 @@ const WORKFLOW_RUN_DEFS = {
     },
   },
 };
+
+// The 14 graph-driven workflows: display name + price band. Their tier model maps
+// are derived from each graph's required aliases (workflowDefs.graphAliases) so
+// the models always match what the graph calls. client-research above keeps its
+// own explicit model map (proven, byte-identical to the original chain).
+const WORKFLOW_BANDS = {
+  "call-recap": ["Client Call Recap & Action Plan", "light"],
+  "proposal-sow": ["Proposal & Scope of Work Builder", "medium"],
+  "market-pain-research": ["Market Pain Point Research", "heavy"],
+  "code-review": ["Code Review Report", "heavy"],
+  "upwork-proposal": ["Upwork / Job Post Proposal Draft", "medium"],
+  "rfp-proposal": ["RFP / Job Post to Proposal & Estimate", "medium"],
+  "cold-outreach": ["Cold Outreach Pack", "medium"],
+  "follow-up-nurture": ["Automated Follow-up & Nurture", "light"],
+  "timeline-from-sow": ["Project Timeline & Milestone from SOW", "medium"],
+  "handover-report": ["Delivery / Handover Report Generator", "medium"],
+  "seo-content-brief": ["SEO Content Brief Generator", "heavy"],
+  "seo-audit": ["Website / SEO Audit Report", "heavy"],
+  "keyword-strategy": ["Keyword Strategy Map", "light"],
+  "pr-diff-review": ["PR Code Review / Diff Review", "heavy"],
+};
+Object.entries(WORKFLOW_BANDS).forEach(([slug, [name, band]]) => {
+  WORKFLOW_RUN_DEFS[slug] = { name, tiers: workflowTiers(band, workflowDefs.graphAliases(slug)) };
+});
 // Treasury hot key that signs release/refund (Fundline-controlled, matches
 // ARC_TREASURY_ADDRESS). Secret; read-only escrow verification works without it.
 const ARC_TREASURY_PRIVATE_KEY = String(process.env.ARC_TREASURY_PRIVATE_KEY || "").trim();

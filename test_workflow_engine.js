@@ -114,6 +114,45 @@ const tierModels = { FAST: "gpt-4o-mini", RESEARCH: "grok-3-deepsearch", STRONG:
   } catch (e) { threw3 = true; }
   check("empty graph throws", threw3 === true);
 
+  // --- smoke-test every catalog graph end to end ---
+  // For each graph, derive the tier model map from its required aliases (the same
+  // way the server does), run it with a generic fake model, and assert it
+  // produces a report, the right step count, and 2 progress events per node.
+  const genericUsage = { prompt_tokens: 100, completion_tokens: 120 };
+  function genericCall(modelId, messages, maxTokens) {
+    return Promise.resolve({ content: "Generated section content for testing.", usage: genericUsage });
+  }
+  const slugs = Object.keys(defs.WORKFLOW_GRAPHS);
+  eq("catalog has 15 graphs", slugs.length, 15);
+  for (const slug of slugs) {
+    const g = defs.getGraph(slug);
+    const aliases = defs.graphAliases(slug);
+    const tm = {};
+    aliases.forEach((a) => { tm[a] = "gpt-4o-mini"; });
+    const ev = [];
+    // search mode exercises retrieval nodes as model calls
+    let r;
+    let err = null;
+    try {
+      r = await engine.runWorkflowGraph({
+        graph: g,
+        tierModels: tm,
+        input: "Sample input for " + slug + " covering the basics.",
+        mode: "search",
+        groupRatio: 1,
+        today: "2026-06-28",
+        callModel: genericCall,
+        onProgress: (e) => ev.push(e),
+      });
+    } catch (e) { err = e; }
+    check(`${slug} runs without throwing`, err === null);
+    if (err) { console.error("  ->", err.message); continue; }
+    check(`${slug} produced a report`, typeof r.report === "string" && r.report.length > 0);
+    eq(`${slug} step count == node count`, r.steps.length, g.nodes.length);
+    eq(`${slug} progress events == 2x nodes`, ev.length, g.nodes.length * 2);
+    check(`${slug} final node id is last progress done`, ev[ev.length - 1].status === "done");
+  }
+
   console.log(`\nworkflow engine test: ${passed} passed, ${failed} failed`);
   process.exit(failed === 0 ? 0 : 1);
 })();
