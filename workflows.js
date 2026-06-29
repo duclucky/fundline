@@ -649,6 +649,7 @@ const WF_CATALOG = {
 // value). Overrides the band price for the explore card and tier selector.
 const WF_PRICE_OVERRIDES = {
   "call-recap": { normal: "0.01", plus: "0.01", pro: "0.02" },
+  "proposal-sow": { normal: "0.01", plus: "0.01", pro: "0.08" },
 };
 Object.keys(WF_CATALOG).forEach((slug) => {
   WORKFLOWS[slug] = makeWorkflow(WF_CATALOG[slug].meta, WF_CATALOG[slug].specs);

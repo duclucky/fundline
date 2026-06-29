@@ -216,6 +216,7 @@ Object.entries(WORKFLOW_BANDS).forEach(([slug, [name, band]]) => {
 // override the rough band prices as each workflow is measured and finalized.
 const WORKFLOW_PRICE_OVERRIDES = {
   "call-recap": { normal: 10000, plus: 10000, pro: 20000 },
+  "proposal-sow": { normal: 10000, plus: 10000, pro: 80000 },
 };
 Object.entries(WORKFLOW_PRICE_OVERRIDES).forEach(([slug, p]) => {
   const def = WORKFLOW_RUN_DEFS[slug];

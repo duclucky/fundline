@@ -32,7 +32,12 @@ function out(ctx, id) {
 // stored on the node so the cost estimator can predict cost. It defaults from the
 // token cap with headroom (maxTokens is the hard ceiling; outWords is the target).
 function step(spec) {
-  const maxTokens = spec.maxTokens || 1200;
+  const isFinal = !!spec.isFinal;
+  // The final formatter reproduces every section in full, so it gets a high cap
+  // and NO length directive (a short target would truncate the document). It uses
+  // the cheap FORMATTER model, so the larger cap costs almost nothing. Content
+  // nodes keep their length directive so cost stays predictable.
+  const maxTokens = isFinal ? Math.max(spec.maxTokens || 0, 4096) : (spec.maxTokens || 1200);
   const outWords = spec.outWords || Math.round(maxTokens / 1.7);
   const node = { id: spec.id, name: spec.name, alias: spec.alias, maxTokens, outWords };
   if (typeof spec.run === "function") {
@@ -41,12 +46,12 @@ function step(spec) {
   } else {
     node.build = (ctx) => [
       { role: "system", content: spec.system },
-      { role: "user", content: spec.user(ctx) + "\n\nKeep your response to about " + outWords + " words." },
+      { role: "user", content: spec.user(ctx) + (isFinal ? "" : ("\n\nKeep your response to about " + outWords + " words.")) },
     ];
   }
   if (spec.retrieval) node.retrieval = true;
   if (typeof spec.parse === "function") node.parse = spec.parse;
-  if (spec.isFinal) node.isFinal = true;
+  if (isFinal) node.isFinal = true;
   return node;
 }
 
@@ -104,7 +109,7 @@ const proposalSow = {
       user: (ctx) => `Write a Scope of Work with three sections: Deliverables, In Scope, Out of Scope.\n\nRequirements:\n${out(ctx, "requirement_extractor")}\n\nProposal:\n${out(ctx, "proposal_generator")}` }),
     step({ id: "milestone_builder", name: "Milestone Builder", alias: "FAST", maxTokens: 600,
       system: "You break a SOW into milestones with a rough timeline and a payment-schedule hint per milestone.",
-      user: (ctx) => `Produce a Markdown table: Milestone | Deliverable | Est. Duration | Payment Hint.\n\nSOW:\n${out(ctx, "sow_generator")}\n\nRequirements:\n${out(ctx, "requirement_extractor")}` }),
+      user: (ctx) => `Output ONLY a Markdown table (no code fence, no preamble) with columns Milestone | Deliverable | Est. Duration | Payment Hint.\n\nSOW:\n${out(ctx, "sow_generator")}\n\nRequirements:\n${out(ctx, "requirement_extractor")}` }),
     step({ id: "risk_assumption", name: "Risk & Assumption Checker", alias: "STRONG", maxTokens: 500,
       system: "You review a proposal for gaps. List assumptions made, acceptance criteria, and questions to confirm with the client.",
       user: (ctx) => `List Assumptions, Acceptance Criteria, and Open Questions as three bullet sections.\n\nProposal:\n${out(ctx, "proposal_generator")}\n\nSOW:\n${out(ctx, "sow_generator")}` }),
