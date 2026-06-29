@@ -5,6 +5,42 @@ My personal, cross-session memory for this repo. It is loaded into context via a
 made, dead ends, user preferences, and open threads. Do not duplicate what CLAUDE.md or
 .claude/rules/ already state. Keep entries dated (absolute dates).
 
+## Latest work (read first)
+
+- 2026-06-29: WORKFLOW LIBRARY = 15 workflows on a GENERIC ENGINE (committed local df4d3d0 +
+  775584f + a0611e0, NOT pushed). Replaced the single hardcoded research chain with a
+  data-driven node-graph engine so new workflows are CONFIG, not new server branches. New
+  files: `workflow-engine.js` (runWorkflowGraph: runs nodes in order, resolves each node's
+  alias->model via the active tier, kinds llm/retrieval/local, feeds prior outputs forward,
+  emits SSE progress per node.id, sums micro-USD cost, returns {report,steps,totalCostMicros,
+  outputs}); `workflow-defs.js` (the 15 graph definitions + getGraph + graphAliases). server.js:
+  `handleWorkflowRun` no longer gates on `def.type==="research"` -> looks up `workflowDefs.getGraph(slug)`
+  and dispatches via the engine; WORKFLOW_RUN_DEFS gained a WORKFLOW_TIER_MODELS matrix
+  (aliases FAST/STRONG/RESEARCH/CODE/FORMATTER -> real ids per tier) + WORKFLOW_PRICE_BANDS
+  (light 0.03/0.05/0.10, medium 0.04/0.06/0.12, heavy 0.05/0.08/0.15) + workflowTiers() helper;
+  14 new slugs built via a loop that derives each tier's model map from the graph's required
+  aliases (graphAliases) so models always match the chain. client-research KEPT its explicit
+  proven model map (normal writer is deepseek-v3, not v3.2) and uses the original research prompt
+  builders verbatim. Frontend workflows.js: stripped the 5 mock entries (via a brace-matching
+  scratch script), kept client-research, and built the other 14 from compact specs through a new
+  makeWorkflow() builder (WF_TIER_MODELS + WF_PRICE_BANDS mirror the server; node `key` ==
+  server node id, cross-checked). 15 slugs: client-research, call-recap, proposal-sow,
+  market-pain-research, code-review, upwork-proposal, rfp-proposal, cold-outreach,
+  follow-up-nurture, timeline-from-sow, handover-report, seo-content-brief, seo-audit,
+  keyword-strategy, pr-diff-review. Retrieval (RESEARCH alias, web/paste) on: client-research,
+  market-pain-research, seo-content-brief, seo-audit. STT dropped (no STT model in v98 -> paste
+  transcript text). PR review = paste diff (no GitHub OAuth). VERIFIED OFFLINE: node --check all;
+  test_workflow_engine.js 93/93 (engine parity with old research chain = exact cost 20899; every
+  graph smoke-runs; alias coverage), test_workflow_research.js 23/23, v98 cost 14/14, limiter
+  23/23; frontend catalog builds 15 in a vm sandbox; no em dash/emoji/secret/decimal-hazard in
+  the diff. predeploy verdict GO. NOT PUSHED. Live e2e (quote->fund->run->release) skipped per
+  user (parity test covers it). TO DEPLOY: git push origin main (FTP auto-deploys the new modules
+  workflow-engine.js + workflow-defs.js too) THEN restart the cPanel Node app (server.js changed;
+  touch tmp/restart.txt or restart in cPanel) so the new WORKFLOW_RUN_DEFS + engine load. cPanel
+  env already has the runner keys from the 2026-06-28 deploy, so all 15 go live on restart; each
+  workflow charges its tier price via the existing FundlineRunEscrow billing. Prompts are decent
+  beta quality but not yet tuned against real outputs.
+
 ## User preferences (observed)
 
 - Communicates in Vietnamese and wants my replies in Vietnamese.
