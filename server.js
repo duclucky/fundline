@@ -9,6 +9,7 @@ const v98Models = require("./v98-models");
 const workflowLimiter = require("./workflow-limiter");
 const workflowResearch = require("./workflow-research");
 const workflowEngine = require("./workflow-engine");
+const tavilyClient = require("./tavily-client");
 const workflowDefs = require("./workflow-defs");
 const runEscrowClient = require("./run-escrow-client");
 const fundlineMemo = require("./memo-util");
@@ -91,6 +92,7 @@ const WORKFLOW_RATE_LIMIT_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env
 const V98STORE_API_KEY = String(process.env.V98STORE_API_KEY || "").trim();
 const V98STORE_BASE_URL = String(process.env.V98STORE_BASE_URL || "https://v98store.com/v1").trim();
 const V98STORE_GROUP_RATIO = Number(process.env.V98STORE_GROUP_RATIO || 1) || 1;
+const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const WORKFLOW_BUILD_PROMPT_MODEL = String(process.env.WORKFLOW_BUILD_PROMPT_MODEL || "gpt-4o-mini").trim();
 const WORKFLOW_RUNS_PER_IP_PER_DAY = Number(process.env.WORKFLOW_RUNS_PER_IP_PER_DAY || 3);
 const WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY = Number(process.env.WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY || 3);
@@ -113,9 +115,9 @@ const WORKFLOW_LIMITS = {
 // and cost scale up from Normal to Pro. The FORMATTER alias stays cheap on every
 // tier (it only assembles prior outputs).
 const WORKFLOW_TIER_MODELS = {
-  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "gpt-4o-mini-search-preview", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
-  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "gpt-4o-mini-search-preview", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
-  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "gpt-4o-mini-search-preview", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
+  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "deepseek-r1", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
+  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "deepseek-r1", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
+  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "deepseek-r1", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
 };
 // Fixed USDC price per tier by workflow weight (6-decimal base units).
 const WORKFLOW_PRICE_BANDS = {
@@ -151,7 +153,7 @@ const WORKFLOW_RUN_DEFS = {
         priceUnits: 30000,   // 0.03 USDC
         models: {
           FAST: "gpt-4o-mini",
-          RESEARCH: "gpt-4o-mini-search-preview",
+          RESEARCH: "deepseek-r1",
           STRONG: "deepseek-v3",
         },
       },
@@ -159,7 +161,7 @@ const WORKFLOW_RUN_DEFS = {
         priceUnits: 50000,   // 0.05 USDC
         models: {
           FAST: "gpt-4o-mini",
-          RESEARCH: "gpt-4o-mini-search-preview",
+          RESEARCH: "deepseek-r1",
           STRONG: "deepseek-v3.2",
         },
       },
@@ -167,7 +169,7 @@ const WORKFLOW_RUN_DEFS = {
         priceUnits: 100000,  // 0.10 USDC
         models: {
           FAST: "gpt-4o-mini",
-          RESEARCH: "gpt-4o-mini-search-preview",
+          RESEARCH: "deepseek-r1",
           STRONG: "claude-sonnet-4-6",
         },
       },
@@ -870,6 +872,10 @@ async function handleWorkflowRun(req, res, slug) {
   }
 
   const v98config = { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL };
+  // Real web search for retrieval nodes (Tavily). Null in paste mode or when no key.
+  const searchWeb = (TAVILY_API_KEY && mode !== "paste")
+    ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 5 }).then((r) => r.results)
+    : null;
   try {
     const result = await workflowEngine.runWorkflowGraph({
       graph,
@@ -877,6 +883,7 @@ async function handleWorkflowRun(req, res, slug) {
       input: query,
       mode,
       pastedSources,
+      searchWeb,
       groupRatio: V98STORE_GROUP_RATIO,
       today: new Date().toISOString().slice(0, 10),
       callModel: (modelId, messages, maxTokens) =>

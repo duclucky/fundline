@@ -479,6 +479,7 @@ const clientResearch = {
   },
   {
     id: "web_research", name: "Web research", alias: "RESEARCH", maxTokens: 4000, outWords: 1500, retrieval: true,
+    searchQueries: (ctx) => ctx.parsed.research_plan || [ctx.input],
     build: (ctx) => research.buildSearchMessages(ctx.input, ctx.parsed.research_plan || [ctx.input], ctx.today),
   },
   {

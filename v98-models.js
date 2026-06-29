@@ -11,8 +11,8 @@
 // newer models use approximate market rates -- update when confirmed from dashboard.
 const V98_MODELS = {
   // GPT series
-  "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.60 },
-  "gpt-4.1-mini": { inputPer1M: 0.40, outputPer1M: 1.60 },
+  "gpt-4o-mini": { inputPer1M: 0.425, outputPer1M: 1.70 },
+  "gpt-4.1-mini": { inputPer1M: 1.13, outputPer1M: 4.53 },
   "gpt-4.1": { inputPer1M: 2.00, outputPer1M: 8.00 },
   "gpt-4o": { inputPer1M: 2.50, outputPer1M: 10.00 },
   "gpt-5-mini": { inputPer1M: 0.25, outputPer1M: 2.00 },
@@ -22,11 +22,11 @@ const V98_MODELS = {
   "deepseek-v3": { inputPer1M: 0.27, outputPer1M: 1.10 },
   "deepseek-v3-0324": { inputPer1M: 0.27, outputPer1M: 1.10 },
   "deepseek-v3.1": { inputPer1M: 0.27, outputPer1M: 1.10 },
-  "deepseek-v3.2": { inputPer1M: 0.27, outputPer1M: 1.10 },
+  "deepseek-v3.2": { inputPer1M: 0.764, outputPer1M: 3.11 },
   "deepseek-v4-flash": { inputPer1M: 0.20, outputPer1M: 0.80 },
   "deepseek-v4-pro": { inputPer1M: 0.50, outputPer1M: 2.00 },
   "deepseek-chat": { inputPer1M: 0.27, outputPer1M: 1.10 },
-  "deepseek-r1": { inputPer1M: 0.55, outputPer1M: 2.19 },
+  "deepseek-r1": { inputPer1M: 1.557, outputPer1M: 6.198 },
   "deepseek-r1-0528": { inputPer1M: 0.55, outputPer1M: 2.19 },
   "deepseek-r1-searching": { inputPer1M: 0.55, outputPer1M: 2.19 },
   "deepseek-reasoner": { inputPer1M: 0.55, outputPer1M: 2.19 },
@@ -51,7 +51,7 @@ const V98_MODELS = {
   "kimi-k2": { inputPer1M: 0.50, outputPer1M: 2.50 },
   "kimi-k2.5": { inputPer1M: 0.50, outputPer1M: 2.50 },
   "kimi-k2.6": { inputPer1M: 0.50, outputPer1M: 2.50 },
-  "kimi-k2.7-code": { inputPer1M: 0.50, outputPer1M: 2.50 },
+  "kimi-k2.7-code": { inputPer1M: 1.42, outputPer1M: 7.08 },
   // OpenAI web-search models (live browsing). perCallUsd is the web-search tool
   // surcharge per request, which dominates the token cost; confirm against the
   // v98 dashboard. These return real source URLs.

@@ -38,6 +38,12 @@ async function runWorkflowGraph(opts) {
   if (typeof callModel !== "function") throw new Error("callModel is required");
   const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : () => {};
   const mode = opts.mode === "paste" ? "paste" : "search";
+  // Optional real web-search provider (e.g. Tavily): searchWeb(query) -> results[]
+  // (each { title, url, content, score }). When present, retrieval nodes fetch real
+  // sources instead of asking a model. tavilyCostMicros is the per-search cost.
+  const searchWeb = typeof opts.searchWeb === "function" ? opts.searchWeb : null;
+  const maxSearches = opts.maxSearches || 3;
+  const tavilyCostMicros = opts.tavilyCostMicros != null ? opts.tavilyCostMicros : 8000;
 
   const ctx = {
     input: String(opts.input || "").trim(),
@@ -75,6 +81,22 @@ async function runWorkflowGraph(opts) {
       if (!pasted.length) throw new Error("Paste mode needs at least one source");
       content = research.aggregateContext(pasted);
       steps.push({ name: node.name, model: null, costMicros: 0 });
+    } else if (node.retrieval && searchWeb) {
+      // Retrieval node in search mode with a real web-search provider (Tavily):
+      // gather real sources (title/url/snippet) and aggregate them with URLs so the
+      // downstream nodes can cite them. No model call here.
+      const wanted = (typeof node.searchQueries === "function" ? node.searchQueries(ctx) : [ctx.input]) || [];
+      const qs = wanted.filter(Boolean).slice(0, maxSearches);
+      const queries = qs.length ? qs : [ctx.input];
+      let found = [];
+      for (const q of queries) {
+        try { const r = await searchWeb(String(q)); if (Array.isArray(r)) found = found.concat(r); } catch (_) {}
+      }
+      const top = research.selectTopSources(found, 8);
+      content = top.length ? research.aggregateContext(top) : "No web results were found for this query.";
+      const cost = tavilyCostMicros * queries.length;
+      totalCostMicros += cost;
+      steps.push({ name: node.name, model: "tavily", costMicros: cost });
     } else {
       // Model node (incl. retrieval in search mode): resolve the alias to a real
       // model id for the active tier, then call the injected model.

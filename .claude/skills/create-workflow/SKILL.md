@@ -18,9 +18,9 @@ Read first (do not duplicate; build on them):
 - `.claude/workflow-sources.md` - curated shortlist of community workflows to adapt.
 - `.claude/workflow-gpt-researcher.md` - a fully worked example (the research chain) with verbatim prompts.
 - Reference code: `workflow-engine.js` (generic node-graph executor) + `workflow-defs.js`
-  (the 15 graph definitions), `workflow-research.js` (research prompt builders), `v98-models.js`,
-  `v98-client.js`, `workflow-limiter.js`, `run-escrow-client.js`, `wallet.js`, and
-  `memo-util.js` (`buildWorkflowMemoText`). In `server.js`: `WORKFLOW_RUN_DEFS`,
+  (the graph definitions), `workflow-research.js` (research prompt builders), `tavily-client.js`
+  (web search), `v98-models.js`, `v98-client.js`, `workflow-limiter.js`, `run-escrow-client.js`,
+  `wallet.js`, and `memo-util.js` (`buildWorkflowMemoText`). In `server.js`: `WORKFLOW_RUN_DEFS`,
   `handleWorkflowQuote`, `handleWorkflowRun`. In `workflows.js`: the `WORKFLOWS` entry,
   `renderRunPanel`, `runWorkflow`, `fundWorkflowRun`, `openResultModal`.
 
@@ -56,11 +56,13 @@ env, never committed, never client-side.
    community-vetted one and add it there). Capture the real step structure and verbatim prompts
    where given. Note the license (MIT/Apache are safe to adapt; keep an attribution comment).
 
-2. Decide retrieval. Needs live web data? Add a retrieval node (set `retrieval: true`) that uses
-   a search-capable model via the RESEARCH alias (grok-3-deepsearch / grok-4 / deepseek-r1-searching);
-   the engine also supports a paste-your-sources fallback. Self-contained (writing, code review,
-   transformation) -> no retrieval; input is the user prompt. A no-retrieval variant must drop
-   citation requirements (otherwise the model fabricates URLs).
+2. Decide retrieval. Needs live web data? Add a retrieval node (set `retrieval: true`, optional
+   `searchQueries(ctx)`). The engine fetches real sources via Tavily (injected `searchWeb`) - real
+   URLs + citations, ~$0.008/search (much cheaper than v98's search-preview at ~$0.20/call; the
+   dedicated v98 search models 503). Downstream nodes read the aggregated sources and cite them.
+   The engine also supports a paste-your-sources fallback. Self-contained (writing, code review,
+   transformation) -> no retrieval; input is the user prompt. A no-retrieval variant must forbid
+   inventing URLs/stats (otherwise the model fabricates citations).
 
 3. Build the executor (server-side, testable). Mirror `workflow-research.js`: pure helpers
    (prompt builders, parsers, aggregation) + an orchestrator taking INJECTED
@@ -98,9 +100,10 @@ env, never committed, never client-side.
    accounting. Ask the user before spending.
 
 8. Ship. Run `/predeploy-check`. To go live the cPanel Node env must have:
-   `WORKFLOW_RATE_LIMIT_ENABLED=true`, `V98STORE_API_KEY`, `V98STORE_BASE_URL`,
-   `ARC_RUN_ESCROW_ADDRESS`, `ARC_TREASURY_ADDRESS`, `ARC_TREASURY_PRIVATE_KEY`
-   (+ `V98STORE_GROUP_RATIO` if not 1x), then restart. Until then the workflow shows "Coming soon".
+   `WORKFLOW_RATE_LIMIT_ENABLED=true`, `V98STORE_API_KEY`, `V98STORE_BASE_URL`, `TAVILY_API_KEY`
+   (for retrieval workflows), `ARC_RUN_ESCROW_ADDRESS`, `ARC_TREASURY_ADDRESS`,
+   `ARC_TREASURY_PRIVATE_KEY` (+ `V98STORE_GROUP_RATIO` if not 1x), then restart. Until then the
+   workflow shows "Coming soon".
 
 ## Red flags
 

@@ -18,6 +18,7 @@ const defs = require("./workflow-defs");
 const engine = require("./workflow-engine");
 const v98 = require("./v98-models");
 const v98Client = require("./v98-client");
+const tavily = require("./tavily-client");
 
 // --- minimal .env loader (first-wins, like server.js) ---
 function loadEnv() {
@@ -31,9 +32,9 @@ function loadEnv() {
 loadEnv();
 
 const TIER_MODELS = {
-  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "gpt-4o-mini-search-preview", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
-  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "gpt-4o-mini-search-preview", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
-  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "gpt-4o-mini-search-preview", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
+  normal: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", RESEARCH: "deepseek-r1", CODE: "deepseek-v3.2", FORMATTER: "gpt-4o-mini" },
+  plus: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", RESEARCH: "deepseek-r1", CODE: "kimi-k2.7-code", FORMATTER: "gpt-4o-mini" },
+  pro: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6", RESEARCH: "deepseek-r1", CODE: "claude-sonnet-4-6", FORMATTER: "gpt-4o-mini" },
 };
 const RATIO = Number(process.env.V98STORE_GROUP_RATIO) > 0 ? Number(process.env.V98STORE_GROUP_RATIO) : 1;
 const NICE = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.12, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75, 1.00];
@@ -94,15 +95,23 @@ async function main() {
 
   console.log(`\nRunning "${slug}" (tier ${tier}) with real v98 calls...\n`);
   const t0 = Date.now();
+  const tavilyKey = process.env.TAVILY_API_KEY;
+  const searchWeb = tavilyKey
+    ? (q) => tavily.searchTavily({ apiKey: tavilyKey }, { query: q, maxResults: 5 }).then((r) => r.results)
+    : null;
   const result = await engine.runWorkflowGraph({
-    graph, tierModels, input, mode: "search", groupRatio: RATIO,
+    graph, tierModels, input, mode: "search", groupRatio: RATIO, searchWeb,
     today: new Date().toISOString().slice(0, 10), callModel,
     onProgress: (e) => { if (e.status === "running") process.stdout.write(`  - ${e.step} ...\n`); },
   });
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
 
-  // Map recorded usages back to the model nodes (in order) for per-tier costing.
-  const modelNodes = graph.nodes.filter((n) => n.build && n.alias);
+  // Map recorded usages to the nodes that actually called the model. Retrieval
+  // nodes go to Tavily (when a key is set), so they make no model call and are
+  // excluded here; their cost is added separately below.
+  const usedTavily = Boolean(searchWeb);
+  const modelNodes = graph.nodes.filter((n) => n.build && n.alias && !(n.retrieval && usedTavily));
+  const tavilyMicros = (result.steps || []).filter((s) => s.model === "tavily").reduce((a, s) => a + (s.costMicros || 0), 0);
   console.log(`\n=== Per-node (real tokens) ===`);
   const perNode = [];
   modelNodes.forEach((n, i) => {
@@ -113,8 +122,9 @@ async function main() {
 
   console.log(`\n=== Cost + suggested price per tier (group ratio ${RATIO}) ===`);
   const prices = {};
+  if (tavilyMicros) console.log(`  (web search: $${(tavilyMicros / 1e6).toFixed(4)} added to every tier)`);
   for (const t of ["normal", "plus", "pro"]) {
-    let micros = 0;
+    let micros = tavilyMicros;
     perNode.forEach((nd) => {
       const model = v98.resolveModelId(TIER_MODELS[t][nd.alias] || "");
       micros += v98.computeCostMicros(model, nd.pt, nd.ct, RATIO) || 0;

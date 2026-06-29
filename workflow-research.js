@@ -134,10 +134,12 @@ function buildPlannerMessages(query, maxQueries, today) {
 // The model is expected to perform real web retrieval and return findings with source URLs.
 function buildSearchMessages(query, queries, today) {
   const angles = queries.map((q, i) => `${i + 1}. ${q}`).join("\n");
-  const content = `You are a research assistant with live web search. Search the web and research the following topic thoroughly: "${query}"\n\n`
+  const content = `You are an expert research analyst. You do NOT have live web access, so work from your own knowledge.\n\n`
+    + `Research the following topic: "${query}"\n\n`
     + `Cover these specific angles:\n${angles}\n\n`
-    + `Provide comprehensive, factual findings with specific data points and statistics, and include the REAL source URLs you actually found, inline. `
-    + `Do not fabricate URLs, figures, or quotes; report only what you actually find. Assume today is ${today}.`;
+    + `Provide a thorough, well-structured analysis. IMPORTANT: do not invent specific URLs, statistics, dates, or quotes. `
+    + `When you state a figure you are not certain of, mark it as approximate or note it should be verified. `
+    + `Do not fabricate citations or sources. Assume today is ${today}.`;
   return [{ role: "user", content }];
 }
 
@@ -149,8 +151,8 @@ function buildWriterMessages(persona, contextText, query, totalWords, today) {
     + "- Determine your own concrete opinion based on the information; do not defer to vague conclusions.\n"
     + "- Write in markdown using #, ##, ### headers; use tables for structured comparisons.\n"
     + "- Do NOT include a table of contents.\n"
-    + "- Use in-text citations as markdown links to the REAL source URLs from the information above; do NOT invent URLs, statistics, or quotes.\n"
-    + "- Add a references list at the end of the actual source URLs used, no duplicates.\n"
+    + "- Only cite sources that actually appear in the information above; do NOT invent URLs, statistics, dates, or quotes.\n"
+    + "- If the information has source URLs, add a short references list of them. Otherwise add a brief 'Sources & verification' note that the analysis is from general knowledge and key facts should be verified.\n"
     + `Write in english. Assume the current date is ${today}.`;
   return [
     { role: "system", content: persona.agent_role_prompt },
