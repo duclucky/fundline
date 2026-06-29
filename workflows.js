@@ -648,6 +648,12 @@ const WF_CATALOG = {
 // Filled in as each workflow is run and finalized (real cost rounded to a clean
 // value). Overrides the band price for the explore card and tier selector.
 const WF_PRICE_OVERRIDES = {
+  "follow-up-nurture": { normal: "0.01", plus: "0.01", pro: "0.02" },
+  "cold-outreach": { normal: "0.01", plus: "0.01", pro: "0.03" },
+  "rfp-proposal": { normal: "0.01", plus: "0.01", pro: "0.03" },
+  "upwork-proposal": { normal: "0.01", plus: "0.01", pro: "0.02" },
+  "code-review": { normal: "0.01", plus: "0.01", pro: "0.05" },
+  "market-pain-research": { normal: "0.03", plus: "0.03", pro: "0.06" },
   "call-recap": { normal: "0.01", plus: "0.01", pro: "0.02" },
   "proposal-sow": { normal: "0.01", plus: "0.01", pro: "0.08" },
 };
