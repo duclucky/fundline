@@ -2927,6 +2927,32 @@ a.nav-item {
   .wf-modal-body { padding: 18px 18px; }
 }
 
+.wf-tier-selector {
+  display: flex;
+  gap: 6px;
+}
+
+.wf-tier-btn {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.wf-tier-btn.is-active {
+  background: rgba(242, 210, 122, 0.12);
+  border-color: rgba(242, 210, 122, 0.4);
+  color: var(--gold);
+}
+
 .wf-run-mode-btn {
   padding: 8px;
   border-radius: 9px;

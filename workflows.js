@@ -39,7 +39,7 @@ const WORKFLOWS = {
     category: "Freelance",
     live: true,
     usesRetrieval: true,
-    price: "0.05",
+    price: "0.03",
     version: "v1.0.1",
     runtime: "~60s",
     modelCount: 2,
@@ -48,17 +48,47 @@ const WORKFLOWS = {
     inputHint: "Enter the company name and context (e.g. 'sales call', 'investor outreach', 'partnership').",
     outputHint: "Structured research report with background, signals, and cited sources.",
     limits: { inputChars: 500, outputWords: 1500 },
+    // Default steps = normal tier (used for initial canvas render before JS applies a tier).
     steps: [
-      { name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
-      { name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused web search queries.", tokens: "~60" },
-      { name: "Web research", model: "Tavily", purpose: "Search the web and gather ranked sources.", tokens: "-" },
-      { name: "Report writer", model: "gpt-4.1-mini", purpose: "Write a structured, cited research report.", tokens: "~1500" },
+      { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
+      { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
+      { serverKey: "web_research", name: "Web research", model: "deepseek-r1-searching", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+      { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3", purpose: "Write a structured, cited research report.", tokens: "~1500" },
     ],
+    tiers: {
+      normal: {
+        price: "0.03",
+        steps: [
+          { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
+          { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
+          { serverKey: "web_research", name: "Web research", model: "deepseek-r1-searching", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3", purpose: "Write a structured, cited research report.", tokens: "~1500" },
+        ],
+      },
+      plus: {
+        price: "0.05",
+        steps: [
+          { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
+          { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
+          { serverKey: "web_research", name: "Web research", model: "grok-3-deepsearch", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "report_writer", name: "Report writer", model: "deepseek-v3.2", purpose: "Write a structured, cited research report.", tokens: "~1500" },
+        ],
+      },
+      pro: {
+        price: "0.10",
+        steps: [
+          { serverKey: "role_analysis", name: "Role analysis", model: "gpt-4o-mini", purpose: "Pick the right expert persona for the research topic.", tokens: "~50" },
+          { serverKey: "research_plan", name: "Research plan", model: "gpt-4o-mini", purpose: "Break the request into focused search angles.", tokens: "~60" },
+          { serverKey: "web_research", name: "Web research", model: "grok-4", purpose: "Search the web and gather findings with citations.", tokens: "~1500" },
+          { serverKey: "report_writer", name: "Report writer", model: "claude-sonnet-4-6", purpose: "Write a structured, cited research report.", tokens: "~1500" },
+        ],
+      },
+    },
     pricing: [
       { step: "Role analysis", model: "gpt-4o-mini", inputTokens: 50, outputTokens: 20, cost: "0.00002" },
       { step: "Research plan", model: "gpt-4o-mini", inputTokens: 60, outputTokens: 40, cost: "0.00003" },
-      { step: "Web research", model: "Tavily", inputTokens: 0, outputTokens: 0, cost: "0.00" },
-      { step: "Report writer", model: "gpt-4.1-mini", inputTokens: 1200, outputTokens: 1200, cost: "0.0024" },
+      { step: "Web research", model: "grok-3-deepsearch", inputTokens: 800, outputTokens: 1200, cost: "0.025" },
+      { step: "Report writer", model: "deepseek-v3.2", inputTokens: 1200, outputTokens: 1200, cost: "0.0015" },
     ],
     examplePrompt: "Research Notion Inc for a partnership outreach call. We want to integrate our product with their API.",
     exampleOutput: "# Research Brief: Notion Inc\n\n**Intent:** Partnership outreach - API integration\n\n## Overview\n\nNotion is a productivity platform used by 35M+ users globally. Headquartered in San Francisco. Last round: Series C at $275M (2021).\n\n## Product Signals\n\n- Notion API launched 2021, now at v2. Active developer ecosystem.\n- Recent focus: Notion AI and enterprise SSO.\n- 3 open API positions on their jobs page.\n\n## Talking Points\n\n1. Reference their active API ecosystem as reason for outreach.\n2. Lead with use-case first: show what your integration solves for Notion users.\n3. Avoid cold pitch framing - lean into partnership benefits.\n\n## Recommended Angle\n\nEmail Head of Partnerships with a 3-sentence pitch, link to your integration demo, and a calendar link.",
@@ -285,7 +315,7 @@ async function waitWalletTx(provider, hash) {
 
 // Quote -> approve (if needed) -> fund the escrow from the user's wallet.
 // statusFn(text) updates the run button label during the wallet steps.
-async function fundWorkflowRun(slug, statusFn) {
+async function fundWorkflowRun(slug, statusFn, tier) {
   const provider = getEthProvider();
   if (!provider) throw new Error("No wallet found. Install a wallet to pay and run.");
   // Single dApp-wide wallet session (sidebar). Connect via it if not connected yet.
@@ -301,7 +331,7 @@ async function fundWorkflowRun(slug, statusFn) {
   const qRes = await fetch(`/api/workflows/${slug}/quote`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: "{}",
+    body: JSON.stringify({ tier: tier || "normal" }),
   });
   const quote = await qRes.json().catch(() => ({}));
   if (!qRes.ok) throw new Error(quote.message || "Could not get a quote.");
@@ -562,7 +592,7 @@ function renderWorkflowCard(slug, wf) {
     <article class="wf-card" data-cat="${esc(wf.category)}" data-slug="${esc(slug)}">
       <div class="wf-card-top">
         <span class="wf-cat-badge" style="color:${catColor};border-color:${catColor}22;background:${catColor}12">${esc(wf.category)}</span>
-        <span class="wf-price">${esc(wf.price)} <span class="wf-price-unit">USDC / call</span></span>
+        <span class="wf-price">${esc(wf.price)} <span class="wf-price-unit">USDC / run</span></span>
       </div>
       <h3 class="wf-card-name">${esc(wf.name)}</h3>
       <p class="wf-card-desc">${esc(wf.description)}</p>
@@ -723,20 +753,20 @@ function renderCanvasNode(node, gCol, gRow) {
   </div>`;
 }
 
-function renderTabSteps(wf) {
-  const pricing = wf.pricing || [];
-
+// Build the canvas node list and grid HTML for a given set of steps.
+// Returns { nodes, total, colParts, rowTpl, cellsHtml, summaryHtml }.
+// Called by renderTabSteps (initial render) and by the tier-switch handler (redraw).
+function buildCanvasLayout(steps, inputHint, outputHint) {
   const nodes = [
-    { type: "input", idx: 0, name: "User Input", purpose: wf.inputHint || "Your prompt or instructions" },
-    ...wf.steps.map((s, i) => ({ type: "ai", idx: i + 1, stepNum: i + 1, name: s.name, model: s.model, purpose: s.purpose })),
-    { type: "output", idx: wf.steps.length + 1, name: "Final Output", purpose: wf.outputHint || "Ready to use result" },
+    { type: "input", idx: 0, name: "User Input", purpose: inputHint || "Your prompt or instructions" },
+    ...steps.map((s, i) => ({ type: "ai", idx: i + 1, stepNum: i + 1, name: s.name, model: s.model, purpose: s.purpose })),
+    { type: "output", idx: steps.length + 1, name: "Final Output", purpose: outputHint || "Ready to use result" },
   ];
 
   const total = nodes.length;
   const nodeCols = total <= 3 ? total : Math.ceil(total / 2);
   const twoRows = total > 3;
 
-  // Build grid template: node columns are flexible, connector columns are fixed width.
   const colParts = [];
   for (let c = 0; c < nodeCols; c++) {
     if (c > 0) colParts.push("44px");
@@ -744,7 +774,6 @@ function renderTabSteps(wf) {
   }
   const rowTpl = twoRows ? "auto 42px auto" : "auto";
 
-  // Snake placement: row 0 left to right, row 1 right to left.
   function colIndexOf(n) {
     const row = Math.floor(n / nodeCols);
     const pos = n % nodeCols;
@@ -771,19 +800,22 @@ function renderTabSteps(wf) {
     }
   });
 
-  const summaryRows = nodes.map((node) => {
+  const summaryHtml = nodes.map((node, i) => {
     const label = node.type === "input" ? "Input" : node.type === "output" ? "Output" : "Step " + String(node.stepNum).padStart(2, "0");
-    return { label, name: node.name, model: node.model || null, purpose: node.purpose };
-  });
-
-  const summaryHtml = summaryRows.map((r, i) => `
+    return `
     <tr data-step-row="${i}">
-      <td><span class="wfg-row-label">${esc(r.label)}</span><span class="wfg-row-name">${esc(r.name)}</span></td>
-      <td>${r.model ? `<span class="wf-graph-model-tag">${esc(r.model)}</span>` : '<span class="wf-muted">-</span>'}</td>
-      <td class="wf-muted" style="font-size:12px;line-height:1.5">${esc(r.purpose)}</td>
+      <td><span class="wfg-row-label">${esc(label)}</span><span class="wfg-row-name">${esc(node.name)}</span></td>
+      <td>${node.model ? `<span class="wf-graph-model-tag">${esc(node.model)}</span>` : '<span class="wf-muted">-</span>'}</td>
+      <td class="wf-muted" style="font-size:12px;line-height:1.5">${esc(node.purpose)}</td>
       <td><span class="wfg-step-status wfg-step-status--pending">Pending</span></td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
 
+  return { nodes, total, colParts, rowTpl, cellsHtml: cells.join(""), summaryHtml };
+}
+
+function renderTabSteps(wf) {
+  const layout = buildCanvasLayout(wf.steps, wf.inputHint, wf.outputHint);
   return `<div class="wf-tab-panel" data-panel="Workflow Steps">
     <div class="wfg-canvas">
       <div class="wfg-canvas-head">
@@ -792,14 +824,14 @@ function renderTabSteps(wf) {
           <div class="wfg-canvas-sub">Transparent execution steps and models.</div>
         </div>
         <div class="wfg-chips">
-          <span class="wfg-chip">${total} nodes</span>
+          <span class="wfg-chip">${layout.total} nodes</span>
           <span class="wfg-chip">${wf.modelCount} AI models</span>
           <span class="wfg-chip">${esc(wf.runtime)}</span>
         </div>
       </div>
       <div class="wfg2-board">
-        <div class="wfg2-grid" style="grid-template-columns:${colParts.join(" ")};grid-template-rows:${rowTpl}">
-          ${cells.join("")}
+        <div class="wfg2-grid" id="wfCanvasGrid" style="grid-template-columns:${layout.colParts.join(" ")};grid-template-rows:${layout.rowTpl}">
+          ${layout.cellsHtml}
         </div>
       </div>
       <div class="wfg-summary">
@@ -807,7 +839,7 @@ function renderTabSteps(wf) {
         <div class="wf-table-wrap">
           <table class="wfg-sum-table">
             <thead><tr><th>Step</th><th>Model</th><th>Purpose</th><th>Status</th></tr></thead>
-            <tbody>${summaryHtml}</tbody>
+            <tbody id="wfSummaryTbody">${layout.summaryHtml}</tbody>
           </table>
         </div>
       </div>
@@ -883,10 +915,18 @@ function renderRunPanel(slug, wf) {
       </div>
     </div>` : "";
 
+  const initPrice = wf.tiers ? wf.tiers.normal.price : wf.price;
+  const tierSelector = wf.tiers ? `
+    <div class="wf-tier-selector" id="wfTierSelector">
+      <button class="wf-tier-btn is-active" data-tier="normal" type="button">Normal</button>
+      <button class="wf-tier-btn" data-tier="plus" type="button">Plus</button>
+      <button class="wf-tier-btn" data-tier="pro" type="button">Pro</button>
+    </div>` : `<h3>Run this workflow</h3>`;
+
   return `
     <div class="wf-run-header">
-      <h3>Run this workflow</h3>
-      <div class="wf-run-price-tag">${esc(wf.price)} USDC / call</div>
+      ${tierSelector}
+      <div class="wf-run-price-tag" id="wfPriceTag">${esc(initPrice)} USDC / run</div>
     </div>
     <div class="wf-run-modes" id="wfInputModes" role="group" aria-label="Input mode">
       <button class="wf-run-mode-btn is-active" data-mode="own" type="button">Write prompt</button>
@@ -911,11 +951,11 @@ function renderRunPanel(slug, wf) {
 
     ${retrieval}
 
-    ${isBillingEnabled(wf) ? `<p class="wf-run-hint wf-muted">Pay ${esc(wf.price)} USDC per run from your connected wallet (sidebar). Refunded if the run fails.</p>` : ""}
+    ${isBillingEnabled(wf) ? `<p class="wf-run-hint wf-muted" id="wfBillingHint">Pay ${esc(initPrice)} USDC per run from your connected wallet (sidebar). Refunded if the run fails.</p>` : ""}
 
     <button class="wf-btn-run" id="wfRunBtn" type="button" data-slug="${esc(slug)}">
       <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
-      ${isBillingEnabled(wf) ? `Pay ${esc(wf.price)} USDC and run` : "Run Workflow"}
+      ${isBillingEnabled(wf) ? `Pay ${esc(initPrice)} USDC and run` : "Run Workflow"}
     </button>
     <p class="wf-run-quota wf-muted" id="wfRunQuota" hidden></p>
 
@@ -961,6 +1001,47 @@ function bindDetail(slug, wf) {
   // Run-panel bindings (only for live workflows; the coming-soon panel has none)
   if (isWorkflowLive(wf)) {
     let retrievalMode = "search";
+    let activeTier = "normal";
+
+    // Tier selector: Normal / Plus / Pro
+    const tierSel = document.getElementById("wfTierSelector");
+    if (tierSel && wf.tiers) {
+      tierSel.addEventListener("click", (e) => {
+        const btn = e.target.closest(".wf-tier-btn");
+        if (!btn || btn.dataset.tier === activeTier) return;
+        activeTier = btn.dataset.tier;
+
+        tierSel.querySelectorAll(".wf-tier-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
+
+        const tierDef = wf.tiers[activeTier];
+        const tierPrice = tierDef.price;
+
+        const priceTag = document.getElementById("wfPriceTag");
+        if (priceTag) priceTag.textContent = `${tierPrice} USDC / run`;
+
+        const billingHint = document.getElementById("wfBillingHint");
+        if (billingHint) billingHint.textContent = `Pay ${tierPrice} USDC per run from your connected wallet (sidebar). Refunded if the run fails.`;
+
+        const runBtn = document.getElementById("wfRunBtn");
+        if (runBtn && !runBtn.disabled) {
+          const runIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>`;
+          runBtn.innerHTML = `${runIcon} ${isBillingEnabled(wf) ? `Pay ${tierPrice} USDC and run` : "Run Workflow"}`;
+        }
+
+        // Redraw the canvas and summary table with the selected tier's steps.
+        const layout = buildCanvasLayout(tierDef.steps, wf.inputHint, wf.outputHint);
+        const canvasGrid = document.getElementById("wfCanvasGrid");
+        if (canvasGrid) {
+          canvasGrid.style.gridTemplateColumns = layout.colParts.join(" ");
+          canvasGrid.style.gridTemplateRows = layout.rowTpl;
+          canvasGrid.innerHTML = layout.cellsHtml;
+        }
+        const summaryTbody = document.getElementById("wfSummaryTbody");
+        if (summaryTbody) summaryTbody.innerHTML = layout.summaryHtml;
+
+        switchToTab("Workflow Steps");
+      });
+    }
 
     function flashOutline(el) {
       el.focus();
@@ -1056,15 +1137,15 @@ function bindDetail(slug, wf) {
         runBtn.disabled = true;
         document.getElementById("wfRunResult").hidden = true;
         document.getElementById("wfRunReceipt").hidden = true;
-        fundWorkflowRun(slug, (text) => { runBtn.innerHTML = esc(text); })
-          .then((runId) => runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, runId }))
+        fundWorkflowRun(slug, (text) => { runBtn.innerHTML = esc(text); }, activeTier)
+          .then((runId) => runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, runId, tier: activeTier }))
           .catch((err) => {
             runBtn.disabled = false;
             runBtn.innerHTML = `${runIcon} Run Workflow`;
             displayRunError(err.message || "Payment was not completed.");
           });
       } else {
-        runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources });
+        runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, tier: activeTier });
       }
     });
   }
@@ -1093,8 +1174,14 @@ function runWorkflow(slug, wf, opts) {
   const runIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>`;
   runBtn.innerHTML = `${runIcon} Running...`;
 
+  // Use the selected tier's steps for node indexing; fall back to wf.steps (normal tier).
+  const tier = opts.tier || "normal";
+  const tierDef = wf.tiers && wf.tiers[tier];
+  const activeSteps = tierDef ? tierDef.steps : wf.steps;
+  const tierPrice = tierDef ? tierDef.price : wf.price;
+
   // Node layout: 0 = User Input, 1..N = steps, N+1 = Final Output
-  const stepCount = wf.steps.length;
+  const stepCount = activeSteps.length;
   const outputIdx = stepCount + 1;
   const totalNodes = stepCount + 2;
   for (let j = 0; j < totalNodes; j++) {
@@ -1102,48 +1189,114 @@ function runWorkflow(slug, wf, opts) {
     setStepRowState(j, "pending");
   }
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Build serverKey -> node index map so SSE progress events update the right node.
+  const keyToIdx = {};
+  activeSteps.forEach((s, i) => {
+    if (s.serverKey) keyToIdx[s.serverKey] = i + 1;
+  });
 
-  // Fire the real request immediately; the canvas animation paces against it.
-  const reqBody = { prompt: opts.prompt, mode: opts.mode };
+  const reqBody = { prompt: opts.prompt, mode: opts.mode, tier };
   if (opts.sources && opts.sources.length) reqBody.sources = opts.sources;
   if (opts.runId) reqBody.runId = opts.runId;
-  const fetchPromise = fetch(`/api/workflows/${slug}/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(reqBody),
-  }).then(async (res) => {
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, data };
-  }, (err) => ({ ok: false, status: 0, data: { message: err.message } }));
 
   (async () => {
     setNodeState(0, "completed");
     setStepRowState(0, "completed");
-    // Animate steps 1..N; hold the last node "running" until the real response lands.
-    for (let k = 1; k <= stepCount; k += 1) {
-      setNodeState(k, "running");
-      setStepRowState(k, "running");
-      if (k < stepCount) {
-        await sleep(650);
-        setNodeState(k, "completed");
-        setStepRowState(k, "completed");
-      }
-    }
-    const out = await fetchPromise;
-    if (!out.ok) {
-      setNodeState(stepCount, "failed");
-      setStepRowState(stepCount, "failed");
-      showRunError(out.data);
+
+    let response;
+    try {
+      response = await fetch(`/api/workflows/${slug}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reqBody),
+      });
+    } catch (err) {
+      showRunError({ message: err.message });
       restoreBtn();
       return;
     }
-    setNodeState(stepCount, "completed");
-    setStepRowState(stepCount, "completed");
-    setNodeState(outputIdx, "completed");
-    setStepRowState(outputIdx, "completed");
-    showRunResult(out.data);
-    restoreBtn();
+
+    // Pre-stream errors (billing, rate limit, etc.) arrive as normal JSON.
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      setNodeState(1, "failed");
+      setStepRowState(1, "failed");
+      showRunError(errData);
+      restoreBtn();
+      return;
+    }
+
+    // Consume the SSE stream and drive node states from real server events.
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let resultData = null;
+    let errorData = null;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE events are separated by double newlines.
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          let evName = "message";
+          let evData = "";
+          for (const line of part.split("\n")) {
+            if (line.startsWith("event: ")) evName = line.slice(7).trim();
+            else if (line.startsWith("data: ")) evData = line.slice(6);
+          }
+          if (!evData) continue;
+          let parsed;
+          try { parsed = JSON.parse(evData); } catch { continue; }
+
+          if (evName === "progress") {
+            const nodeIdx = keyToIdx[parsed.step];
+            if (nodeIdx != null) {
+              if (parsed.status === "running") {
+                setNodeState(nodeIdx, "running");
+                setStepRowState(nodeIdx, "running");
+              } else if (parsed.status === "done") {
+                setNodeState(nodeIdx, "completed");
+                setStepRowState(nodeIdx, "completed");
+              }
+            }
+          } else if (evName === "result") {
+            resultData = parsed;
+          } else if (evName === "error") {
+            errorData = parsed;
+          }
+        }
+      }
+    } catch (streamErr) {
+      errorData = { message: streamErr.message };
+    }
+
+    if (errorData) {
+      // Mark any node still in running state as failed.
+      for (let k = 1; k <= stepCount; k++) {
+        const node = document.querySelector(`.wfg2-node[data-node-idx="${k}"]`);
+        if (node && node.classList.contains("wfg2-node--running")) {
+          setNodeState(k, "failed");
+          setStepRowState(k, "failed");
+        }
+      }
+      showRunError(errorData);
+      restoreBtn();
+      return;
+    }
+
+    if (resultData) {
+      setNodeState(outputIdx, "completed");
+      setStepRowState(outputIdx, "completed");
+      showRunResult(resultData);
+      restoreBtn();
+    }
   })();
 
   function restoreBtn() {
@@ -1161,7 +1314,7 @@ function runWorkflow(slug, wf, opts) {
       at: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
       output: null,
       releaseTx: null,
-      charged: wf.price,
+      charged: tierPrice,
     });
     displayRunError(msg);
   }
@@ -1176,7 +1329,7 @@ function runWorkflow(slug, wf, opts) {
       at: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
       output: output,
       releaseTx: data.releaseTx || null,
-      charged: wf.price,
+      charged: tierPrice,
     });
     resultEl.hidden = false;
     const label = resultEl.querySelector(".wf-run-result-label");
@@ -1192,7 +1345,6 @@ function runWorkflow(slug, wf, opts) {
     openResultModal(output, slug);
 
     receiptEl.hidden = false;
-    const sources = Array.isArray(data.sources) ? data.sources : [];
     const steps = Array.isArray(data.steps) ? data.steps : [];
     const stepRows = steps.map((s) =>
       `<div class="wf-receipt-step"><span>${esc(s.name)}</span><span class="wf-graph-model-tag">${s.model ? esc(s.model) : "-"}</span></div>`
@@ -1201,8 +1353,7 @@ function runWorkflow(slug, wf, opts) {
       <div class="wf-receipt-row"><span>Workflow</span><span>${esc(wf.name)}</span></div>
       <div class="wf-receipt-row"><span>Status</span><span class="wf-status-done">Completed</span></div>
       <div class="wf-receipt-steps">${stepRows}</div>
-      <div class="wf-receipt-row"><span>Sources</span><span>${sources.length}</span></div>
-      <div class="wf-receipt-row"><span>Charged</span><span class="wf-receipt-price">${esc(wf.price)} USDC</span></div>
+      <div class="wf-receipt-row"><span>Charged</span><span class="wf-receipt-price">${esc(tierPrice)} USDC</span></div>
       ${data.releaseTx
       ? `<div class="wf-receipt-row"><span>Invoice memo tx</span><a class="wf-link wf-mono" href="${esc((WF_CONFIG.explorerBase || "https://testnet.arcscan.app") + "/tx/" + data.releaseTx)}" target="_blank" rel="noopener">${esc(data.releaseTx.slice(0, 10) + "…" + data.releaseTx.slice(-8))}</a></div>`
       : `<div class="wf-receipt-row"><span>Settlement</span><span class="wf-muted">Pending on-chain (Arc Testnet)</span></div>`}`;

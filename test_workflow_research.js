@@ -44,63 +44,73 @@ check("context includes url", R.aggregateContext([{ title: "T", url: "http://u",
 
 // --- end-to-end with fakes ---
 (async () => {
+  // Search mode: 4 callModel calls (role, plan, search model, writer).
   let calls = 0;
-  const usageRole = { prompt_tokens: 50, completion_tokens: 20 };
-  const usagePlan = { prompt_tokens: 30, completion_tokens: 15 };
-  const usageWrite = { prompt_tokens: 500, completion_tokens: 300 };
+  const usageRole   = { prompt_tokens: 50,  completion_tokens: 20  };
+  const usagePlan   = { prompt_tokens: 30,  completion_tokens: 15  };
+  const usageSearch = { prompt_tokens: 800, completion_tokens: 1200 };
+  const usageWrite  = { prompt_tokens: 500, completion_tokens: 300  };
   function fakeCall(modelId, messages, maxTokens) {
     calls += 1;
     if (calls === 1) return Promise.resolve({ content: '{"server":"\u{1F4B0} Finance Agent","agent_role_prompt":"You are a finance analyst."}', usage: usageRole });
     if (calls === 2) return Promise.resolve({ content: '["q1","q2","q3"]', usage: usagePlan });
-    return Promise.resolve({ content: "# Report\nFinding ([A](http://a))\n\n## References\n[http://a](http://a)", usage: usageWrite });
-  }
-  function fakeSearch(q) {
-    return Promise.resolve([
-      { title: "A", url: "http://a", content: "alpha facts", score: 0.9 },
-      { title: "B", url: "http://b", content: "beta facts", score: 0.5 },
-    ]);
+    if (calls === 3) return Promise.resolve({ content: "Web findings: Acme Corp is a tech company ([acme.com](http://acme.com))", usage: usageSearch });
+    return Promise.resolve({ content: "# Report\nFinding ([A](http://acme.com))\n\n## References\n[http://acme.com](http://acme.com)", usage: usageWrite });
   }
 
+  // Track which step fired the onProgress events.
+  const progressEvents = [];
   const res = await R.runResearchWorkflow({
     query: "Research Acme Corp for a partnership",
     mode: "search",
     cheapModel: "gpt-4o-mini",
-    writerModel: "gpt-4.1-mini",
+    searchModel: "grok-3-deepsearch",
+    writerModel: "deepseek-v3.2",
     groupRatio: 1,
     today: "2026-06-28",
     callModel: fakeCall,
-    searchWeb: fakeSearch,
+    onProgress: (evt) => progressEvents.push(evt),
   });
 
   check("report produced", res.report.indexOf("# Report") === 0);
   eq("persona resolved + emoji stripped", res.persona.server, "Finance Agent");
   eq("queries parsed", res.queries.length, 3);
-  check("sources returned", res.sources.length === 2 && res.sources[0].url === "http://a");
-  // cost: role 50*0.15+20*0.60=19.5->20; plan 30*0.15+15*0.60=13.5->14; write 500*0.40+300*1.60=680; total 714
-  eq("total cost micros", res.totalCostMicros, 714);
   eq("step count (role, plan, web, writer)", res.steps.length, 4);
+  // progress: 4 steps x 2 events (running + done) = 8
+  eq("onProgress events", progressEvents.length, 8);
+  check("first event is role_analysis running", progressEvents[0].step === "role_analysis" && progressEvents[0].status === "running");
+  check("last event is report_writer done", progressEvents[7].step === "report_writer" && progressEvents[7].status === "done");
+  // cost: role(gpt-4o-mini) 50*0.15+20*0.60=20; plan(gpt-4o-mini) 30*0.15+15*0.60=14;
+  //        search(grok-3-deepsearch) 800*3.00+1200*15.00=20400; write(deepseek-v3.2) 500*0.27+300*1.10=465; total 20899
+  eq("total cost micros", res.totalCostMicros, 20899);
 
-  // paste mode does not call search
-  let searched = false;
+  // Paste mode: 3 callModel calls (role, plan, writer) -- search model not called.
+  let calls2 = 0;
+  function fakeCall2(modelId, messages, maxTokens) {
+    calls2 += 1;
+    if (calls2 === 1) return Promise.resolve({ content: '{"server":"Analyst","agent_role_prompt":"You analyze."}', usage: usageRole });
+    if (calls2 === 2) return Promise.resolve({ content: '["q1"]', usage: usagePlan });
+    return Promise.resolve({ content: "# Paste Report\nSummary.", usage: usageWrite });
+  }
   const res2 = await R.runResearchWorkflow({
     query: "Summarize these",
     mode: "paste",
     pastedSources: [{ title: "Doc", url: "http://d", content: "important data" }],
-    callModel: fakeCall,
-    searchWeb: () => { searched = true; return Promise.resolve([]); },
+    callModel: fakeCall2,
     today: "2026-06-28",
   });
   check("paste mode produced report", typeof res2.report === "string" && res2.report.length > 0);
-  check("paste mode did not search", searched === false);
+  eq("paste mode: 3 model calls (no search model)", calls2, 3);
+  eq("paste mode step count", res2.steps.length, 4);
 
-  // zero sources in search mode throws
+  // Paste mode with empty sources throws.
   let threw = false;
   try {
     await R.runResearchWorkflow({
-      query: "x", mode: "search", callModel: fakeCall, searchWeb: () => Promise.resolve([]), today: "2026-06-28",
+      query: "x", mode: "paste", pastedSources: [], callModel: fakeCall2, today: "2026-06-28",
     });
   } catch (e) { threw = true; }
-  check("zero sources throws", threw === true);
+  check("paste mode empty sources throws", threw === true);
 
   console.log(`\nresearch executor test: ${passed} passed, ${failed} failed`);
   process.exit(failed === 0 ? 0 : 1);

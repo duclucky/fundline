@@ -103,14 +103,45 @@ const WORKFLOW_LIMITS = {
   spendCapMicros: Math.round(WORKFLOW_SPEND_PER_IP_PER_DAY_USD * 1000000),
   dailyBudgetMicros: Math.round(WORKFLOW_DAILY_BUDGET_USD * 1000000),
 };
-// Research workflow (GPT Researcher chain) models + Tavily retrieval (phase 2).
-const WORKFLOW_RESEARCH_CHEAP_MODEL = String(process.env.WORKFLOW_RESEARCH_CHEAP_MODEL || "gpt-4o-mini").trim();
-const WORKFLOW_RESEARCH_WRITER_MODEL = String(process.env.WORKFLOW_RESEARCH_WRITER_MODEL || "gpt-4.1-mini").trim();
-const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
-// Slugs runnable server-side: chain type, display name (for the memo), and the
-// fixed price in USDC base units (6 decimals; 50000 = 0.05 USDC). Others return 501.
+// Slugs runnable server-side. Each workflow owns its model choices -- models are
+// part of the workflow definition, not global env vars, so different workflows
+// can use different search providers or writers depending on their data needs.
+// priceUnits: fixed USDC base units (6 decimals; 50000 = 0.05 USDC).
 const WORKFLOW_RUN_DEFS = {
-  "client-research": { type: "research", name: "Client Research", priceUnits: 50000 },
+  "client-research": {
+    type: "research",
+    name: "Client Research",
+    // Each tier owns its own model set and price. Models chosen for each tier:
+    // - cheap: shared across tiers (fast, inexpensive for role + plan steps)
+    // - search: the real-time web retrieval model (quality scales with tier)
+    // - writer: the report synthesis model (quality scales with tier)
+    tiers: {
+      normal: {
+        priceUnits: 30000,   // 0.03 USDC
+        models: {
+          cheap: "gpt-4o-mini",
+          search: "deepseek-r1-searching",
+          writer: "deepseek-v3",
+        },
+      },
+      plus: {
+        priceUnits: 50000,   // 0.05 USDC
+        models: {
+          cheap: "gpt-4o-mini",
+          search: "grok-3-deepsearch",
+          writer: "deepseek-v3.2",
+        },
+      },
+      pro: {
+        priceUnits: 100000,  // 0.10 USDC
+        models: {
+          cheap: "gpt-4o-mini",
+          search: "grok-4",
+          writer: "claude-sonnet-4-6",
+        },
+      },
+    },
+  },
 };
 // Treasury hot key that signs release/refund (Fundline-controlled, matches
 // ARC_TREASURY_ADDRESS). Secret; read-only escrow verification works without it.
@@ -610,11 +641,20 @@ async function handleWorkflowQuote(req, res, slug) {
     sendJson(res, 503, { error: "billing_unconfigured", message: "Workflow billing is not configured." });
     return;
   }
+  let quoteInput;
+  try { quoteInput = await readJsonBody(req); } catch (_) { quoteInput = {}; }
+  const quoteTier = String(quoteInput.tier || "normal");
+  const tierDef = def.tiers && def.tiers[quoteTier];
+  if (!tierDef) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid tier" } });
+    return;
+  }
   const runId = `0x${crypto.randomBytes(32).toString("hex")}`;
   sendJson(res, 200, {
     runId,
-    amount: String(def.priceUnits),
-    amountUsdc: (def.priceUnits / 1000000).toFixed(6),
+    tier: quoteTier,
+    amount: String(tierDef.priceUnits),
+    amountUsdc: (tierDef.priceUnits / 1000000).toFixed(6),
     escrowAddress: ARC_RUN_ESCROW_ADDRESS,
     usdc: ARC_USDC_TOKEN_ADDRESS,
     chainId: ARC_CHAIN_ID,
@@ -659,12 +699,16 @@ async function handleWorkflowRun(req, res, slug) {
     sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A prompt is required" } });
     return;
   }
-  if (mode === "search" && !TAVILY_API_KEY) {
-    sendJson(res, 503, { error: "search_unconfigured", message: "Web search is not configured. Paste your own sources instead." });
-    return;
-  }
   if (mode === "paste" && (!pastedSources || (Array.isArray(pastedSources) && !pastedSources.length))) {
     sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Paste at least one source" } });
+    return;
+  }
+
+  // Resolve the requested tier and its model/price configuration.
+  const tier = String(input.tier || "normal");
+  const tierDef = def.tiers && def.tiers[tier];
+  if (!tierDef) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid tier" } });
     return;
   }
 
@@ -693,8 +737,8 @@ async function handleWorkflowRun(req, res, slug) {
       sendJson(res, 409, { error: "already_settled", message: "This run was already settled." });
       return;
     }
-    if (onchain.amount !== BigInt(def.priceUnits)) {
-      sendJson(res, 400, { error: "amount_mismatch", message: "Funded amount does not match the price." });
+    if (onchain.amount !== BigInt(tierDef.priceUnits)) {
+      sendJson(res, 400, { error: "amount_mismatch", message: "Funded amount does not match the tier price." });
       return;
     }
   }
@@ -707,21 +751,34 @@ async function handleWorkflowRun(req, res, slug) {
     return;
   }
 
+  // All validation passed -- switch to Server-Sent Events so the client gets
+  // real-time step progress instead of a single JSON response at the end.
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  function sendSSE(name, data) {
+    try { res.write("event: " + name + "\ndata: " + JSON.stringify(data) + "\n\n"); } catch (_) {}
+  }
+
   const v98config = { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL };
   try {
     const result = await workflowResearch.runResearchWorkflow({
       query,
       mode,
       pastedSources,
-      cheapModel: WORKFLOW_RESEARCH_CHEAP_MODEL,
-      writerModel: WORKFLOW_RESEARCH_WRITER_MODEL,
+      cheapModel: tierDef.models.cheap,
+      searchModel: tierDef.models.search,
+      writerModel: tierDef.models.writer,
       groupRatio: V98STORE_GROUP_RATIO,
+      today: new Date().toISOString().slice(0, 10),
       callModel: (modelId, messages, maxTokens) =>
         v98Client.callV98Chat(v98config, { model: modelId, messages, maxTokens })
           .then((r) => ({ content: r.content, usage: r.usage })),
-      searchWeb: (q, maxResults) =>
-        tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults })
-          .then((r) => r.results),
+      onProgress: (evt) => sendSSE("progress", evt),
     });
     // Record the real v98 cost (in micro-USD) for the rate-limit + budget caps.
     // This is OUR provider cost, separate from the USDC the user paid via escrow.
@@ -737,17 +794,15 @@ async function handleWorkflowRun(req, res, slug) {
       try {
         releaseTx = await runEscrow.release(runId, memoText);
       } catch (error) {
-        // The run succeeded and the output is delivered; only the on-chain release
-        // failed. Do NOT refund (we delivered). Funds stay in escrow until a retry
-        // or the payer's claimRefund window. Log and return the output.
+        // Run succeeded and output is delivered; only the on-chain release failed.
+        // Do NOT refund -- funds stay in escrow until a retry or claimRefund window.
         console.error("[Workflow] release error:", error.message);
       }
     }
 
-    sendJson(res, 200, {
+    sendSSE("result", {
       output: result.report,
       steps: result.steps,
-      sources: result.sources,
       costUsd: (result.totalCostMicros / 1000000).toFixed(6),
       releaseTx,
       memo: memoText,
@@ -764,12 +819,14 @@ async function handleWorkflowRun(req, res, slug) {
       }
     }
     console.error("[Workflow] run error:", error.message);
-    sendJson(res, 502, {
+    sendSSE("error", {
       error: "provider_error",
       message: billing
         ? "The workflow could not complete; your payment was refunded."
         : "The workflow could not complete right now.",
     });
+  } finally {
+    try { res.end(); } catch (_) {}
   }
 }
 

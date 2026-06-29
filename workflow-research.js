@@ -130,6 +130,18 @@ function buildPlannerMessages(query, maxQueries, today) {
   return [{ role: "user", content }];
 }
 
+// Messages for a search-capable model (e.g. grok-3-deepsearch, deepseek-r1-searching).
+// The model is expected to perform real web retrieval and return findings with source URLs.
+function buildSearchMessages(query, queries, today) {
+  const angles = queries.map((q, i) => `${i + 1}. ${q}`).join("\n");
+  const content = `You are a research assistant with web search capability.\n\n`
+    + `Research the following topic thoroughly: "${query}"\n\n`
+    + `Cover these specific angles:\n${angles}\n\n`
+    + `Provide comprehensive, factual findings with specific data points, statistics, and quotes. `
+    + `Include source URLs inline where available. Assume today is ${today}.`;
+  return [{ role: "user", content }];
+}
+
 function buildWriterMessages(persona, contextText, query, totalWords, today) {
   const user = `Information: "${contextText}"\n---\n`
     + `Using the above information, answer the following query or task: "${query}" in a detailed report -- `
@@ -152,26 +164,25 @@ function buildWriterMessages(persona, contextText, query, totalWords, today) {
 
 // opts: {
 //   query, mode ("search"|"paste"), pastedSources,
-//   cheapModel, writerModel, groupRatio, today,
+//   cheapModel, searchModel, writerModel, groupRatio, today,
 //   callModel(modelId, messages, maxTokens) -> { content, usage:{prompt_tokens,completion_tokens} },
-//   searchWeb(query) -> [{ title, url, content, score }],
-//   maxQueries=3, maxResults=5, maxSources=6, totalWords=1000,
+//   onProgress({ step, status }) -> void  (optional; step = "role_analysis"|"research_plan"|"web_research"|"report_writer", status = "running"|"done")
+//   maxQueries=3, totalWords=1000,
 // }
-// Returns { report, persona, steps:[{name,model,costMicros}], sources:[{title,url}], totalCostMicros, queries }
+// Returns { report, persona, steps:[{name,model,costMicros}], totalCostMicros, queries }
 async function runResearchWorkflow(opts) {
   const query = String(opts.query || "").trim();
   if (!query) throw new Error("A research query is required");
   const mode = opts.mode === "paste" ? "paste" : "search";
   const cheapModel = v98Models.resolveModelId(opts.cheapModel || "gpt-4o-mini");
-  const writerModel = v98Models.resolveModelId(opts.writerModel || "gpt-4.1-mini");
+  const searchModel = v98Models.resolveModelId(opts.searchModel || "grok-3-deepsearch");
+  const writerModel = v98Models.resolveModelId(opts.writerModel || "deepseek-v3.2");
   const groupRatio = opts.groupRatio || 1;
   const today = opts.today || new Date().toISOString().slice(0, 10);
   const maxQueries = opts.maxQueries || 3;
-  const maxResults = opts.maxResults || 5;
-  const maxSources = opts.maxSources || 6;
   const totalWords = opts.totalWords || 1000;
   const callModel = opts.callModel;
-  const searchWeb = opts.searchWeb;
+  const onProgress = typeof opts.onProgress === "function" ? opts.onProgress : () => {};
 
   const steps = [];
   let totalCostMicros = 0;
@@ -183,41 +194,44 @@ async function runResearchWorkflow(opts) {
   }
 
   // 1. Role select
+  onProgress({ step: "role_analysis", status: "running" });
   const roleRes = await callModel(cheapModel, buildPersonaMessages(query), 300);
   account("Role analysis", cheapModel, roleRes.usage);
   const persona = parsePersona(roleRes.content) || FALLBACK_PERSONA;
+  onProgress({ step: "role_analysis", status: "done" });
 
   // 2. Plan queries
+  onProgress({ step: "research_plan", status: "running" });
   const planRes = await callModel(cheapModel, buildPlannerMessages(query, maxQueries, today), 300);
   account("Research plan", cheapModel, planRes.usage);
   const queries = parsePlannerQueries(planRes.content, query, maxQueries);
+  onProgress({ step: "research_plan", status: "done" });
 
-  // 3. Retrieve sources
-  let sources = [];
+  // 3. Retrieve sources via search model or paste
+  onProgress({ step: "web_research", status: "running" });
+  let contextText;
   if (mode === "paste") {
-    sources = buildPasteSources(opts.pastedSources);
-    if (!sources.length) throw new Error("Paste mode needs at least one source");
+    const pasted = buildPasteSources(opts.pastedSources);
+    if (!pasted.length) throw new Error("Paste mode needs at least one source");
+    contextText = aggregateContext(pasted);
     steps.push({ name: "Sources (pasted)", model: null, costMicros: 0 });
   } else {
-    for (const q of queries) {
-      const found = await searchWeb(q, maxResults);
-      if (Array.isArray(found)) sources = sources.concat(found);
-    }
-    steps.push({ name: "Web research", model: "Tavily", costMicros: 0 });
-    if (!sources.length) throw new Error("No sources found for this query");
+    const searchRes = await callModel(searchModel, buildSearchMessages(query, queries, today), 4000);
+    account("Web research", searchModel, searchRes.usage);
+    contextText = searchRes.content;
   }
-  const topSources = selectTopSources(sources, maxSources);
-  const contextText = aggregateContext(topSources);
+  onProgress({ step: "web_research", status: "done" });
 
   // 4. Write the report
+  onProgress({ step: "report_writer", status: "running" });
   const writeRes = await callModel(writerModel, buildWriterMessages(persona, contextText, query, totalWords, today), 4000);
   account("Report writer", writerModel, writeRes.usage);
+  onProgress({ step: "report_writer", status: "done" });
 
   return {
     report: writeRes.content,
     persona,
     queries,
-    sources: topSources.map((s) => ({ title: s.title, url: s.url })),
     steps,
     totalCostMicros,
   };
@@ -231,6 +245,7 @@ module.exports = {
   aggregateContext,
   buildPersonaMessages,
   buildPlannerMessages,
+  buildSearchMessages,
   buildWriterMessages,
   runResearchWorkflow,
   FALLBACK_PERSONA,

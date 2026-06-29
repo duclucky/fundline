@@ -7,20 +7,69 @@
 // Adapted provider contract; v98store is OpenAI-compatible.
 
 // Real model id -> price in USD per 1,000,000 tokens.
+// Prices confirmed from https://v98store.com/prices on 2026-06-28 where available;
+// newer models use approximate market rates -- update when confirmed from dashboard.
 const V98_MODELS = {
-  "gpt-4.1-mini": { inputPer1M: 0.40, outputPer1M: 1.60 },
+  // GPT series
   "gpt-4o-mini": { inputPer1M: 0.15, outputPer1M: 0.60 },
+  "gpt-4.1-mini": { inputPer1M: 0.40, outputPer1M: 1.60 },
+  "gpt-4.1": { inputPer1M: 2.00, outputPer1M: 8.00 },
+  "gpt-4o": { inputPer1M: 2.50, outputPer1M: 10.00 },
   "gpt-5-mini": { inputPer1M: 0.25, outputPer1M: 2.00 },
+  "gpt-5-nano": { inputPer1M: 0.10, outputPer1M: 0.40 },
+  "gpt-5": { inputPer1M: 15.00, outputPer1M: 60.00 },
+  // DeepSeek series
+  "deepseek-v3": { inputPer1M: 0.27, outputPer1M: 1.10 },
+  "deepseek-v3-0324": { inputPer1M: 0.27, outputPer1M: 1.10 },
+  "deepseek-v3.1": { inputPer1M: 0.27, outputPer1M: 1.10 },
+  "deepseek-v3.2": { inputPer1M: 0.27, outputPer1M: 1.10 },
+  "deepseek-v4-flash": { inputPer1M: 0.20, outputPer1M: 0.80 },
+  "deepseek-v4-pro": { inputPer1M: 0.50, outputPer1M: 2.00 },
+  "deepseek-chat": { inputPer1M: 0.27, outputPer1M: 1.10 },
+  "deepseek-r1": { inputPer1M: 0.55, outputPer1M: 2.19 },
+  "deepseek-r1-0528": { inputPer1M: 0.55, outputPer1M: 2.19 },
+  "deepseek-r1-searching": { inputPer1M: 0.55, outputPer1M: 2.19 },
+  "deepseek-reasoner": { inputPer1M: 0.55, outputPer1M: 2.19 },
+  // Grok series (xAI)
+  "grok-3": { inputPer1M: 3.00, outputPer1M: 15.00 },
+  "grok-3-mini": { inputPer1M: 0.30, outputPer1M: 0.50 },
+  "grok-3-deepsearch": { inputPer1M: 3.00, outputPer1M: 15.00 },
+  "grok-4": { inputPer1M: 3.00, outputPer1M: 15.00 },
+  "grok-4-fast": { inputPer1M: 1.00, outputPer1M: 5.00 },
+  "grok-4.1": { inputPer1M: 3.00, outputPer1M: 15.00 },
+  "grok-4.2": { inputPer1M: 3.00, outputPer1M: 15.00 },
+  // Qwen series (Alibaba)
+  "qwen-turbo": { inputPer1M: 0.05, outputPer1M: 0.20 },
+  "qwen-plus": { inputPer1M: 0.40, outputPer1M: 1.20 },
+  "qwen-max": { inputPer1M: 1.60, outputPer1M: 6.40 },
+  "qwen3-8b": { inputPer1M: 0.05, outputPer1M: 0.20 },
+  "qwen3-30b-a3b": { inputPer1M: 0.20, outputPer1M: 0.60 },
+  "qwen3-32b": { inputPer1M: 0.30, outputPer1M: 1.20 },
+  "qwen3-max": { inputPer1M: 1.60, outputPer1M: 6.40 },
+  "qwen3-235b-a22b": { inputPer1M: 0.50, outputPer1M: 2.20 },
+  // Kimi (Moonshot AI)
+  "kimi-k2": { inputPer1M: 0.50, outputPer1M: 2.50 },
+  "kimi-k2.5": { inputPer1M: 0.50, outputPer1M: 2.50 },
+  "kimi-k2.6": { inputPer1M: 0.50, outputPer1M: 2.50 },
+  "kimi-k2.7-code": { inputPer1M: 0.50, outputPer1M: 2.50 },
+  // Claude series
   "claude-3-haiku-20240307": { inputPer1M: 0.25, outputPer1M: 1.25 },
   "claude-3-5-sonnet-20241022": { inputPer1M: 3.00, outputPer1M: 15.00 },
   "claude-haiku-4-5-20251001": { inputPer1M: 1.00, outputPer1M: 5.00 },
   "claude-sonnet-4-6": { inputPer1M: 3.00, outputPer1M: 15.00 },
+  "claude-opus-4-8": { inputPer1M: 15.00, outputPer1M: 75.00 },
 };
 
 // Friendly labels used in the workflow definitions -> real v98store model id.
 // Claude ids REQUIRE the date suffix, so labels must be mapped before any call.
 const LABEL_TO_ID = {
   "gpt-4.1-mini": "gpt-4.1-mini",
+  "gpt-4o-mini": "gpt-4o-mini",
+  "deepseek-v3.2": "deepseek-v3.2",
+  "deepseek-r1": "deepseek-r1",
+  "grok-3-deepsearch": "grok-3-deepsearch",
+  "kimi-k2": "kimi-k2",
+  "qwen3-max": "qwen3-max",
   "claude-3-haiku": "claude-3-haiku-20240307",
   "claude-3.5-sonnet": "claude-3-5-sonnet-20241022",
 };
