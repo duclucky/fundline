@@ -79,7 +79,7 @@ async function main() {
 
   const memoText = memo.buildWorkflowMemoText({ workflowName: "Client Research", steps: [
     { name: "Role analysis", model: "gpt-4o-mini" },
-    { name: "Web research", model: "Tavily" },
+    { name: "Web research", model: "grok-3-deepsearch" },
     { name: "Report writer", model: "gpt-4.1-mini" },
   ] });
   const relRcpt = await (await escrowAsTreasury.release(runId1, toUtf8Bytes(memoText))).wait(1);

@@ -7,7 +7,6 @@ const { ethers } = require("ethers");
 const v98Client = require("./v98-client");
 const v98Models = require("./v98-models");
 const workflowLimiter = require("./workflow-limiter");
-const tavilyClient = require("./tavily-client");
 const workflowResearch = require("./workflow-research");
 const workflowEngine = require("./workflow-engine");
 const workflowDefs = require("./workflow-defs");

@@ -3,7 +3,7 @@
 // End-to-end billing dry-run against a LOCAL server + the live escrow on Arc testnet.
 // Simulates the client: POST /quote -> fund the escrow on-chain (payer wallet) ->
 // POST /run with the runId -> the server verifies the funded run, runs the workflow
-// (real v98 + Tavily, small cost), and treasury-releases the escrow. Asserts the run
+// (real v98, small cost), and treasury-releases the escrow. Asserts the run
 // output, the on-chain release, and the InvoiceMemo. Needs the server running locally
 // with billing active. Run: node test_billing_e2e_dryrun.js  (set BASE to override URL)
 
@@ -56,7 +56,7 @@ async function main() {
   check("funded on-chain", BigInt(r[1]) === amount && r[3] === false);
 
   // 3. Run (server verifies funding, runs, releases)
-  console.log("  running workflow (real v98 + Tavily)...");
+  console.log("  running workflow (real v98)...");
   const run = await postJson(`${BASE}/api/workflows/client-research/run`, {
     runId: quote.runId,
     prompt: "Research Acme Corp for a partnership outreach call",

@@ -17,8 +17,9 @@ Read first (do not duplicate; build on them):
 - `.claude/workflow-billing-spec.md` - the per-run escrow billing design (shared).
 - `.claude/workflow-sources.md` - curated shortlist of community workflows to adapt.
 - `.claude/workflow-gpt-researcher.md` - a fully worked example (the research chain) with verbatim prompts.
-- Reference code: `workflow-research.js` (executor pattern), `v98-models.js`, `v98-client.js`,
-  `tavily-client.js`, `workflow-limiter.js`, `run-escrow-client.js`, `wallet.js`, and
+- Reference code: `workflow-engine.js` (generic node-graph executor) + `workflow-defs.js`
+  (the 15 graph definitions), `workflow-research.js` (research prompt builders), `v98-models.js`,
+  `v98-client.js`, `workflow-limiter.js`, `run-escrow-client.js`, `wallet.js`, and
   `memo-util.js` (`buildWorkflowMemoText`). In `server.js`: `WORKFLOW_RUN_DEFS`,
   `handleWorkflowQuote`, `handleWorkflowRun`. In `workflows.js`: the `WORKFLOWS` entry,
   `renderRunPanel`, `runWorkflow`, `fundWorkflowRun`, `openResultModal`.
@@ -46,7 +47,7 @@ English only, no em dashes, no emojis in UI text, CommonJS, two-space indent, do
 Two separate money systems, keep them distinct: (a) the USDC the user PAYS = a FIXED price per
 workflow in 6-decimal base units (0.05 USDC = 50000), held/settled by the escrow; (b) our REAL
 v98 API cost = integer micro-USD via `computeCostMicros` (apply `V98STORE_GROUP_RATIO`), tracked
-by the limiter for the budget caps. Secrets (V98/Tavily/treasury keys) live in `.env` + cPanel
+by the limiter for the budget caps. Secrets (V98/treasury keys) live in `.env` + cPanel
 env, never committed, never client-side.
 
 ## Process
@@ -55,10 +56,11 @@ env, never committed, never client-side.
    community-vetted one and add it there). Capture the real step structure and verbatim prompts
    where given. Note the license (MIT/Apache are safe to adapt; keep an attribution comment).
 
-2. Decide retrieval. Needs live web data? Use Tavily (`tavily-client.js`) for the search step,
-   plus a paste-your-sources fallback. Self-contained (writing, code review, transformation) ->
-   no retrieval; input is the user prompt. A no-retrieval variant must drop citation requirements
-   (otherwise the model fabricates URLs).
+2. Decide retrieval. Needs live web data? Add a retrieval node (set `retrieval: true`) that uses
+   a search-capable model via the RESEARCH alias (grok-3-deepsearch / grok-4 / deepseek-r1-searching);
+   the engine also supports a paste-your-sources fallback. Self-contained (writing, code review,
+   transformation) -> no retrieval; input is the user prompt. A no-retrieval variant must drop
+   citation requirements (otherwise the model fabricates URLs).
 
 3. Build the executor (server-side, testable). Mirror `workflow-research.js`: pure helpers
    (prompt builders, parsers, aggregation) + an orchestrator taking INJECTED
@@ -77,8 +79,8 @@ env, never committed, never client-side.
    billing, quota, or escrow.
 
 5. Frontend `WORKFLOWS[slug]` (in `workflows.js`). Set `live: true`, `usesRetrieval: true` if it
-   has a search/paste step, the REAL `steps` (name, model, purpose - include the "Web research /
-   Tavily" tool step), a representative `pricing` display, and `modelCount`. The shared
+   has a search/paste step, the REAL `steps` (name, model, purpose - include the "Web research"
+   retrieval step), a representative `pricing` display, and `modelCount`. The shared
    `renderRunPanel` / `runWorkflow` / `fundWorkflowRun` handle wallet connect (sidebar), quote +
    approve + fund, the canvas, the View-result modal, and the receipt. Non-live workflows show
    "Coming soon"; live ones are gated by `isWorkflowLive` (wf.live && /api/config
@@ -96,8 +98,8 @@ env, never committed, never client-side.
    accounting. Ask the user before spending.
 
 8. Ship. Run `/predeploy-check`. To go live the cPanel Node env must have:
-   `WORKFLOW_RATE_LIMIT_ENABLED=true`, `V98STORE_API_KEY`, `V98STORE_BASE_URL`, `TAVILY_API_KEY`
-   (if retrieval), `ARC_RUN_ESCROW_ADDRESS`, `ARC_TREASURY_ADDRESS`, `ARC_TREASURY_PRIVATE_KEY`
+   `WORKFLOW_RATE_LIMIT_ENABLED=true`, `V98STORE_API_KEY`, `V98STORE_BASE_URL`,
+   `ARC_RUN_ESCROW_ADDRESS`, `ARC_TREASURY_ADDRESS`, `ARC_TREASURY_PRIVATE_KEY`
    (+ `V98STORE_GROUP_RATIO` if not 1x), then restart. Until then the workflow shows "Coming soon".
 
 ## Red flags
