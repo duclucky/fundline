@@ -648,6 +648,10 @@ const WF_CATALOG = {
 // Filled in as each workflow is run and finalized (real cost rounded to a clean
 // value). Overrides the band price for the explore card and tier selector.
 const WF_PRICE_OVERRIDES = {
+  "linkedin-post": { normal: "0.01", plus: "0.01", pro: "0.01" },
+  "newsletter-writer": { normal: "0.01", plus: "0.01", pro: "0.03" },
+  "x-thread-writer": { normal: "0.01", plus: "0.01", pro: "0.01" },
+  "pr-diff-review": { normal: "0.01", plus: "0.01", pro: "0.06" },
   "keyword-strategy": { normal: "0.01", plus: "0.01", pro: "0.03" },
   "seo-audit": { normal: "0.03", plus: "0.03", pro: "0.06" },
   "seo-content-brief": { normal: "0.06", plus: "0.06", pro: "0.08" },

@@ -58,7 +58,7 @@ function step(spec) {
 // Standard instruction appended to every final formatter node so the deliverable
 // is a clean client-ready Markdown document that also carries machine-readable
 // JSON at the end (Markdown + JSON in one output).
-const FORMATTER_SYSTEM = "You are a meticulous editor. You assemble the working notes from earlier steps into a single, clean, client-ready Markdown document. Do not invent facts beyond the notes. Use #, ##, ### headers. Preserve any Markdown tables from the notes as real tables; never wrap a table in a code fence. After the Markdown, append a fenced code block labelled json with a SHORT structured summary: only the top-level key fields and counts, not a full restatement of the document. Keep the entire response complete and never cut it off mid-way; if space runs low, shorten the JSON first. Output only the document, with no commentary.";
+const FORMATTER_SYSTEM = "You are a meticulous editor. You assemble the working notes from earlier steps into a single, clean, client-ready Markdown document. Do not invent facts beyond the notes. Use #, ##, ### headers. Preserve any Markdown tables from the notes as real tables; never wrap a table in a code fence. After the Markdown, append a fenced code block labelled json with a SHORT structured summary: only the top-level key fields and counts, not a full restatement of the document. Keep the entire response complete and never cut it off mid-way; if space runs low, shorten the JSON first. Do not use emojis. Output only the document, with no commentary.";
 
 // --- 1. Client Call Recap & Action Plan -----------------------------------
 const callRecap = {
@@ -507,10 +507,10 @@ const xThreadWriter = {
       system: "You plan a high-engagement X thread: a strong hook, an ordered list of point tweets, and a closing CTA.",
       user: (ctx) => `Plan the thread structure (hook, 5-9 point beats, CTA).\n\nIdeas:\n${out(ctx, "content_extractor")}` }),
     step({ id: "tweet_writer", name: "Tweet Writer", alias: "STRONG", maxTokens: 1000,
-      system: "You write X threads. Each tweet is punchy and under 280 characters, numbered (1/, 2/, ...), with line breaks for readability. No hashtags spam.",
+      system: "You write X threads. Each tweet is punchy and under 280 characters, numbered (1/, 2/, ...), with line breaks for readability. No hashtag spam. Do not use emojis.",
       user: (ctx) => `Write the full thread following the plan.\n\nPlan:\n${out(ctx, "thread_architect")}\n\nIdeas:\n${out(ctx, "content_extractor")}` }),
     step({ id: "hook_optimizer", name: "Hook Optimizer", alias: "FAST", maxTokens: 300,
-      system: "You write scroll-stopping first lines for X threads.",
+      system: "You write scroll-stopping first lines for X threads. Do not use emojis.",
       user: (ctx) => `Give 3 alternative hook tweets for this thread.\n\nThread:\n${out(ctx, "tweet_writer")}` }),
     step({ id: "formatter", name: "Final Formatter", alias: "FORMATTER", maxTokens: 1400, isFinal: true,
       system: FORMATTER_SYSTEM,
