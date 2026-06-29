@@ -67,7 +67,7 @@ async function callV98Chat(config, params) {
   };
   if (params.temperature != null) body.temperature = params.temperature;
 
-  const maxRetries = params.maxRetries != null ? params.maxRetries : 3;
+  const maxRetries = params.maxRetries != null ? params.maxRetries : 5;
   let attempt = 0;
   let lastError = null;
 
@@ -86,7 +86,8 @@ async function callV98Chat(config, params) {
     if (result.status === 429) {
       attempt += 1;
       if (attempt > maxRetries) throw new Error("v98store rate limited (429) after retries");
-      await sleep(500 * Math.pow(2, attempt - 1));
+      // Longer backoff for 429: web-search models rate-limit harder (1s,2s,4s,8s,16s).
+      await sleep(1000 * Math.pow(2, attempt - 1));
       continue;
     }
 
