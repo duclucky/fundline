@@ -9,6 +9,8 @@ const v98Models = require("./v98-models");
 const workflowLimiter = require("./workflow-limiter");
 const tavilyClient = require("./tavily-client");
 const workflowResearch = require("./workflow-research");
+const workflowEngine = require("./workflow-engine");
+const workflowDefs = require("./workflow-defs");
 const runEscrowClient = require("./run-escrow-client");
 const fundlineMemo = require("./memo-util");
 
@@ -109,35 +111,35 @@ const WORKFLOW_LIMITS = {
 // priceUnits: fixed USDC base units (6 decimals; 50000 = 0.05 USDC).
 const WORKFLOW_RUN_DEFS = {
   "client-research": {
-    type: "research",
     name: "Client Research",
-    // Each tier owns its own model set and price. Models chosen for each tier:
-    // - cheap: shared across tiers (fast, inexpensive for role + plan steps)
-    // - search: the real-time web retrieval model (quality scales with tier)
-    // - writer: the report synthesis model (quality scales with tier)
+    // Each tier owns its own model set and price. Models map node ALIASES to real
+    // v98store ids (the graph in workflow-defs.js references aliases, not ids):
+    // - FAST: inexpensive model for role + plan steps (shared across tiers)
+    // - RESEARCH: the real-time web retrieval model (quality scales with tier)
+    // - STRONG: the report synthesis model (quality scales with tier)
     tiers: {
       normal: {
         priceUnits: 30000,   // 0.03 USDC
         models: {
-          cheap: "gpt-4o-mini",
-          search: "deepseek-r1-searching",
-          writer: "deepseek-v3",
+          FAST: "gpt-4o-mini",
+          RESEARCH: "deepseek-r1-searching",
+          STRONG: "deepseek-v3",
         },
       },
       plus: {
         priceUnits: 50000,   // 0.05 USDC
         models: {
-          cheap: "gpt-4o-mini",
-          search: "grok-3-deepsearch",
-          writer: "deepseek-v3.2",
+          FAST: "gpt-4o-mini",
+          RESEARCH: "grok-3-deepsearch",
+          STRONG: "deepseek-v3.2",
         },
       },
       pro: {
         priceUnits: 100000,  // 0.10 USDC
         models: {
-          cheap: "gpt-4o-mini",
-          search: "grok-4",
-          writer: "claude-sonnet-4-6",
+          FAST: "gpt-4o-mini",
+          RESEARCH: "grok-4",
+          STRONG: "claude-sonnet-4-6",
         },
       },
     },
@@ -679,7 +681,8 @@ async function handleWorkflowRun(req, res, slug) {
     return;
   }
   const def = WORKFLOW_RUN_DEFS[slug];
-  if (!def || def.type !== "research") {
+  const graph = workflowDefs.getGraph(slug);
+  if (!def || !graph) {
     sendJson(res, 501, { error: "not_implemented", message: "This workflow is not available for live runs yet." });
     return;
   }
@@ -766,13 +769,12 @@ async function handleWorkflowRun(req, res, slug) {
 
   const v98config = { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL };
   try {
-    const result = await workflowResearch.runResearchWorkflow({
-      query,
+    const result = await workflowEngine.runWorkflowGraph({
+      graph,
+      tierModels: tierDef.models,
+      input: query,
       mode,
       pastedSources,
-      cheapModel: tierDef.models.cheap,
-      searchModel: tierDef.models.search,
-      writerModel: tierDef.models.writer,
       groupRatio: V98STORE_GROUP_RATIO,
       today: new Date().toISOString().slice(0, 10),
       callModel: (modelId, messages, maxTokens) =>
