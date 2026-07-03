@@ -56,6 +56,7 @@
     ".bar .act{padding:7px 14px;border:0;border-radius:8px;background:var(--accent);color:#fff;",
     " font:inherit;font-weight:700;font-size:12px;cursor:pointer;}",
     ".bar .ghost{background:#232128;border:1px solid #3a3842;color:#ddd;}",
+    ".bar .hint{font-size:11px;color:#9a97a2;max-width:260px;}",
     "#stage{padding:22px 12px 60px;display:flex;justify-content:center;}",
     ".cv-page{width:210mm;min-height:297mm;background:var(--page);box-shadow:0 10px 44px rgba(0,0,0,.16);}",
     // shared type + sections
@@ -135,7 +136,8 @@
     "    <button class=\"act ghost\" id=\"upload\" type=\"button\">Upload photo</button>",
     "    <button class=\"act ghost\" id=\"rmphoto\" type=\"button\" hidden>Remove photo</button>",
     "  </div>",
-    "  <button class=\"act\" id=\"save\" type=\"button\" style=\"margin-left:auto\">Save as PDF</button>",
+    "  <span class=\"hint\" style=\"margin-left:auto\">Tip: in the dialog pick \"Save as PDF\" and click Print</span>",
+    "  <button class=\"act\" id=\"save\" type=\"button\">Save as PDF</button>",
     "</div>",
   ].join("\n");
 
