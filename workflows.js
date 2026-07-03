@@ -1052,7 +1052,7 @@ function closeResultModal() {
   if (overlay) overlay.hidden = true;
   document.body.style.overflow = "";
 }
-function openResultModal(markdown, slug) {
+function openResultModal(markdown, slug, cvJson) {
   let overlay = document.getElementById("wfResultModal");
   if (!overlay) {
     overlay = document.createElement("div");
@@ -1064,6 +1064,7 @@ function openResultModal(markdown, slug) {
         <div class="wf-modal-head">
           <h3 class="wf-modal-title">Result</h3>
           <div class="wf-modal-actions">
+            <button class="wf-result-btn" id="wfModalViewCv" type="button" hidden>View CV</button>
             <button class="wf-result-btn" id="wfModalCopy" type="button">Copy</button>
             <button class="wf-result-btn" id="wfModalDownload" type="button">Download .doc</button>
             <button class="wf-modal-close" id="wfModalClose" type="button" aria-label="Close">
@@ -1079,6 +1080,20 @@ function openResultModal(markdown, slug) {
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeResultModal(); });
   }
   document.getElementById("wfModalBody").innerHTML = renderMarkdown(markdown);
+  // Show the "View CV" button when this run produced a structured CV.
+  const viewCvBtn = document.getElementById("wfModalViewCv");
+  if (viewCvBtn) {
+    if (cvJson && window.FundlineCV) {
+      viewCvBtn.hidden = false;
+      viewCvBtn.onclick = () => {
+        const ok = window.FundlineCV.openCv(cvJson);
+        if (!ok) alert("Please allow pop-ups for this site to open your CV, then click again.");
+      };
+    } else {
+      viewCvBtn.hidden = true;
+      viewCvBtn.onclick = null;
+    }
+  }
   const copyBtn = document.getElementById("wfModalCopy");
   copyBtn.textContent = "Copy";
   copyBtn.onclick = () => {
@@ -1989,10 +2004,10 @@ function runWorkflow(slug, wf, opts) {
     const viewBtn = document.getElementById("wfViewResultBtn");
     if (viewBtn) {
       viewBtn.hidden = false;
-      viewBtn.onclick = () => openResultModal(output, slug);
+      viewBtn.onclick = () => openResultModal(output, slug, data.cvJson);
     }
     // Open the report immediately so the user sees it right away.
-    openResultModal(output, slug);
+    openResultModal(output, slug, data.cvJson);
 
     receiptEl.hidden = false;
     const steps = Array.isArray(data.steps) ? data.steps : [];
