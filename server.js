@@ -13,6 +13,8 @@ const tavilyClient = require("./tavily-client");
 const workflowDefs = require("./workflow-defs");
 const runEscrowClient = require("./run-escrow-client");
 const fundlineMemo = require("./memo-util");
+const gigSources = require("./gig-sources");
+const cvGig = require("./workflow-cvgig");
 
 const PORT = Number(process.env.PORT || 5190);
 const ROOT = __dirname;
@@ -33,6 +35,7 @@ const TELEGRAM_SESSION_DB_PATH = path.join(DATA_DIR, "telegram-sessions.json");
 const BATCH_DB_PATH = path.join(DATA_DIR, "batches.json");
 const WORKFLOW_USAGE_DB_PATH = path.join(DATA_DIR, "workflow-usage.json");
 const WORKFLOW_BUDGET_DB_PATH = path.join(DATA_DIR, "workflow-budget.json");
+const JSEARCH_USAGE_DB_PATH = path.join(DATA_DIR, "jsearch-usage.json");
 
 const AGENT_RATE_LIMIT_PER_MIN = Number(process.env.AGENT_RATE_LIMIT_PER_MIN || 60);
 const rateLimits = new Map();
@@ -92,6 +95,11 @@ const WORKFLOW_RATE_LIMIT_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env
 const V98STORE_API_KEY = String(process.env.V98STORE_API_KEY || "").trim();
 const V98STORE_BASE_URL = String(process.env.V98STORE_BASE_URL || "https://v98store.com/v1").trim();
 const V98STORE_GROUP_RATIO = Number(process.env.V98STORE_GROUP_RATIO || 1) || 1;
+// JSearch (OpenWeb Ninja) gig API for the CV + Gig Match workflow. On-demand only:
+// free sources (Freelancer.com + Hacker News) run every time; JSearch is a top-up
+// when the free two are thin, capped monthly to stay under the ~200/month plan.
+const JSEARCH_API_KEY = String(process.env.JSEARCH_API_KEY || "").trim();
+const JSEARCH_MONTHLY_CAP = Number(process.env.JSEARCH_MONTHLY_CAP || 180) || 180;
 const TAVILY_API_KEY = String(process.env.TAVILY_API_KEY || "").trim();
 const WORKFLOW_BUILD_PROMPT_MODEL = String(process.env.WORKFLOW_BUILD_PROMPT_MODEL || "gpt-4o-mini").trim();
 const WORKFLOW_RUNS_PER_IP_PER_DAY = Number(process.env.WORKFLOW_RUNS_PER_IP_PER_DAY || 10);
@@ -249,6 +257,21 @@ Object.entries(WORKFLOW_PRICE_OVERRIDES).forEach(([slug, p]) => {
   if (!def || !def.tiers) return;
   ["normal", "plus", "pro"].forEach((t) => { if (def.tiers[t] && p[t] != null) def.tiers[t].priceUnits = p[t]; });
 });
+
+// CV + Freelance Gig Match. type "cvgig" -> a custom executor (workflow-cvgig.js),
+// NOT the generic node-graph engine (it fetches real gigs from external APIs and
+// returns a structured cvJson). FAST = profile extract, STRONG = CV writer + gig
+// ranking. Prices set from a live measurement pass 2026-06-30 (real v98 cost
+// normal $0.004 / plus $0.007 / pro $0.030), rounded to clean monotonic USDC.
+WORKFLOW_RUN_DEFS["cv-gig-match"] = {
+  type: "cvgig",
+  name: "CV + Freelance Gig Match",
+  tiers: {
+    normal: { priceUnits: 20000, models: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2" } },
+    plus: { priceUnits: 30000, models: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini" } },
+    pro: { priceUnits: 60000, models: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6" } },
+  },
+};
 // Treasury hot key that signs release/refund (Fundline-controlled, matches
 // ARC_TREASURY_ADDRESS). Secret; read-only escrow verification works without it.
 const ARC_TREASURY_PRIVATE_KEY = String(process.env.ARC_TREASURY_PRIVATE_KEY || "").trim();
@@ -661,6 +684,35 @@ function workflowLimiterPaths() {
   return { usagePath: WORKFLOW_USAGE_DB_PATH, budgetPath: WORKFLOW_BUDGET_DB_PATH };
 }
 
+// JSearch monthly usage guard (~200/month plan). Free gig sources run every time;
+// JSearch is a top-up only while under the monthly cap. UTC month key.
+function jsearchMonthKey(nowMs) {
+  const d = new Date(nowMs || Date.now());
+  return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0");
+}
+function readJsearchUsage() {
+  try {
+    const o = JSON.parse(fs.readFileSync(JSEARCH_USAGE_DB_PATH, "utf8"));
+    if (o && typeof o === "object") return o;
+  } catch (_) {}
+  return { month: "", count: 0 };
+}
+function jsearchUnderCap() {
+  if (!JSEARCH_API_KEY) return false;
+  const u = readJsearchUsage();
+  if (u.month !== jsearchMonthKey()) return true;
+  return (u.count || 0) < JSEARCH_MONTHLY_CAP;
+}
+function bumpJsearchUsage() {
+  const month = jsearchMonthKey();
+  const u = readJsearchUsage();
+  const count = (u.month === month ? (u.count || 0) : 0) + 1;
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(JSEARCH_USAGE_DB_PATH, JSON.stringify({ month, count }));
+  } catch (e) { console.error("[Workflow] jsearch usage write:", e.message); }
+}
+
 // POST /api/workflows/:slug/build-prompt - turn a short description into a polished
 // prompt with one v98store call. Free, but has its own per-IP daily quota (genCount)
 // and still counts against the per-IP spend cap and the global daily budget.
@@ -786,7 +838,8 @@ async function handleWorkflowRun(req, res, slug) {
   }
   const def = WORKFLOW_RUN_DEFS[slug];
   const graph = workflowDefs.getGraph(slug);
-  if (!def || !graph) {
+  // cvgig has a custom executor and no node graph; every other slug needs a graph.
+  if (!def || (def.type !== "cvgig" && !graph)) {
     sendJson(res, 501, { error: "not_implemented", message: "This workflow is not available for live runs yet." });
     return;
   }
@@ -879,21 +932,44 @@ async function handleWorkflowRun(req, res, slug) {
   const searchWeb = (TAVILY_API_KEY && mode !== "paste")
     ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 5 }).then((r) => r.results)
     : null;
+  const callModel = (modelId, messages, maxTokens) =>
+    v98Client.callV98Chat(v98config, { model: modelId, messages, maxTokens })
+      .then((r) => ({ content: r.content, usage: r.usage }));
   try {
-    const result = await workflowEngine.runWorkflowGraph({
-      graph,
-      tierModels: tierDef.models,
-      input: query,
-      mode,
-      pastedSources,
-      searchWeb,
-      groupRatio: V98STORE_GROUP_RATIO,
-      today: new Date().toISOString().slice(0, 10),
-      callModel: (modelId, messages, maxTokens) =>
-        v98Client.callV98Chat(v98config, { model: modelId, messages, maxTokens })
-          .then((r) => ({ content: r.content, usage: r.usage })),
-      onProgress: (evt) => sendSSE("progress", evt),
-    });
+    let result;
+    if (def.type === "cvgig") {
+      result = await cvGig.runCvGigWorkflow({
+        input: query,
+        topGigs: 8,
+        remoteOnly: !!input.remoteOnly,
+        profileModel: tierDef.models.FAST,
+        cvModel: tierDef.models.STRONG,
+        rankModel: tierDef.models.STRONG,
+        groupRatio: V98STORE_GROUP_RATIO,
+        jsearchKey: JSEARCH_API_KEY,
+        jsearchAvailable: jsearchUnderCap(),
+        callModel,
+        fetchGigs: (o) => gigSources.fetchGigs(o),
+        onProgress: (evt) => sendSSE("progress", evt),
+      });
+      // Count a JSearch call toward the monthly cap only if it actually ran.
+      if (result.meta && result.meta.sourceCounts && ("JSearch" in result.meta.sourceCounts)) {
+        bumpJsearchUsage();
+      }
+    } else {
+      result = await workflowEngine.runWorkflowGraph({
+        graph,
+        tierModels: tierDef.models,
+        input: query,
+        mode,
+        pastedSources,
+        searchWeb,
+        groupRatio: V98STORE_GROUP_RATIO,
+        today: new Date().toISOString().slice(0, 10),
+        callModel,
+        onProgress: (evt) => sendSSE("progress", evt),
+      });
+    }
     // Record the real v98 cost (in micro-USD) for the rate-limit + budget caps.
     // This is OUR provider cost, separate from the USDC the user paid via escrow.
     workflowLimiter.recordCost({ ...paths, ipKey, costMicros: result.totalCostMicros });
@@ -917,6 +993,7 @@ async function handleWorkflowRun(req, res, slug) {
     sendSSE("result", {
       output: result.report,
       steps: result.steps,
+      cvJson: result.cvJson || null,
       costUsd: (result.totalCostMicros / 1000000).toFixed(6),
       releaseTx,
       memo: memoText,

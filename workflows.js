@@ -64,6 +64,66 @@ const WORKFLOWS = {
     examplePrompt: "Research Notion Inc for a partnership outreach call. We want to integrate our product with their API.",
     exampleOutput: "# Research Brief: Notion Inc\n\n**Intent:** Partnership outreach - API integration\n\n## Overview\n\nNotion is a productivity platform used by 35M+ users globally. Headquartered in San Francisco. Last round: Series C at $275M (2021).\n\n## Product Signals\n\n- Notion API launched 2021, now at v2. Active developer ecosystem.\n- Recent focus: Notion AI and enterprise SSO.\n- 3 open API positions on their jobs page.\n\n## Talking Points\n\n1. Reference their active API ecosystem as reason for outreach.\n2. Lead with use-case first: show what your integration solves for Notion users.\n3. Avoid cold pitch framing - lean into partnership benefits.\n\n## Recommended Angle\n\nEmail Head of Partnerships with a 3-sentence pitch, link to your integration demo, and a calendar link.",
   },
+  "cv-gig-match": {
+    name: "CV + Freelance Gig Match",
+    description: "Turn your background into a styled CV and a ranked list of real freelance gigs with proposal openers.",
+    longDesc: "Extracts your skills and profession, writes a polished CV you can save as PDF, then searches real gig sources (Freelancer.com, Hacker News, JSearch) and ranks the best matches with a short tailored proposal for each. Gigs are real listings with real links; Upwork and Fiverr are not included due to their API limits.",
+    category: "Freelance",
+    live: true,
+    usesRetrieval: false,
+    price: "0.02",
+    version: "v1.0.0",
+    runtime: "~70s",
+    modelCount: 2,
+    calls: 0,
+    inputLabel: "Your skills and experience",
+    inputHint: "Paste your background: skills, past work, notable projects, target role, and any portfolio or GitHub links.",
+    outputHint: "A styled CV (save as PDF) plus a ranked list of real freelance gigs with proposal openers.",
+    limits: { inputChars: 4000, outputWords: 2000 },
+    steps: [
+      { serverKey: "profile", name: "Profile analysis", model: "gpt-4o-mini", purpose: "Extract skills, profession, and search keywords.", tokens: "~200" },
+      { serverKey: "cv_writer", name: "CV writer", model: "deepseek-v3.2", purpose: "Write a structured CV from your facts (no fabrication).", tokens: "~1500" },
+      { serverKey: "gig_search", name: "Gig search", model: "Freelancer.com + HN", purpose: "Fetch real gigs matching your skills.", tokens: "~" },
+      { serverKey: "ranking", name: "Rank and proposals", model: "deepseek-v3.2", purpose: "Rank the real gigs and draft a proposal opener each.", tokens: "~1500" },
+    ],
+    tiers: {
+      normal: {
+        price: "0.02",
+        steps: [
+          { serverKey: "profile", name: "Profile analysis", model: "gpt-4o-mini", purpose: "Extract skills, profession, and search keywords.", tokens: "~200" },
+          { serverKey: "cv_writer", name: "CV writer", model: "deepseek-v3.2", purpose: "Write a structured CV from your facts (no fabrication).", tokens: "~1500" },
+          { serverKey: "gig_search", name: "Gig search", model: "Freelancer.com + HN", purpose: "Fetch real gigs matching your skills.", tokens: "~" },
+          { serverKey: "ranking", name: "Rank and proposals", model: "deepseek-v3.2", purpose: "Rank the real gigs and draft a proposal opener each.", tokens: "~1500" },
+        ],
+      },
+      plus: {
+        price: "0.03",
+        steps: [
+          { serverKey: "profile", name: "Profile analysis", model: "gpt-4o-mini", purpose: "Extract skills, profession, and search keywords.", tokens: "~200" },
+          { serverKey: "cv_writer", name: "CV writer", model: "gpt-4.1-mini", purpose: "Write a structured CV from your facts (no fabrication).", tokens: "~1500" },
+          { serverKey: "gig_search", name: "Gig search", model: "Freelancer.com + HN", purpose: "Fetch real gigs matching your skills.", tokens: "~" },
+          { serverKey: "ranking", name: "Rank and proposals", model: "gpt-4.1-mini", purpose: "Rank the real gigs and draft a proposal opener each.", tokens: "~1500" },
+        ],
+      },
+      pro: {
+        price: "0.06",
+        steps: [
+          { serverKey: "profile", name: "Profile analysis", model: "gpt-4.1-mini", purpose: "Extract skills, profession, and search keywords.", tokens: "~200" },
+          { serverKey: "cv_writer", name: "CV writer", model: "claude-sonnet-4-6", purpose: "Write a structured CV from your facts (no fabrication).", tokens: "~1500" },
+          { serverKey: "gig_search", name: "Gig search", model: "Freelancer.com + HN", purpose: "Fetch real gigs matching your skills.", tokens: "~" },
+          { serverKey: "ranking", name: "Rank and proposals", model: "claude-sonnet-4-6", purpose: "Rank the real gigs and draft a proposal opener each.", tokens: "~1500" },
+        ],
+      },
+    },
+    pricing: [
+      { step: "Profile analysis", model: "gpt-4o-mini", inputTokens: 300, outputTokens: 150, cost: "" },
+      { step: "CV writer", model: "gpt-4.1-mini", inputTokens: 800, outputTokens: 1200, cost: "" },
+      { step: "Gig search", model: "Freelancer.com + HN + JSearch", inputTokens: 0, outputTokens: 0, cost: "" },
+      { step: "Rank and proposals", model: "gpt-4.1-mini", inputTokens: 1500, outputTokens: 1200, cost: "" },
+    ],
+    examplePrompt: "Senior Solidity developer, 5 years. Built DEX and ERC-20 platforms. Skills: Solidity, Hardhat, React, TypeScript. Portfolio: github.com/example. Looking for remote smart-contract contracts.",
+    exampleOutput: "# CV and matched gigs\n\n## Your profile\n- Profession: Blockchain Developer (Senior)\n- Skills: Solidity, Hardhat, React, TypeScript\n\n## Your CV\nA styled CV is ready (template: modern). Use the View CV button to open it and save as PDF.\n\n## Matched gigs (8)\n\n### 1. Expert Solidity Contract Development  (92% fit)\n750 - 1500 USD | Remote | Freelancer.com\nLink: https://www.freelancer.com/projects/solidity/Expert-Solidity-Contract-Development\nWhy: Direct match on Solidity contract work at your seniority.\nProposal opener: I build production Solidity contracts and have shipped DEX and ERC-20 platforms...",
+  },
 };
 
 // ─── Live workflow catalog (graph-driven, server-backed) ───────────────────
@@ -1897,6 +1957,20 @@ function runWorkflow(slug, wf, opts) {
       ${data.releaseTx
       ? `<div class="wf-receipt-row"><span>Invoice memo tx</span><a class="wf-link wf-mono" href="${esc((WF_CONFIG.explorerBase || "https://testnet.arcscan.app") + "/tx/" + data.releaseTx)}" target="_blank" rel="noopener">${esc(data.releaseTx.slice(0, 10) + "…" + data.releaseTx.slice(-8))}</a></div>`
       : `<div class="wf-receipt-row"><span>Settlement</span><span class="wf-muted">Pending on-chain (Arc Testnet)</span></div>`}`;
+
+    // CV workflows return a structured cvJson; offer a styled CV to open + print as PDF.
+    if (data.cvJson && window.FundlineCV) {
+      const cvBtn = document.createElement("button");
+      cvBtn.type = "button";
+      cvBtn.className = "wf-btn-run";
+      cvBtn.style.marginTop = "12px";
+      cvBtn.textContent = "View CV (save as PDF)";
+      cvBtn.onclick = () => {
+        const ok = window.FundlineCV.openCv(data.cvJson);
+        if (!ok) alert("Please allow pop-ups for this site to open your CV, then click again.");
+      };
+      document.getElementById("wfReceiptBody").appendChild(cvBtn);
+    }
 
     if (quotaEl && data.remaining != null) {
       quotaEl.hidden = false;

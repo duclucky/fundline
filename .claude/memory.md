@@ -7,6 +7,47 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Latest work (read first)
 
+- 2026-06-30: NEW WORKFLOW "CV + Freelance Gig Match" (slug cv-gig-match) BUILT v1, NOT pushed,
+  NOT live-tested. Spec: `.claude/workflow-cv-gigmatch-spec.md`. This is the FIRST workflow with a
+  CUSTOM executor (not the generic node-graph engine) because it fetches real gigs from external
+  APIs and returns a structured cvJson. New files: `gig-sources.js` (3 gig APIs -> one normalized
+  shape: Freelancer.com [free,no auth,PRIMARY] + Hacker News Algolia [free] + JSearch/OpenWeb
+  Ninja [key ak_..., ON-DEMAND, ~200/mo cap]; injected getJson for tests; merge/dedupe; a failing
+  source is skipped not fatal), `workflow-cvgig.js` (executor: profile extract [FAST] -> deterministic
+  template select -> CV JSON [STRONG, retry once on bad JSON, minimal fallback] -> gig fetch [free
+  first; JSearch top-up only when free <5 AND under cap] -> rank+proposal [STRONG]; injected
+  callModel+fetchGigs; returns {report,cvJson,gigs,steps,totalCostMicros,meta}), `cv-render.js`
+  (BROWSER: builds self-contained styled HTML CV from cvJson + opens print-ready tab -> Ctrl/Cmd+P
+  Save as PDF; 2 CSS templates classic/modern; window.FundlineCV.openCv/buildHtml). DECISION: CV is
+  HTML/CSS+print (design quality, like Reactive Resume), NOT the invoice hand-rolled PDF primitives
+  (user wanted "dep, co gu"); invoice PDF path untouched. server.js: WORKFLOW_RUN_DEFS["cv-gig-match"]
+  = {type:"cvgig", name, tiers normal/plus/pro 20000/30000/60000 (0.02/0.03/0.06 USDC) = MEASURED
+  live 2026-06-30 (real v98 cost normal $0.0041 deepseek-v3.2 / plus $0.0073 gpt-4.1-mini / pro
+  $0.0303 claude-sonnet-4-6; models differentiated per tier), monotonic}; handleWorkflowRun branches on def.type==="cvgig" (relaxed the
+  !graph 501 check for it) -> cvGig.runCvGigWorkflow, else the engine; SSE result now carries cvJson;
+  JSEARCH_API_KEY + JSEARCH_MONTHLY_CAP(180) env + data/jsearch-usage.json monthly counter
+  (jsearchUnderCap/bumpJsearchUsage, bumped only when JSearch actually ran). workflows.js: WORKFLOWS
+  ["cv-gig-match"] live entry (category Freelance, usesRetrieval false, 4 steps serverKeys
+  profile/cv_writer/gig_search/ranking matching executor onProgress); showRunResult appends a
+  "View CV (save as PDF)" button when data.cvJson present -> FundlineCV.openCv. workflows.html loads
+  /cv-render.js before workflows.js (static server serves any ROOT file by ext, FTP includes new .js).
+  EXCLUDED sources (say so in UI): Upwork/Fiverr/Facebook/LinkedIn (API limits). Grok/X = phase 2
+  (xAI direct, NOT v98; $25/1000 X sources; deferred). Adzuna = documented 4th-source fallback (key
+  app_id c9bb89bc already available). VERIFIED OFFLINE: node --check all; test_gig_sources.js 21/21 +
+  test_workflow_cvgig.js 27/27 (new); server requires clean; frontend catalog builds 27 in vm sandbox
+  (cv-gig-match live, steps + tier prices correct); no regression I caused (v98_cost 5-fail +
+  research 1-fail are PRE-EXISTING, v98-models.js/workflow-research.js untouched - confirmed via git).
+  LIVE MEASURED 2026-06-30 via measure-cvgig.js (real v98 + real gig APIs, all 3 tiers ran clean;
+  free sources Freelancer.com 15 + HN 15 = 30 gigs so JSearch on-demand NOT triggered = quota saved;
+  normal deepseek returned only 3 ranked gigs vs 8 for plus/pro = acceptable cheap-tier quality; cv
+  name was "" only because the test input had no name = no-fabrication rule working). STILL TODO
+  before ship: (1) OPTIONAL on-chain e2e (quote->fund->run->release) - generic billing already proven
+  by test_billing_e2e_dryrun.js so not strictly needed; (2) confirm JSearch real monthly quota on
+  dashboard; (3) predeploy-check; (4) cPanel env add JSEARCH_API_KEY (+ optional JSEARCH_MONTHLY_CAP)
+  then restart. measure-cvgig.js kept in repo (scratch, no secret; JSearch key passed via env at run). Templates: v1 = classic + modern only (technical
+  deferred). API keys the user pasted in chat (JSearch ak_ukm..., Adzuna app_id c9bb89bc + key
+  4a5b...) SHOULD be rotated (exposed in chat) and set in cPanel env, never committed.
+
 - 2026-06-29: WORKFLOW LIBRARY = 15 workflows on a GENERIC ENGINE (committed local df4d3d0 +
   775584f + a0611e0, NOT pushed). Replaced the single hardcoded research chain with a
   data-driven node-graph engine so new workflows are CONFIG, not new server branches. New
