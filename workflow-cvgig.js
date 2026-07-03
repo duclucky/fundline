@@ -206,13 +206,16 @@ function buildReport(profile, cvJson, ranked, meta) {
     lines.push("No gigs matched your skills right now. Try broader keywords or run again later.");
   }
   ranked.forEach((g, i) => {
+    // Blank lines between each field so the renderer shows them on separate lines
+    // (single newlines collapse into one paragraph). The link is a real markdown
+    // link so it is clickable and opens in a new tab.
     lines.push("");
-    lines.push(`### ${i + 1}. ${g.title}${g.fit ? "  (" + g.fit + "% fit)" : ""}`);
-    const meta2 = [g.org, g.budget, g.location, g.source].filter(Boolean).join(" | ");
-    if (meta2) lines.push(meta2);
-    if (g.url) lines.push(`Link: ${g.url}`);
-    if (g.reason) lines.push(`Why: ${g.reason}`);
-    if (g.proposal) lines.push(`Proposal opener: ${g.proposal}`);
+    lines.push(`### ${i + 1}. ${g.title}${g.fit ? " (" + g.fit + "% fit)" : ""}`);
+    const meta2 = [g.org, g.budget, g.location, g.source].filter(Boolean).join(", ");
+    if (meta2) { lines.push(""); lines.push(meta2); }
+    if (g.url) { lines.push(""); lines.push(`**Link:** [${g.url}](${g.url})`); }
+    if (g.reason) { lines.push(""); lines.push(`**Why:** ${g.reason}`); }
+    if (g.proposal) { lines.push(""); lines.push(`**Proposal opener:** ${g.proposal}`); }
   });
   if (meta && meta.dropped) {
     lines.push("");
