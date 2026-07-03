@@ -137,7 +137,7 @@
     "    <button class=\"act ghost\" id=\"rmphoto\" type=\"button\" hidden>Remove photo</button>",
     "  </div>",
     "  <span class=\"hint\" style=\"margin-left:auto\">Tip: in the dialog pick \"Save as PDF\" and click Print</span>",
-    "  <button class=\"act\" id=\"save\" type=\"button\">Save as PDF</button>",
+    "  <button class=\"act\" id=\"save\" type=\"button\">Print PDF to Your Computer</button>",
     "</div>",
   ].join("\n");
 
