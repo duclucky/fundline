@@ -2973,6 +2973,10 @@ a.nav-item {
 
 .wf-run-mode-panel { display: flex; flex-direction: column; gap: 8px; }
 
+.wf-fields-form { display: flex; flex-direction: column; gap: 14px; }
+.wf-run-field { display: flex; flex-direction: column; gap: 6px; }
+.wf-field-req { color: var(--red); font-weight: 700; }
+
 .wf-run-label {
   font-size: 12px;
   font-weight: 700;

@@ -80,6 +80,22 @@ const WORKFLOWS = {
     inputHint: "Paste your background: skills, past work, notable projects, target role, and any portfolio or GitHub links.",
     outputHint: "A styled CV (save as PDF) plus a ranked list of real freelance gigs with proposal openers.",
     limits: { inputChars: 4000, outputWords: 2000 },
+    // A structured form instead of one free-text box, so each field maps cleanly
+    // to the CV and the model extracts each one accurately.
+    fields: [
+      { key: "name", label: "Full name", type: "text", required: true, placeholder: "Jane Doe" },
+      { key: "title", label: "Professional title / target role", type: "text", required: true, placeholder: "Senior Solidity Developer" },
+      { key: "email", label: "Email", type: "text", placeholder: "jane@example.com" },
+      { key: "location", label: "Location", type: "text", placeholder: "Remote (GMT+7)" },
+      { key: "links", label: "Portfolio / GitHub / LinkedIn", type: "textarea", rows: 2, placeholder: "github.com/jane, jane.dev" },
+      { key: "skills", label: "Skills", type: "textarea", rows: 2, required: true, placeholder: "Solidity, Hardhat, React, TypeScript" },
+      { key: "experience", label: "Work experience", type: "textarea", rows: 4, required: true, placeholder: "Role, company, dates, what you did (one per line)" },
+      { key: "projects", label: "Notable projects", type: "textarea", rows: 3, placeholder: "Project name - what it does - link" },
+      { key: "education", label: "Education", type: "textarea", rows: 2, placeholder: "Degree, school, years" },
+      { key: "certifications", label: "Certifications", type: "textarea", rows: 2, placeholder: "Name, issuer, year (optional)" },
+      { key: "languages", label: "Languages", type: "text", placeholder: "English (fluent), Vietnamese (native)" },
+      { key: "lookingFor", label: "What gigs are you looking for?", type: "textarea", rows: 2, required: true, placeholder: "e.g. remote smart-contract audit and development contracts" },
+    ],
     steps: [
       { serverKey: "profile", name: "Profile analysis", model: "gpt-4o-mini", purpose: "Extract skills, profession, and search keywords.", tokens: "~200" },
       { serverKey: "cv_writer", name: "CV writer", model: "deepseek-v3.2", purpose: "Write a structured CV from your facts (no fabrication).", tokens: "~1500" },
@@ -1512,11 +1528,21 @@ function renderRunPanel(slug, wf) {
       <button class="wf-tier-btn" data-tier="pro" type="button">Pro</button>
     </div>` : `<h3>Run this workflow</h3>`;
 
-  return `
-    <div class="wf-run-header">
-      ${tierSelector}
-      <div class="wf-run-price-tag" id="wfPriceTag">${esc(initPrice)} USDC / run</div>
-    </div>
+  // Structured form (per-field) for workflows that declare wf.fields; otherwise
+  // the default write/generate prompt panels.
+  const fieldsHtml = wf.fields ? `
+    <div id="wfFieldsForm" class="wf-fields-form">
+      <p class="wf-run-hint wf-muted">${esc(wf.inputHint)}</p>
+      ${wf.fields.map((f) => {
+        const req = f.required ? ` <span class="wf-field-req">*</span>` : "";
+        const ph = esc(f.placeholder || "");
+        const ctrl = f.type === "textarea"
+          ? `<textarea id="wff_${esc(f.key)}" class="wf-run-textarea" rows="${f.rows || 2}" placeholder="${ph}"></textarea>`
+          : `<input type="text" id="wff_${esc(f.key)}" class="wf-run-textarea" placeholder="${ph}" />`;
+        return `<div class="wf-run-field"><label class="wf-run-label" for="wff_${esc(f.key)}">${esc(f.label)}${req}</label>${ctrl}</div>`;
+      }).join("")}
+    </div>` : "";
+  const inputSection = wf.fields ? fieldsHtml : `
     <div class="wf-run-modes" id="wfInputModes" role="group" aria-label="Input mode">
       <button class="wf-run-mode-btn is-active" data-mode="own" type="button">Write prompt</button>
       <button class="wf-run-mode-btn" data-mode="build" type="button">Generate prompt</button>
@@ -1536,7 +1562,14 @@ function renderRunPanel(slug, wf) {
         <label class="wf-run-label" for="wfGenPromptEdit" style="margin-top:14px">Generated prompt (editable)</label>
         <textarea id="wfGenPromptEdit" class="wf-run-textarea" rows="5"></textarea>
       </div>
+    </div>`;
+
+  return `
+    <div class="wf-run-header">
+      ${tierSelector}
+      <div class="wf-run-price-tag" id="wfPriceTag">${esc(initPrice)} USDC / run</div>
     </div>
+    ${inputSection}
 
     ${retrieval}
 
@@ -1644,15 +1677,17 @@ function bindDetail(slug, wf) {
       q.textContent = text;
     }
 
-    // Input mode toggle (write vs generate)
+    // Input mode toggle (write vs generate). Absent for form-based workflows.
     const inputModes = document.getElementById("wfInputModes");
-    inputModes.addEventListener("click", (e) => {
-      const btn = e.target.closest(".wf-run-mode-btn");
-      if (!btn) return;
-      inputModes.querySelectorAll(".wf-run-mode-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
-      document.getElementById("wfModeOwn").hidden = btn.dataset.mode !== "own";
-      document.getElementById("wfModeBuild").hidden = btn.dataset.mode !== "build";
-    });
+    if (inputModes) {
+      inputModes.addEventListener("click", (e) => {
+        const btn = e.target.closest(".wf-run-mode-btn");
+        if (!btn) return;
+        inputModes.querySelectorAll(".wf-run-mode-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
+        document.getElementById("wfModeOwn").hidden = btn.dataset.mode !== "own";
+        document.getElementById("wfModeBuild").hidden = btn.dataset.mode !== "build";
+      });
+    }
 
     // Retrieval toggle (search the web vs paste sources)
     const retrModes = document.getElementById("wfRetrModes");
@@ -1666,8 +1701,9 @@ function bindDetail(slug, wf) {
       });
     }
 
-    // Generate prompt (real call to /build-prompt)
-    document.getElementById("wfGenPrompt").addEventListener("click", () => {
+    // Generate prompt (real call to /build-prompt). Absent for form-based workflows.
+    const genPromptBtn = document.getElementById("wfGenPrompt");
+    if (genPromptBtn) genPromptBtn.addEventListener("click", () => {
       const descEl = document.getElementById("wfBuildDesc");
       const desc = descEl.value.trim();
       if (!desc) { flashOutline(descEl); return; }
@@ -1699,17 +1735,31 @@ function bindDetail(slug, wf) {
 
     // Run workflow (real call to /run)
     document.getElementById("wfRunBtn").addEventListener("click", () => {
-      const mode = inputModes.querySelector(".wf-run-mode-btn.is-active").dataset.mode;
       let prompt = "";
-      if (mode === "own") {
-        prompt = document.getElementById("wfOwnPrompt").value.trim();
+      if (wf.fields) {
+        // Gather the structured form into labeled lines so the model maps each field.
+        const parts = [];
+        let missing = null;
+        wf.fields.forEach((f) => {
+          const fel = document.getElementById("wff_" + f.key);
+          const val = fel && fel.value ? fel.value.trim() : "";
+          if (f.required && !val && !missing) missing = fel;
+          if (val) parts.push(f.label + ": " + val);
+        });
+        if (missing) { flashOutline(missing); return; }
+        prompt = parts.join("\n");
       } else {
-        const edit = document.getElementById("wfGenPromptEdit");
-        prompt = edit.value.trim() || document.getElementById("wfBuildDesc").value.trim();
-      }
-      if (!prompt) {
-        flashOutline(mode === "own" ? document.getElementById("wfOwnPrompt") : document.getElementById("wfBuildDesc"));
-        return;
+        const mode = inputModes.querySelector(".wf-run-mode-btn.is-active").dataset.mode;
+        if (mode === "own") {
+          prompt = document.getElementById("wfOwnPrompt").value.trim();
+        } else {
+          const edit = document.getElementById("wfGenPromptEdit");
+          prompt = edit.value.trim() || document.getElementById("wfBuildDesc").value.trim();
+        }
+        if (!prompt) {
+          flashOutline(mode === "own" ? document.getElementById("wfOwnPrompt") : document.getElementById("wfBuildDesc"));
+          return;
+        }
       }
       let sources = null;
       if (retrievalMode === "paste") {
