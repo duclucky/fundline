@@ -7,6 +7,32 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Latest work (read first)
 
+- 2026-07: AGENT DISCOVERY + MCP SERVER + rate-limit hardening (all pushed to main, commits
+  0e5ba55 discovery, ffdd52c keyword search, ee09f5f limits, a93a541 MCP). Continues the Agent API.
+  (1) NEW public endpoint GET /api/workflows[?q=keyword] (handleWorkflowList, gated on
+  WORKFLOW_RATE_LIMIT_ENABLED, GET only) = discovery menu: [{slug, name, tiers:{normal/plus/pro:
+  {units,usdc}}}] + billingEnabled/chainId/usdc; ?q= filters slug+name case-insensitive. So an
+  agent can search/choose a workflow, not be handed a fixed slug. (2) RATE-LIMIT SECURITY FIX
+  (user caught it): per-key spend cap was $10/day == the global $10 budget, so ONE key (paying free
+  testnet USDC in beta while v98 cost is real USD) could drain the shared global budget and DoS
+  everyone. Lowered per-key defaults WELL BELOW global: WORKFLOW_KEY_RUNS_PER_DAY 500->100,
+  WORKFLOW_KEY_SPEND_PER_DAY_USD 10->2 (so ~5 wallet-signed keys needed to approach the $10 global;
+  same cap applies to x402 payers keyed on "x402:"+payer). Root cause is beta=testnet (free spam);
+  mainnet real USDC makes runs self-funding. All tunable via env (.env.example documents the KEY vars).
+  (3) MCP SERVER for autonomous agents (Hermes Agent, OpenClaw, Claude Desktop, Cursor all use MCP):
+  examples/mcp-server/fundline-mcp.js exposes tools list_workflows / run_workflow / wallet_info over
+  stdio (low-level @modelcontextprotocol/sdk API, no zod). run_workflow does discover->pay->run and
+  returns the output. Shared discover/pay/run logic factored into examples/fundline-agent-core.js
+  (initCircle/listWorkflows/getConfig/runEscrow/runX402/payAndRun/getWalletAddress/getUsdcBalance);
+  circle-agent-demo.js refactored to use it (DRY). Non-custodial: operator's Circle + Fundline keys
+  live in the MCP server's OWN env (their machine); Fundline never sees them. MCP + Circle SDKs are
+  integration-only deps (npm i in examples/mcp-server/), NOT added to the app package.json (app stays
+  buildless). examples/README documents MCP setup + a Claude Desktop mcpServers config block.
+  Two compatibility levels: (L1) plain HTTP + Bearer/X-API-Key works with ANY framework today;
+  (L2) MCP = plug-and-play for MCP clients. VERIFIED: node --check all; core requires clean (dynamic
+  imports so Circle SDK not needed until initCircle); no em dash/emoji/secret. NOT tested live (needs
+  Circle creds + funded wallet + server billing on).
+
 - 2026-07 (approx): AGENT API v1 built. Spec `.claude/agent-api-spec.md`. Lets an AI agent
   (headless + own Arc wallet) create invoices and run workflows via HTTP with an API key. Decision:
   workflow-run payment = ESCROW-FUND HEADLESS (agent funds its own per-run escrow from its own wallet
