@@ -115,11 +115,14 @@ const WORKFLOW_LIMITS = {
   spendCapMicros: Math.round(WORKFLOW_SPEND_PER_IP_PER_DAY_USD * 1000000),
   dailyBudgetMicros: Math.round(WORKFLOW_DAILY_BUDGET_USD * 1000000),
 };
-// Per-API-key limits for authenticated agent runs. Runs are escrow-funded (paid), so
-// the per-key run count is high; the global daily v98 budget backstop still applies
-// (beta bills testnet USDC but the v98 provider cost is real USD).
-const WORKFLOW_KEY_RUNS_PER_DAY = Number(process.env.WORKFLOW_KEY_RUNS_PER_DAY || 500);
-const WORKFLOW_KEY_SPEND_PER_DAY_USD = Number(process.env.WORKFLOW_KEY_SPEND_PER_DAY_USD || 10);
+// Per-API-key limits for authenticated agent runs. In beta the run is paid in
+// TESTNET USDC (no real cost to the caller) while the v98 provider cost is real USD,
+// so a single key must NOT be able to drain the shared global daily budget. The
+// per-key spend cap is therefore set WELL BELOW WORKFLOW_DAILY_BUDGET_USD (it takes
+// several distinct keys, each a wallet-signed mint, to approach the global cap). On
+// mainnet, real USDC payment makes runs self-funding and these can be raised.
+const WORKFLOW_KEY_RUNS_PER_DAY = Number(process.env.WORKFLOW_KEY_RUNS_PER_DAY || 100);
+const WORKFLOW_KEY_SPEND_PER_DAY_USD = Number(process.env.WORKFLOW_KEY_SPEND_PER_DAY_USD || 2);
 const WORKFLOW_KEY_LIMITS = {
   runsPerDay: WORKFLOW_KEY_RUNS_PER_DAY,
   gensPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
