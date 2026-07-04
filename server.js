@@ -539,6 +539,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/mcp") {
+    handleMcp(req, res);
+    return;
+  }
+
   const wfQuoteMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/quote$/i);
   if (wfQuoteMatch) {
     handleWorkflowQuote(req, res, wfQuoteMatch[1]);
@@ -849,6 +854,131 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
     workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "gen" });
     console.error("[Workflow] build-prompt error:", error.message);
     sendJson(res, 502, { error: "provider_error", message: "Could not generate a prompt right now." });
+  }
+}
+
+// Remote MCP (Model Context Protocol) at POST /mcp. An MCP client (Claude, Cursor,
+// Hermes Agent, OpenClaw) connects by URL + a Fundline API key and can discover +
+// run workflows. Payment is the agent's OWN wallet via x402 (Fundline holds no agent
+// funds). Tool handlers call this server's own HTTP endpoints in process, forwarding
+// the caller's API key. See .claude/remote-mcp-spec.md.
+const MCP_TOOLS = [
+  {
+    name: "list_workflows",
+    description: "Discover Fundline workflows and their per-run USDC price. Optional keyword search on slug or name.",
+    inputSchema: { type: "object", properties: { query: { type: "string", description: "Optional keyword filter (e.g. 'research')." } } },
+  },
+  {
+    name: "run_workflow",
+    description: "Run a Fundline workflow and return its output. Pay-per-call via x402: call with no payment to get the price and treasury address, transfer the USDC from your own wallet, then call again with payment={payerWallet,txHash}.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Workflow slug from list_workflows." },
+        tier: { type: "string", enum: ["normal", "plus", "pro"], description: "Quality/price tier. Default normal." },
+        prompt: { type: "string", description: "The workflow input." },
+        payment: {
+          type: "object",
+          description: "x402 payment proof after you transferred USDC to the treasury.",
+          properties: { payerWallet: { type: "string" }, txHash: { type: "string" } },
+        },
+      },
+      required: ["slug", "prompt"],
+    },
+  },
+];
+
+async function handleMcp(req, res) {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED) { sendJson(res, 404, { error: "Not found" }); return; }
+  if (req.method === "GET") {
+    sendJson(res, 200, {
+      name: "fundline", transport: "streamable-http",
+      tools: MCP_TOOLS.map((t) => t.name),
+      note: "POST JSON-RPC (MCP) with header Authorization: Bearer <Fundline API key>.",
+    });
+    return;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const auth = optionalAgentApiKey(req);
+  if (!auth.present || !auth.ok) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Provide a valid Fundline API key (Authorization: Bearer)." } });
+    return;
+  }
+
+  let Server;
+  let StreamableHTTPServerTransport;
+  let ListToolsRequestSchema;
+  let CallToolRequestSchema;
+  try {
+    ({ Server } = require("@modelcontextprotocol/sdk/server/index.js"));
+    ({ StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js"));
+    ({ ListToolsRequestSchema, CallToolRequestSchema } = require("@modelcontextprotocol/sdk/types.js"));
+  } catch (error) {
+    console.error("[MCP] SDK not installed:", error.message);
+    sendJson(res, 503, { error: "mcp_unavailable", message: "MCP is not available on this server." });
+    return;
+  }
+
+  let body;
+  try { body = await readJsonBody(req); } catch (_) { body = undefined; }
+
+  const selfBase = "http://127.0.0.1:" + PORT;
+  const authHeader = String(req.headers.authorization || "");
+  const apiKeyHeader = String(req.headers["x-api-key"] || "");
+  function fwdHeaders() {
+    const h = { "Content-Type": "application/json", "Accept": "application/json" };
+    if (authHeader) h.Authorization = authHeader; else if (apiKeyHeader) h["X-API-Key"] = apiKeyHeader;
+    return h;
+  }
+
+  const mcp = new Server({ name: "fundline", version: "1.0.0" }, { capabilities: { tools: {} } });
+  mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: MCP_TOOLS }));
+  mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const name = request.params.name;
+    const args = request.params.arguments || {};
+    try {
+      if (name === "list_workflows") {
+        const r = await fetch(selfBase + "/api/workflows" + (args.query ? "?q=" + encodeURIComponent(args.query) : ""));
+        const j = await r.json();
+        const list = (j.workflows || []).map((w) => "- " + w.slug + " (" + w.name + ") from " + (w.tiers && w.tiers.normal ? w.tiers.normal.usdc : "?") + " USDC").join("\n");
+        return { content: [{ type: "text", text: (j.workflows || []).length + " workflows:\n" + list }] };
+      }
+      if (name === "run_workflow") {
+        if (!args.slug || !args.prompt) throw new Error("slug and prompt are required");
+        const headers = fwdHeaders();
+        if (args.payment && args.payment.txHash) {
+          headers["X-PAYMENT"] = Buffer.from(JSON.stringify({ payerWallet: args.payment.payerWallet, txHash: args.payment.txHash })).toString("base64");
+        }
+        const r = await fetch(selfBase + "/api/workflows/" + encodeURIComponent(args.slug) + "/run", {
+          method: "POST", headers, body: JSON.stringify({ tier: args.tier || "normal", prompt: args.prompt }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.status === 402 && j.accepts) {
+          const q = j.accepts[0];
+          return { content: [{ type: "text", text: "Payment required: transfer " + q.maxAmountRequired + " USDC (base units) to " + q.payTo + " on " + q.network + " from your wallet, then call run_workflow again with payment={payerWallet, txHash}." }] };
+        }
+        if (r.status !== 200) {
+          return { content: [{ type: "text", text: "Run failed: " + (j.message || j.error || r.status) }], isError: true };
+        }
+        return { content: [{ type: "text", text: "Charged v98 " + j.costUsd + " USD; settlement " + (j.releaseTx || "(none)") + ".\n\n" + String(j.output || "") }] };
+      }
+      throw new Error("Unknown tool: " + name);
+    } catch (error) {
+      return { content: [{ type: "text", text: "Error: " + error.message }], isError: true };
+    }
+  });
+
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  res.on("close", () => { try { transport.close(); } catch (_) {} try { mcp.close(); } catch (_) {} });
+  try {
+    await mcp.connect(transport);
+    await transport.handleRequest(req, res, body);
+  } catch (error) {
+    console.error("[MCP] handler error:", error.message);
+    if (!res.headersSent) sendJson(res, 500, { error: "mcp_error", message: "MCP request failed." });
   }
 }
 

@@ -7,6 +7,31 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Latest work (read first)
 
+- 2026-07: REMOTE MCP SERVER hosted at POST /mcp (spec .claude/remote-mcp-spec.md; NOT pushed at
+  time of writing - check git). User chose: host remote MCP (URL + API key), x402 payment (agent's
+  OWN wallet), and transport T2 = the OFFICIAL @modelcontextprotocol/sdk (added as an APP dependency,
+  ^1.29.0 - a deliberate deviation from the buildless/no-dep principle, user accepted; it is
+  Anthropic's official MCP SDK, MIT, CJS-requireable). server.js: route POST/GET /mcp -> handleMcp;
+  auth via optionalAgentApiKey (Bearer/X-API-Key required); LAZY require of the SDK inside the handler
+  wrapped in try/catch -> 503 if the dep is not installed (so the site stays up on cPanel until
+  `npm install` runs there). Uses the low-level Server + StreamableHTTPServerTransport in STATELESS
+  mode ({sessionIdGenerator: undefined, enableJsonResponse: true}) - VERIFIED live locally that
+  initialize / tools/list / tools/call all work statelessly (no session needed) returning JSON. Two
+  MCP tools: list_workflows({query}) and run_workflow({slug,tier,prompt,payment?}). Tool handlers call
+  THIS server's own endpoints in-process via fetch to http://127.0.0.1:PORT (/api/workflows and /run),
+  forwarding the caller's API key header; run_workflow with no payment returns the x402 402 quote as
+  a "pay then call again" text, with payment={payerWallet,txHash} sends X-PAYMENT and returns output.
+  Non-custodial: no wallet server-side; agent pays from its own wallet. LOCAL TEST PASSED: initialize
+  -> capabilities; tools/list -> 2 tools; tools/call list_workflows?q=research -> 3 workflows;
+  no-auth -> 401. npm audit: `npm audit fix` (non-force) applied (fixed ws high); 2 remaining
+  (tmp/solc, offline-only, fixing needs --force which downgrades solc = skip). DEPLOY IMPACT: (1) CI
+  `npm ci` now installs the SDK (package.json + package-lock committed, in sync); (2) node_modules is
+  FTP-excluded so cPanel needs `npm install` on the Node app + restart to get the SDK (else /mcp -> 503,
+  rest of site fine). docs.html #agent-api got a "Remote MCP server" section (client config + x402
+  note + mcp-remote bridge caveat). NOT tested against real MCP clients (Claude Desktop/Hermes/OpenClaw)
+  or a real x402 run yet. examples/mcp-server/fundline-mcp.js (the earlier LOCAL stdio MCP) still exists
+  as the local-install alternative.
+
 - 2026-07: AGENT DISCOVERY + MCP SERVER + rate-limit hardening (all pushed to main, commits
   0e5ba55 discovery, ffdd52c keyword search, ee09f5f limits, a93a541 MCP). Continues the Agent API.
   (1) NEW public endpoint GET /api/workflows[?q=keyword] (handleWorkflowList, gated on

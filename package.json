@@ -10,6 +10,7 @@
     "deploy:batch-router": "node scripts/deploy-batch-router.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "acorn": "^8.17.0",
     "ethers": "^6.16.0",
     "solc": "^0.8.30"

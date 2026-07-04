@@ -615,6 +615,30 @@ curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
   -d '{ "tier": "normal", "prompt": "Research Acme Labs" }'
 # -> 200 { "output": "...", "releaseTx": "0xYourTransferTx", ... }</code></pre>
           </div>
+
+          <h3>Remote MCP server</h3>
+          <p>
+            Fundline also speaks the Model Context Protocol at <code>POST /mcp</code>, so an MCP
+            client (Claude, Cursor, and autonomous agents like Hermes Agent or OpenClaw) can connect
+            by URL and use Fundline workflows as tools. Authenticate with your API key; pay per run
+            from your own wallet via x402 (Fundline holds no funds). Tools: <code>list_workflows</code>
+            and <code>run_workflow</code>.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>MCP client config</span><button data-copy="#mcp-config" type="button">Copy</button></div>
+            <pre id="mcp-config"><code>{
+  "fundline": {
+    "url": "https://fundline.xyz/mcp",
+    "headers": { "Authorization": "Bearer $FUNDLINE_API_KEY" }
+  }
+}</code></pre>
+          </div>
+          <p>
+            The agent calls <code>run_workflow</code> with no payment to get the price and treasury
+            address, transfers the USDC from its own wallet, then calls again with
+            <code>payment</code> (payer wallet + tx hash). Some clients reach remote MCP servers
+            through a local bridge such as <code>mcp-remote</code>.
+          </p>
         </section>
 
         <section class="doc-section" id="webhooks">
