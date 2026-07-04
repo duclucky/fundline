@@ -978,7 +978,9 @@ async function handleMcp(req, res) {
   let body;
   try { body = await readJsonBody(req); } catch (_) { body = undefined; }
 
-  const selfBase = "http://127.0.0.1:" + PORT;
+  // Self-call the public base, not 127.0.0.1:PORT: under Passenger the app runs on a
+  // socket, so the local TCP port is not reachable from within the process.
+  const selfBase = getRequestBaseUrl(req);
   const authHeader = String(req.headers.authorization || "");
   const apiKeyHeader = String(req.headers["x-api-key"] || "");
   function fwdHeaders() {
