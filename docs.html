@@ -3,12 +3,47 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Fundline Documentation</title>
+    <title>Fundline Docs: USDC Invoices, AI Workflows, and the Agent API</title>
+    <meta name="description" content="Fundline documentation: create USDC invoices on Arc, run AI workflows (research, proposals, CV and gig matching, SEO, crypto), and integrate AI agents via the HTTP API and MCP with x402 pay-per-call." />
+    <link rel="canonical" href="https://fundline.xyz/docs" />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM and AI agent guide" />
     <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta property="og:title" content="Fundline Docs: USDC Invoices, AI Workflows, and the Agent API" />
+    <meta property="og:description" content="Create USDC invoices, run AI workflows, and integrate AI agents via API and MCP with x402 pay-per-call on Arc." />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="https://fundline.xyz/docs" />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Fundline Docs: USDC Invoices, AI Workflows, and the Agent API" />
+    <meta name="twitter:description" content="Create USDC invoices, run AI workflows, and integrate AI agents via API and MCP with x402 on Arc." />
+    <meta name="twitter:image" content="/og-image.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/docs.css" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        { "@type": "TechArticle", "headline": "Fundline documentation", "description": "How to create USDC invoices, run AI workflows, and integrate AI agents with Fundline via the HTTP API and MCP with x402 payments on Arc.", "url": "https://fundline.xyz/docs", "inLanguage": "en", "author": { "@type": "Organization", "name": "Fundline", "url": "https://fundline.xyz" } },
+        { "@type": "BreadcrumbList", "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Fundline", "item": "https://fundline.xyz/" },
+          { "@type": "ListItem", "position": 2, "name": "Docs", "item": "https://fundline.xyz/docs" }
+        ]},
+        { "@type": "FAQPage", "mainEntity": [
+          { "@type": "Question", "name": "What is Fundline?", "acceptedAnswer": { "@type": "Answer", "text": "Fundline is a non-custodial layer on the Arc blockchain that turns a USDC transfer into a trusted business event. You can create invoices and get paid in USDC, run AI workflows to do the work, and pay teams, all wallet to wallet with on-chain proof. AI agents can discover and run workflows too, paying per run." } },
+          { "@type": "Question", "name": "How do I create a USDC invoice?", "acceptedAnswer": { "@type": "Answer", "text": "Connect your wallet, add your line items and client details, and share the pay link. Your client pays in USDC on Arc and the payment is verified on-chain. Creating an invoice is free and Fundline never holds the funds." } },
+          { "@type": "Question", "name": "What AI workflows can I run?", "acceptedAnswer": { "@type": "Answer", "text": "Ready-made multi-step workflows including client research, proposals and scope of work, CV plus freelance gig matching, SEO briefs and audits, crypto and tokenomics research, competitor analysis, and more. Each returns a structured, ready-to-use result with real data." } },
+          { "@type": "Question", "name": "How much does an AI workflow cost?", "acceptedAnswer": { "@type": "Answer", "text": "You pay per run in USDC, typically from 0.01 to 0.12 USDC depending on the workflow and quality tier. There is no subscription; you only pay when you run one." } },
+          { "@type": "Question", "name": "How do I create a CV and find freelance gigs?", "acceptedAnswer": { "@type": "Answer", "text": "Run the CV plus Freelance Gig Match workflow. It writes a styled CV from your details, which you can restyle and save as PDF, and returns a ranked list of real freelance gigs from Freelancer.com and Hacker News, each with a link and a proposal opener." } },
+          { "@type": "Question", "name": "Can an AI agent use Fundline, and does it need an API key?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Fundline exposes an HTTP API and a Model Context Protocol (MCP) endpoint. An autonomous agent can discover and run workflows and pay per run from its own wallet via x402, with no account or API key required. An API key is optional and only needed for the Invoice API or higher rate limits." } },
+          { "@type": "Question", "name": "What is x402 and how does paying per call work?", "acceptedAnswer": { "@type": "Answer", "text": "x402 is an HTTP 402 based pay-per-call flow. The agent requests a run, receives a 402 quote with the price and treasury address, transfers the USDC from its own wallet, then retries with a payment proof header. A failed run is refunded to the payer." } },
+          { "@type": "Question", "name": "Does Fundline hold customer money?", "acceptedAnswer": { "@type": "Answer", "text": "No. The settlement routers and the per-run escrow transfer USDC directly from the payer to the recipient. They hold no balance and have no owner or admin withdraw path." } },
+          { "@type": "Question", "name": "Can a payer pay an invoice without connecting a wallet?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, for single invoices. They can send USDC directly, including by scanning the payment-page QR, and then verify the transfer. Batch payouts are wallet-only." } }
+        ]}
+      ]
+    }
+    </script>
   </head>
   <body>
     <header class="docs-topbar">
@@ -812,24 +847,40 @@ curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
           <p class="eyebrow">FAQ</p>
           <h2>Common questions</h2>
           <details open>
+            <summary>What is Fundline?</summary>
+            <p>Fundline is a non-custodial layer on the Arc blockchain that turns a USDC transfer into a trusted business event. You can create invoices and get paid in USDC, run AI workflows to do the work, and pay teams, all wallet to wallet with on-chain proof. AI agents can discover and run workflows too, paying per run.</p>
+          </details>
+          <details>
+            <summary>How do I create a USDC invoice?</summary>
+            <p>Connect your wallet, add your line items and client details, and share the pay link. Your client pays in USDC on Arc and the payment is verified on-chain. Creating an invoice is free and Fundline never holds the funds.</p>
+          </details>
+          <details>
+            <summary>What AI workflows can I run?</summary>
+            <p>Ready-made multi-step workflows including client research, proposals and scope of work, CV plus freelance gig matching, SEO briefs and audits, crypto and tokenomics research, competitor analysis, and more. Each returns a structured, ready-to-use result with real data.</p>
+          </details>
+          <details>
+            <summary>How much does an AI workflow cost?</summary>
+            <p>You pay per run in USDC, typically from 0.01 to 0.12 USDC depending on the workflow and quality tier. There is no subscription; you only pay when you run one. See live prices at /api/workflows.</p>
+          </details>
+          <details>
+            <summary>How do I create a CV and find freelance gigs?</summary>
+            <p>Run the CV + Freelance Gig Match workflow. It writes a styled CV from your details (which you can restyle and save as PDF) and returns a ranked list of real freelance gigs from Freelancer.com and Hacker News, each with a link and a proposal opener.</p>
+          </details>
+          <details>
+            <summary>Can an AI agent use Fundline, and does it need an API key?</summary>
+            <p>Yes. Fundline exposes an HTTP API and a Model Context Protocol (MCP) endpoint at /mcp. An autonomous agent can discover and run workflows and pay per run from its own wallet via x402, with no account or API key required. An API key is optional and only needed for the Invoice API or higher per-key rate limits.</p>
+          </details>
+          <details>
+            <summary>What is x402 and how does paying per call work?</summary>
+            <p>x402 is an HTTP 402 based pay-per-call flow. The agent requests a run, receives a 402 quote with the price and treasury address, transfers the USDC from its own wallet, then retries with a payment proof header. A failed run is refunded to the payer.</p>
+          </details>
+          <details>
             <summary>Does Fundline hold customer money?</summary>
-            <p>No. The settlement routers transfer USDC from the payer wallet directly to the recipient wallet. They hold no balance and have no withdraw path.</p>
+            <p>No. The settlement routers and the per-run escrow transfer USDC directly from the payer to the recipient. They hold no balance and have no owner or admin withdraw path.</p>
           </details>
           <details>
             <summary>Can a payer pay an invoice without connecting a wallet?</summary>
             <p>Yes, for single invoices. They can send USDC directly (including by scanning the payment-page QR) and then verify the transfer. Batch payouts are wallet-only.</p>
-          </details>
-          <details>
-            <summary>How does a batch payout pay everyone at once?</summary>
-            <p>The payer approves the total once, then one transaction through FundlineBatchRouter distributes USDC from the payer to every recipient. It is atomic, so a failed transfer reverts the whole run.</p>
-          </details>
-          <details>
-            <summary>Is the local demo storage production ready?</summary>
-            <p>No. It is useful for demo and local development. Production should use a database.</p>
-          </details>
-          <details>
-            <summary>What is coming next?</summary>
-            <p>Mainnet deployment with live USDC settlement, additional AI workflows beyond Client Research, milestone and held-payment escrow, and Circle Wallet onboarding for non-crypto payers.</p>
           </details>
         </section>
       </main>
