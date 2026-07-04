@@ -7,6 +7,34 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Latest work (read first)
 
+- 2026-07 (approx): AGENT API v1 built. Spec `.claude/agent-api-spec.md`. Lets an AI agent
+  (headless + own Arc wallet) create invoices and run workflows via HTTP with an API key. Decision:
+  workflow-run payment = ESCROW-FUND HEADLESS (agent funds its own per-run escrow from its own wallet
+  -> reuses the exact existing billing / verify / release / refund; non-custodial preserved). INVOICES
+  were already done (POST /api/agent/invoices, X-API-Key, idempotency, paymentLink). Changes:
+  (1) WIRED the API-key issuance routes that existed but were never routed: GET/POST
+  /api/dashboard/api-keys + DELETE /api/dashboard/api-keys/:id{16hex}, under requireSellerAuth
+  (wallet-signature); handleDashboardApiKeys takes (req,res,wallet,url). (2) NEW optionalAgentApiKey(req)
+  (exported) = non-fatal requireAgentApiKey: validates a key IF present (Bearer or X-API-Key), never
+  writes a response; returns {present, ok, sellerId, rateKey}. Absent -> present:false (keeps browser
+  IP path). Applied to /run + /quote: present-but-invalid -> 401; valid -> key rate limit + JSON mode.
+  (3) JSON (non-SSE) mode on /run: jsonMode = agentAuth.ok || input.stream===false; skips SSE writeHead,
+  sendSSE no-op, result -> sendJson(200,{output,steps,cvJson,costUsd,releaseTx,memo,runId,remaining,
+  resetsAt}), error -> sendJson(502). Browser (no key) unchanged = SSE. (4) WORKFLOW_KEY_LIMITS
+  (runsPerDay 500 env WORKFLOW_KEY_RUNS_PER_DAY, spend $10/day, same global daily budget backstop),
+  keyed on "key:<hash>"/"key:global". (5) Dashboard key UI existed in dashboard.js but was broken
+  (wrong fetchApi signature) + had NO HTML + never called on nav: fixed the fetchApi calls, ADDED the
+  dashboard.html section (nav data-view=apikeys + newApiKeyBtn/apiKeyForm/newApiKeyDisplay/
+  newApiSecretInput/apiKeysList/copyApiSecretBtn), trigger loadApiKeys()/loadWebhooks() on nav click
+  (guarded by session.wallet; webhooks previously only loaded after create/delete = fixed). (6)
+  docs.html #agent-api extended: get key + run-a-workflow flow (config->quote->approve+fund->run JSON)
+  with curl, placeholders only. Test test_agent_api.js (12; exports optionalAgentApiKey +
+  requireAgentApiKey). VERIFIED OFFLINE: node --check app+server+dashboard; test_agent_api 12/12,
+  cvgig 27/27, gig_sources 21/21; requires clean; no em dash/emoji/secret. Global admin key still =
+  FUNDLINE_API_KEY / ARC_INVOICE_API_KEY (agentSellerId null = unscoped). Agent runs still need the
+  same cPanel env (WORKFLOW_RATE_LIMIT_ENABLED + escrow + treasury + V98) to work live (testnet beta).
+  FUTURE (not v1): x402 for runs, prepaid on-chain credit balance per key.
+
 - 2026-06-30: NEW WORKFLOW "CV + Freelance Gig Match" (slug cv-gig-match) BUILT v1, NOT pushed,
   NOT live-tested. Spec: `.claude/workflow-cv-gigmatch-spec.md`. This is the FIRST workflow with a
   CUSTOM executor (not the generic node-graph engine) because it fetches real gigs from external
@@ -44,7 +72,20 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   before ship: (1) OPTIONAL on-chain e2e (quote->fund->run->release) - generic billing already proven
   by test_billing_e2e_dryrun.js so not strictly needed; (2) confirm JSearch real monthly quota on
   dashboard; (3) predeploy-check; (4) cPanel env add JSEARCH_API_KEY (+ optional JSEARCH_MONTHLY_CAP)
-  then restart. measure-cvgig.js kept in repo (scratch, no secret; JSearch key passed via env at run). Templates: v1 = classic + modern only (technical
+  then restart. measure-cvgig.js kept in repo (scratch, no secret; JSearch key passed via env at run).
+- 2026-06-30 (follow-ups after first push): (a) INPUT is now a structured multi-field FORM for
+  cv-gig-match (wf.fields array on the WORKFLOWS entry -> renderRunPanel + run handler branch, mode/
+  gen wiring guarded for null); 12 fields (name/title/email/location/links/skills/experience/
+  projects/education/certifications/languages/lookingFor), gathered into labeled lines as the run
+  input so extraction is accurate + CV name/contact fill. (b) "View CV" button added INSIDE the
+  result modal header (openResultModal now takes cvJson) - it was only in the receipt behind the
+  auto-opened modal. (c) CV RENDER REWRITTEN: cv-render.js now opens a self-contained INTERACTIVE
+  page with a toolbar = 6 templates (Modern/Classic/Minimal/Header/Compact/Elegant) + 6 accent
+  colors + client-side photo upload (base64, NEVER sent to server) + Save as PDF; switching re-
+  renders instantly and is FREE (content produced once). cvJson.templateId only sets the initial
+  template. All inline/self-contained. User decisions: live switcher (not pre-pick), 6 quality
+  templates (not 10), photo client-side. Commits d500f36 (form) + b46cb1f (modal button) + 5dc80b4
+  (6-template renderer), all pushed. selectTemplate still returns modern/classic as the initial only. Templates: v1 = classic + modern only (technical
   deferred). API keys the user pasted in chat (JSearch ak_ukm..., Adzuna app_id c9bb89bc + key
   4a5b...) SHOULD be rotated (exposed in chat) and set in cPanel env, never committed.
 

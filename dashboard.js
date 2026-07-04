@@ -263,6 +263,8 @@ els.navButtons.forEach(btn => {
     const view = btn.dataset.view;
     els.panels.forEach(p => p.hidden = p.dataset.panel !== view);
     els.productForm.hidden = true;
+    if (session && session.wallet && view === "webhooks") loadWebhooks();
+    if (session && session.wallet && view === "apikeys") loadApiKeys();
   });
 });
 
@@ -464,7 +466,7 @@ async function loadApiKeys() {
   document.querySelectorAll(".revoke-key").forEach(btn => {
     btn.addEventListener("click", async (e) => {
       if (!confirm("Are you sure you want to revoke this key? It will immediately stop working.")) return;
-      await fetchApi(`/api/dashboard/api-keys/${e.target.dataset.id}`, "DELETE");
+      await fetchApi(`/api/dashboard/api-keys/${e.target.dataset.id}`, { method: "DELETE" });
       loadApiKeys();
     });
   });
@@ -481,7 +483,11 @@ document.getElementById("apiKeyForm")?.addEventListener("submit", async (e) => {
   e.preventDefault();
   const form = e.target;
   const name = form.name.value;
-  const res = await fetchApi("/api/dashboard/api-keys", "POST", { name });
+  const res = await fetchApi("/api/dashboard/api-keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
   if (res && res.apiKey) {
     form.hidden = true;
     form.reset();

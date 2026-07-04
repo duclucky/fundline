@@ -24,6 +24,7 @@
           <button class="nav-item is-active" data-view="metrics" type="button">Dashboard</button>
           <button class="nav-item" data-view="products" type="button">Products</button>
           <button class="nav-item" data-view="webhooks" type="button">Webhooks</button>
+          <button class="nav-item" data-view="apikeys" type="button">API keys</button>
         </nav>
       </aside>
 
@@ -184,6 +185,41 @@
               </div>
             </div>
             <div class="invoice-list" id="webhookLogsList"></div>
+          </section>
+
+          <section class="view" data-panel="apikeys" hidden>
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Developers</p>
+                <h2>API keys</h2>
+              </div>
+              <button class="primary-action" id="newApiKeyBtn">New API key</button>
+            </div>
+
+            <p class="settings-note">Use an API key to let an app or AI agent create invoices and run workflows on your behalf. Send it as the <strong>X-API-Key</strong> header (or <strong>Authorization: Bearer</strong>). The secret is shown once at creation; store it safely.</p>
+
+            <form id="apiKeyForm" class="invoice-form" hidden style="margin-bottom: 24px;">
+              <div class="form-grid">
+                <label>
+                  <span class="field-label">Key name</span>
+                  <input type="text" name="name" required placeholder="My agent" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="ghost-action" id="cancelApiKeyBtn">Cancel</button>
+                <button type="submit" class="primary-action">Create key</button>
+              </div>
+            </form>
+
+            <div id="newApiKeyDisplay" class="invoice-form" hidden style="margin-bottom: 24px; padding: 16px;">
+              <p class="eyebrow">Your new key (copy it now, it will not be shown again)</p>
+              <div class="copy-row" style="margin-top: 8px;">
+                <input type="text" id="newApiSecretInput" readonly />
+                <button type="button" class="ghost-action" id="copyApiSecretBtn">Copy</button>
+              </div>
+            </div>
+
+            <div class="invoice-list" id="apiKeysList"></div>
           </section>
 
         </section>

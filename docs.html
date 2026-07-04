@@ -538,6 +538,56 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
     ]
   }'</code></pre>
           </div>
+
+          <h3>Get an API key</h3>
+          <p>
+            Open the dashboard, connect your wallet, and go to <strong>API keys</strong> to create a key.
+            The secret is shown once at creation, so store it safely. A key is scoped to your wallet: invoices
+            it creates are billed to your wallet, and workflow runs it starts are attributed to it.
+          </p>
+
+          <h3>Run a workflow from an agent</h3>
+          <p>
+            An agent can run any live workflow over HTTP. Runs are billed per run in USDC through a
+            non-custodial per-run escrow: the agent funds its own run from its own Arc wallet, and the run is
+            refunded automatically if it fails. Send <code>Accept: application/json</code> to receive one JSON
+            response instead of the streaming response the browser uses.
+          </p>
+          <ol>
+            <li>Read <code>GET /api/config</code> for <code>runEscrowAddress</code>, <code>usdcTokenAddress</code>, <code>chainId</code>, and <code>workflowPrices</code>.</li>
+            <li>Call <code>POST /api/workflows/:slug/quote</code> to get a <code>runId</code> and the exact <code>amount</code>.</li>
+            <li>From your own Arc wallet, <code>approve</code> the escrow for the USDC amount, then call <code>fund(runId, amount)</code> on the run escrow.</li>
+            <li>Call <code>POST /api/workflows/:slug/run</code> with your API key and the <code>runId</code> to execute and settle.</li>
+          </ol>
+          <div class="code-card">
+            <div class="code-head"><span>Quote a run</span><button data-copy="#wf-quote" type="button">Copy</button></div>
+            <pre id="wf-quote"><code>curl -X POST http://127.0.0.1:5190/api/workflows/client-research/quote \
+  -H "X-API-Key: $FUNDLINE_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{ "tier": "normal" }'
+# -> { "runId": "0x...", "amount": "30000", "amountUsdc": "0.03",
+#      "escrowAddress": "0x...", "usdc": "0x3600...0000", "chainId": 5042002 }</code></pre>
+          </div>
+          <div class="code-card">
+            <div class="code-head"><span>Run a workflow (JSON response)</span><button data-copy="#wf-run" type="button">Copy</button></div>
+            <pre id="wf-run"><code># after approve + fund(runId, amount) from your own wallet:
+curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
+  -H "X-API-Key: $FUNDLINE_API_KEY" \
+  -H "Accept: application/json" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "runId": "0xYourFundedRunId",
+    "tier": "normal",
+    "prompt": "Research Acme Labs for a partnership call"
+  }'
+# -> { "output": "...markdown report...", "steps": [...],
+#      "costUsd": "0.003218", "releaseTx": "0x...", "runId": "0x..." }</code></pre>
+          </div>
+          <p>
+            Every run charges its fixed per-tier USDC price (see <code>workflowPrices</code> in the config), held
+            and settled by the escrow. No owner or admin can withdraw a funded run: it can only release to the
+            workflow provider on success or refund to the payer on failure.
+          </p>
         </section>
 
         <section class="doc-section" id="webhooks">

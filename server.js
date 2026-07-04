@@ -114,6 +114,17 @@ const WORKFLOW_LIMITS = {
   spendCapMicros: Math.round(WORKFLOW_SPEND_PER_IP_PER_DAY_USD * 1000000),
   dailyBudgetMicros: Math.round(WORKFLOW_DAILY_BUDGET_USD * 1000000),
 };
+// Per-API-key limits for authenticated agent runs. Runs are escrow-funded (paid), so
+// the per-key run count is high; the global daily v98 budget backstop still applies
+// (beta bills testnet USDC but the v98 provider cost is real USD).
+const WORKFLOW_KEY_RUNS_PER_DAY = Number(process.env.WORKFLOW_KEY_RUNS_PER_DAY || 500);
+const WORKFLOW_KEY_SPEND_PER_DAY_USD = Number(process.env.WORKFLOW_KEY_SPEND_PER_DAY_USD || 10);
+const WORKFLOW_KEY_LIMITS = {
+  runsPerDay: WORKFLOW_KEY_RUNS_PER_DAY,
+  gensPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
+  spendCapMicros: Math.round(WORKFLOW_KEY_SPEND_PER_DAY_USD * 1000000),
+  dailyBudgetMicros: Math.round(WORKFLOW_DAILY_BUDGET_USD * 1000000),
+};
 // Slugs runnable server-side. Each workflow owns its model choices -- models are
 // part of the workflow definition, not global env vars, so different workflows
 // can use different search providers or writers depending on their data needs.
@@ -454,6 +465,21 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/dashboard/api-keys") {
+    const keyWallet = requireSellerAuth(req, res);
+    if (!keyWallet) return;
+    handleDashboardApiKeys(req, res, keyWallet, url);
+    return;
+  }
+
+  const apiKeyByIdMatch = url.pathname.match(/^\/api\/dashboard\/api-keys\/([a-f0-9]{16})$/i);
+  if (apiKeyByIdMatch) {
+    const keyWallet = requireSellerAuth(req, res);
+    if (!keyWallet) return;
+    handleDashboardApiKeyById(req, res, keyWallet, apiKeyByIdMatch[1]);
+    return;
+  }
+
 
   if (url.pathname === "/api/products") {
     handleProducts(req, res, url);
@@ -604,6 +630,8 @@ module.exports = {
   loadBatchDb,
   saveBatchDb,
   findBatchPaidInReceipt,
+  optionalAgentApiKey,
+  requireAgentApiKey,
   TELEGRAM_LINK_DB_PATH,
   TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
@@ -799,6 +827,13 @@ async function handleWorkflowQuote(req, res, slug) {
     sendJson(res, 503, { error: "billing_unconfigured", message: "Workflow billing is not configured." });
     return;
   }
+  // Optional agent auth: reject a key that is present but invalid; a missing key is fine
+  // (the browser quotes without one). Quote itself is free and writes nothing on-chain.
+  const quoteAuth = optionalAgentApiKey(req);
+  if (quoteAuth.present && !quoteAuth.ok) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
+    return;
+  }
   let quoteInput;
   try { quoteInput = await readJsonBody(req); } catch (_) { quoteInput = {}; }
   const quoteTier = String(quoteInput.tier || "normal");
@@ -903,9 +938,20 @@ async function handleWorkflowRun(req, res, slug) {
     }
   }
 
+  // Agent auth is OPTIONAL here: the browser calls this with no key (IP-limited, SSE),
+  // an AI agent calls it with an API key (key-limited, single JSON response). A key
+  // that is present but invalid/revoked is rejected.
+  const agentAuth = optionalAgentApiKey(req);
+  if (agentAuth.present && !agentAuth.ok) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
+    return;
+  }
+  const jsonMode = agentAuth.ok || input.stream === false;
+
   const paths = workflowLimiterPaths();
-  const ipKey = workflowClientIpKey(req);
-  const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: WORKFLOW_LIMITS });
+  const ipKey = agentAuth.ok ? agentAuth.rateKey : workflowClientIpKey(req);
+  const runLimits = agentAuth.ok ? WORKFLOW_KEY_LIMITS : WORKFLOW_LIMITS;
+  const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: runLimits });
   if (!reserve.ok) {
     if (billing) {
       runEscrow.refund(runId).catch((e) => console.error("[Workflow] refund on rate-limit:", e.message));
@@ -914,16 +960,19 @@ async function handleWorkflowRun(req, res, slug) {
     return;
   }
 
-  // All validation passed -- switch to Server-Sent Events so the client gets
-  // real-time step progress instead of a single JSON response at the end.
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no",
-  });
+  // Transport: Server-Sent Events for the browser (real-time step progress), or a
+  // single JSON object for API agents (jsonMode). sendSSE is a no-op in jsonMode.
+  if (!jsonMode) {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+  }
 
   function sendSSE(name, data) {
+    if (jsonMode) return;
     try { res.write("event: " + name + "\ndata: " + JSON.stringify(data) + "\n\n"); } catch (_) {}
   }
 
@@ -990,16 +1039,18 @@ async function handleWorkflowRun(req, res, slug) {
       }
     }
 
-    sendSSE("result", {
+    const resultPayload = {
       output: result.report,
       steps: result.steps,
       cvJson: result.cvJson || null,
       costUsd: (result.totalCostMicros / 1000000).toFixed(6),
       releaseTx,
       memo: memoText,
+      runId: runId || null,
       remaining: reserve.remaining,
       resetsAt: reserve.resetsAt,
-    });
+    };
+    if (jsonMode) { sendJson(res, 200, resultPayload); } else { sendSSE("result", resultPayload); }
   } catch (error) {
     workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "run" });
     if (billing) {
@@ -1010,14 +1061,15 @@ async function handleWorkflowRun(req, res, slug) {
       }
     }
     console.error("[Workflow] run error:", error.message);
-    sendSSE("error", {
+    const errPayload = {
       error: "provider_error",
       message: billing
         ? "The workflow could not complete; your payment was refunded."
         : "The workflow could not complete right now.",
-    });
+    };
+    if (jsonMode) { sendJson(res, 502, errPayload); } else { sendSSE("error", errPayload); }
   } finally {
-    try { res.end(); } catch (_) {}
+    if (!jsonMode) { try { res.end(); } catch (_) {} }
   }
 }
 
@@ -2190,6 +2242,29 @@ function requireAgentApiKey(req, res) {
 
 function getAgentApiKey() {
   return String(process.env.FUNDLINE_API_KEY || process.env.ARC_INVOICE_API_KEY || "").trim();
+}
+
+// Non-fatal variant of requireAgentApiKey for endpoints that also serve the browser
+// (workflow /quote, /run). Validates the key IF one is presented; never writes a
+// response. Absent key -> { present:false } so the caller keeps its IP-based path.
+// Present but invalid/revoked -> { present:true, ok:false }.
+function optionalAgentApiKey(req) {
+  const authorization = String(req.headers.authorization || "");
+  const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
+  const received = String((bearerMatch && bearerMatch[1]) || req.headers["x-api-key"] || "").trim();
+  if (!received) return { present: false, ok: false, sellerId: null, rateKey: null };
+
+  const expectedGlobal = getAgentApiKey();
+  if (expectedGlobal && safeEqualString(received, expectedGlobal)) {
+    return { present: true, ok: true, sellerId: null, rateKey: "key:global" };
+  }
+  const db = loadApiKeyDb();
+  const keyHash = crypto.createHash("sha256").update(received).digest("hex");
+  const record = db.apiKeys.find((k) => k.keyHash === keyHash);
+  if (!record || record.revokedAt) return { present: true, ok: false, sellerId: null, rateKey: null };
+  record.lastUsedAt = new Date().toISOString();
+  saveApiKeyDb(db);
+  return { present: true, ok: true, sellerId: normalizeAddress(record.sellerId), rateKey: "key:" + keyHash };
 }
 
 function safeEqualString(received, expected) {
