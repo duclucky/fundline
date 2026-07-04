@@ -2,6 +2,11 @@
 
 Standalone examples for integrating an AI agent with Fundline. Not part of the app.
 
+- `fundline-agent-core.js` - shared logic (discover + pay + run) used by both examples.
+- `circle-agent-demo.js` - a CLI agent (below).
+- `mcp-server/fundline-mcp.js` - an MCP server so MCP clients (Claude, Cursor, Hermes
+  Agent, OpenClaw) can discover and run Fundline workflows as tools (see the MCP section).
+
 ## circle-agent-demo.js
 
 An agent that pays for Fundline workflow runs from its own Circle
@@ -79,3 +84,46 @@ prices, then runs the ones you chose, paying for each by itself.
 
 The Fundline server needs workflow billing configured (escrow + treasury + provider
 key) for either mode to settle.
+
+## mcp-server/fundline-mcp.js
+
+An MCP (Model Context Protocol) server that exposes Fundline as tools any MCP client
+can use: `list_workflows` (discover/search), `run_workflow` (pay + run, returns the
+output), and `wallet_info`. Frameworks like Hermes Agent and OpenClaw, plus Claude
+Desktop and Cursor, register MCP servers, so this makes Fundline plug-and-play for
+them: the model calls the tools, and the server pays per run from your Circle wallet.
+
+Non-custodial: your Circle + Fundline keys live in the MCP server's env (your machine);
+Fundline never sees them and cannot move your funds.
+
+### Setup
+
+```
+cd examples/mcp-server
+npm i @modelcontextprotocol/sdk @circle-fin/developer-controlled-wallets
+```
+
+Do the one-time Circle setup + funding from the CLI demo above (it prints a
+`CIRCLE_WALLET_ID`). Then register the server with your MCP client, e.g. Claude
+Desktop `mcpServers`:
+
+```json
+{
+  "fundline": {
+    "command": "node",
+    "args": ["/absolute/path/examples/mcp-server/fundline-mcp.js"],
+    "env": {
+      "FUNDLINE_BASE_URL": "https://fundline.xyz",
+      "FUNDLINE_API_KEY": "...",
+      "CIRCLE_API_KEY": "...",
+      "CIRCLE_ENTITY_SECRET": "...",
+      "CIRCLE_WALLET_ID": "...",
+      "PAY_MODE": "escrow"
+    }
+  }
+}
+```
+
+After that, the agent can say things like "find a research workflow and run it on
+Acme Labs" and the MCP tools discover, pay, and run it autonomously.
+
