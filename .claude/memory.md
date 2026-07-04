@@ -7,6 +7,22 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Latest work (read first)
 
+- 2026-07: SEO/GEO Phase 3 - docs.html + workflows.html (commit 1f37295, live-verified). docs.html:
+  added full SEO head (title "Fundline Docs: USDC Invoices, AI Workflows, and the Agent API", meta
+  description, canonical, OG/Twitter, llms.txt alternate link) + JSON-LD @graph (TechArticle +
+  BreadcrumbList + FAQPage). REWROTE the #faq (was stale: "beyond Client Research", "Circle Wallet
+  coming") into 9 current intent-focused Q&As (what is Fundline, create invoice, AI workflows, cost,
+  CV+gigs, agent API+MCP+no-key, x402, non-custodial, keyless pay); the FAQPage schema MATCHES the
+  visible FAQ (Google requirement). Did NOT rewrite the 865 lines of body content (already broad +
+  current: has agent-api/mcp/x402/wf-quote/wf-run/payroll/settlement/etc). workflows.html: added SEO
+  head (title/description/canonical/OG) + a <noscript> crawlable fallback in #wfRoot (the catalog is
+  JS-rendered = empty shell for non-JS crawlers) linking to /ai-workflows, /api/workflows, /docs. Did
+  NOT SSR the catalog (descriptions live in workflows.js frontend; /ai-workflows landing + /api/workflows
+  + noscript already give crawlers the content). Verified live: /docs title+JSON-LD+FAQPage, /workflows
+  title+noscript. Static HTML -> FTP deploy, no restart. SEO/GEO now: Phase 1 (robots/sitemap/homepage
+  JSON-LD) + Phase 2 (3 landing pages) + Phase 3 (docs+workflows) all done. Still user action: Google/
+  Bing Search Console + submit sitemap.
+
 - 2026-07: API KEYS MOVED into the invoice app's Settings (per user: agents are keyless via MCP+x402,
   so a key is only for the Invoice API / dev integration -> belongs with invoicing, not "Agents").
   Removed "API keys" from the Agents nav (Agents is now just Agent API + Docs, both -> docs). Added an
