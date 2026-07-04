@@ -1,0 +1,28 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /pay/
+Disallow: /batch/
+Disallow: /api/agent/
+Disallow: /api/dashboard/
+
+# AI crawlers and answer engines are welcome (GEO).
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: ChatGPT-User
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: Claude-Web
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: Google-Extended
+Allow: /
+User-agent: Applebot-Extended
+Allow: /
+
+Sitemap: https://fundline.xyz/sitemap.xml
+# Machine-readable guide for LLMs and AI agents: https://fundline.xyz/llms.txt
