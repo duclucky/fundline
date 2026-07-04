@@ -243,6 +243,13 @@ function showDashboard() {
   
   loadSummary();
   loadProducts();
+
+  // Deep link: /dashboard#apikeys opens the API keys tab directly (the Agents nav
+  // links here since agents and the dashboard share one type of API key).
+  if (location.hash === "#apikeys") {
+    const keysBtn = document.querySelector('.nav-item[data-view="apikeys"]');
+    if (keysBtn) keysBtn.click();
+  }
 }
 
 els.walletButton.addEventListener('click', () => {

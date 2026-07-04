@@ -7,6 +7,19 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Latest work (read first)
 
+- 2026-07: NAV cleanup per user product decisions. (a) REMOVED the "Developers" nav group from the app
+  sidebar (app.html + workflows.html) - the seller dashboard is de-emphasized (not deleted): invoicing
+  + workflow have their own history, no marketplace yet so Products/sales dashboard not needed, Telegram
+  covers notifications so Webhooks dropped from nav. (b) API keys MOVED under the "Agents" group (agents
+  + humans share ONE type of API key); Agents group is now [Agent API -> /docs#agent-api, API keys ->
+  /dashboard#apikeys, Docs -> /docs]. (c) Removed the dead disabled items Access Keys / Runs / Settings.
+  Runs was dropped on the user's correct point: an agent uses its OWN wallet, so there is no logged-in
+  "manager" account that maps to a runs view. (d) dashboard.html trimmed to 2 tabs (Dashboard + API keys;
+  removed Products + Webhooks tabs, panels left in place/unreachable, code NOT deleted). (e) dashboard.js:
+  showDashboard() now honors /dashboard#apikeys to open the API keys tab directly (the Agents nav links
+  there). The dashboard PAGE still exists and works; it is just not surfaced as "Developers" in the main
+  nav. Frontend-only (no server change) so FTP deploy is enough, no restart needed.
+
 - 2026-07: SEO/GEO Phase 1 (foundation) DONE + live-verified (commit 9a9d739). robots.txt (allow all
   + explicitly allow AI answer engines GPTBot/OAI-SearchBot/ChatGPT-User/ClaudeBot/Claude-Web/
   PerplexityBot/Google-Extended/Applebot-Extended; disallow /dashboard,/pay/,/batch/,/api/agent/,
