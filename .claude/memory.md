@@ -37,8 +37,11 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 - 2026-07: x402 FOR WORKFLOW RUNS built (user prioritized it right after the agent API; the
   earlier "future" note is now done). Spec in `.claude/agent-api-spec.md` Part 3. Also a Circle
-  Wallet integration spec `.claude/circle-wallet-integration-spec.md` was written (agent brings its
-  OWN Circle Developer-Controlled Wallet, non-custodial; demo+docs pending, NOT built yet). x402
+  Wallet integration spec `.claude/circle-wallet-integration-spec.md` (agent brings its OWN Circle
+  Developer-Controlled Wallet, non-custodial). Circle demo NOW BUILT (commit 2faff1d):
+  examples/circle-agent-demo.js + examples/README.md (standalone agent, @circle-fin/developer-controlled-
+  wallets demo-only dep NOT in package.json, modes escrow + x402, reads creds from env, ARC-TESTNET,
+  createContractExecutionTransaction approve/fund/transfer, polls getTransaction; NOT tested live). x402
   runs: handleWorkflowRun now has THREE payment modes when billing on: (a) X-PAYMENT header -> x402
   settle (verify a direct USDC transfer of the exact tier price to ARC_TREASURY_ADDRESS via
   findPaymentInRpcReceipt requireInvoiceReference:false; consume the txHash so it settles one run;
