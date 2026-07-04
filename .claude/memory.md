@@ -21,6 +21,17 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   Honest: on-page is code; Google ranking also needs off-page (backlinks, authority, time). User to add
   Google/Bing Search Console + submit sitemap. GEO already works: ChatGPT browsing read /llms.txt +
   /api/workflows and correctly summarized Fundline + prices + x402 (user-confirmed).
+- 2026-07: SEO/GEO Phase 2 (intent landing pages) DONE + live-verified (commit 2ff4f83). 3 crawlable
+  content pages sharing landing.css (dark/gold, NO JS = crawler-friendly), each with H1/H2, how-it-works,
+  feature cards, a VISIBLE FAQ + FAQPage + BreadcrumbList JSON-LD (schema matches visible text), and a
+  CTA into the app: create-invoice.html (/create-invoice -> /app), ai-workflows.html (/ai-workflows ->
+  /workflows), cv-gigs.html (/cv-gigs -> /workflows/cv-gig-match). Routes wired in resolveRequestPath;
+  all 3 added to sitemap.xml (now 6 URLs); homepage footer Product column now links the 3 landing pages;
+  each landing cross-links the others + Home + Docs. Verified live: all 3 return 200 with correct
+  <title>. Homepage (/) unchanged as the single main page; landings are separate URLs for search/AI
+  discovery. NEXT possible: SSR/static-ize the /workflows catalog (JS-rendered today so crawlers see a
+  shell), more intent pages (SEO/proposal/crypto), <head> discovery link already added Phase 1. USER
+  ACTION still needed: Google/Bing Search Console verify + submit https://fundline.xyz/sitemap.xml.
 
 - 2026-07: REMOTE MCP SERVER hosted at POST /mcp (spec .claude/remote-mcp-spec.md; NOT pushed at
   time of writing - check git). User chose: host remote MCP (URL + API key), x402 payment (agent's
