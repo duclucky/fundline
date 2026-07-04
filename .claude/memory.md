@@ -31,6 +31,18 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   note + mcp-remote bridge caveat). NOT tested against real MCP clients (Claude Desktop/Hermes/OpenClaw)
   or a real x402 run yet. examples/mcp-server/fundline-mcp.js (the earlier LOCAL stdio MCP) still exists
   as the local-install alternative.
+- 2026-07 FOLLOW-UP (agent self-onboarding): (a) /mcp auth is now OPTIONAL (keyless allowed;
+  present-but-invalid key still 401) so an agent needs NO Fundline account - just a funded wallet
+  paying via x402. (b) NEW GET /llms.txt (handleLlmsTxt) = machine-readable self-onboarding guide
+  (what Fundline is, discovery endpoints, MCP URL, x402 pay steps, escrow alt, docs link) so an
+  agent told "go to fundline.xyz" can read + self-configure. (c) Nav "Soon" flipped to live in
+  app.html + workflows.html only (the app-shell sidebar; dashboard.html/index.html never had the
+  nav-group-soon block): removed nav-group-soon + soon-badge, converted API keys->/dashboard,
+  Webhooks->/dashboard, Docs->/docs, Agent API->/docs#agent-api (remaining Agents children Access
+  Keys/Runs/Settings left disabled = not built as pages). VERIFIED LIVE on fundline.xyz earlier:
+  /api/config billing on, GET /mcp 200, /api/workflows + ?q= work, POST /mcp no-auth/bad-key 401.
+  After this deploy: keyless /mcp + /llms.txt live. Irreducible human step remains: the agent needs
+  a funded wallet (money origin). All pushed.
 
 - 2026-07: AGENT DISCOVERY + MCP SERVER + rate-limit hardening (all pushed to main, commits
   0e5ba55 discovery, ffdd52c keyword search, ee09f5f limits, a93a541 MCP). Continues the Agent API.

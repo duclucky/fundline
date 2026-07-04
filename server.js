@@ -544,6 +544,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/llms.txt") {
+    handleLlmsTxt(req, res);
+    return;
+  }
+
   const wfQuoteMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/quote$/i);
   if (wfQuoteMatch) {
     handleWorkflowQuote(req, res, wfQuoteMatch[1]);
@@ -888,6 +893,51 @@ const MCP_TOOLS = [
   },
 ];
 
+// GET /llms.txt - a machine-readable guide so an AI agent told "go to fundline.xyz"
+// can self-onboard: what Fundline is, how to discover workflows, and how to pay per
+// run with its own wallet (x402), no account required.
+function handleLlmsTxt(req, res) {
+  const base = getRequestBaseUrl(req);
+  const lines = [
+    "# Fundline",
+    "",
+    "Fundline runs AI workflows on demand and settles payment in USDC on the Arc",
+    "blockchain. An AI agent can discover workflows and run them, paying per run from",
+    "its own wallet. No account or API key is required to pay via x402 (a funded Arc",
+    "USDC wallet is enough). An optional API key gives per-key rate limits.",
+    "",
+    "## Discover workflows",
+    "GET " + base + "/api/workflows            (all runnable workflows + USDC price)",
+    "GET " + base + "/api/workflows?q=research  (keyword search on slug/name)",
+    "",
+    "## Model Context Protocol (recommended for agents)",
+    "MCP endpoint (Streamable HTTP): POST " + base + "/mcp",
+    "Tools: list_workflows({query}), run_workflow({slug,tier,prompt,payment}).",
+    "Optional header: Authorization: Bearer <Fundline API key> (not required for x402).",
+    "",
+    "## Pay per run with x402 (no account)",
+    "1. POST " + base + "/api/workflows/<slug>/run  with JSON {tier, prompt} and header",
+    "   Accept: application/json. With no payment you get HTTP 402 and a quote:",
+    "   { accepts: [ { maxAmountRequired, payTo, asset (USDC), network } ] }.",
+    "2. Transfer exactly maxAmountRequired USDC (6 decimals) to payTo from your wallet on",
+    "   Arc (chainId " + ARC_CHAIN_ID + ", USDC " + ARC_USDC_TOKEN_ADDRESS + ").",
+    "3. Retry the same request with header X-PAYMENT set to base64 of",
+    "   {\"payerWallet\":\"0xYou\",\"txHash\":\"0xYourTransfer\"}. You get the workflow output.",
+    "A failed run is refunded to the payer. Each payment settles one run.",
+    "",
+    "## Alternative: escrow (contract-guaranteed refund)",
+    "POST " + base + "/api/workflows/<slug>/quote -> {runId, amount, escrowAddress}.",
+    "Fund the escrow (approve USDC, then fund(runId, amount)), then POST .../run with",
+    "{runId, tier, prompt}.",
+    "",
+    "## Docs",
+    base + "/docs  (see the Agent API section for full details and examples).",
+    "",
+  ];
+  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(lines.join("\n"));
+}
+
 async function handleMcp(req, res) {
   if (!WORKFLOW_RATE_LIMIT_ENABLED) { sendJson(res, 404, { error: "Not found" }); return; }
   if (req.method === "GET") {
@@ -902,9 +952,12 @@ async function handleMcp(req, res) {
     sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
+  // Auth is OPTIONAL: an agent can use Fundline with NO account by paying per call via
+  // x402 (it just needs a funded wallet). A present-but-invalid key is still rejected;
+  // a valid key gets per-key rate limits and attribution.
   const auth = optionalAgentApiKey(req);
-  if (!auth.present || !auth.ok) {
-    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Provide a valid Fundline API key (Authorization: Bearer)." } });
+  if (auth.present && !auth.ok) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key." } });
     return;
   }
 
