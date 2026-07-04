@@ -8,8 +8,9 @@
 // Two phases:
 //   node examples/circle-agent-demo.js setup   ONE-TIME: create the agent wallet,
 //                                              print its address + how to fund it.
-//   node examples/circle-agent-demo.js run     AUTONOMOUS: quote -> pay -> run,
-//                                              no human clicks. Repeatable.
+//   node examples/circle-agent-demo.js run     AUTONOMOUS: discover the workflow
+//                                              menu, choose, then quote -> pay ->
+//                                              run. No human clicks. Repeatable.
 //
 // Prerequisites (one time, human): a Circle testnet API key, a registered entity
 // secret (https://developers.circle.com/wallets/dev-controlled/register-entity-secret),
@@ -17,8 +18,10 @@
 // from the dashboard. See examples/README.md.
 //
 // Env: CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET (both phases); CIRCLE_WALLET_ID (run
-// phase, printed by setup); FUNDLINE_API_KEY, FUNDLINE_BASE_URL, WORKFLOW_SLUG,
-// WORKFLOW_TIER, WORKFLOW_PROMPT, PAY_MODE (escrow|x402), RUN_COUNT (run phase).
+// phase, printed by setup); FUNDLINE_API_KEY, FUNDLINE_BASE_URL, PAY_MODE
+// (escrow|x402). Choose what to run with either a single task (WORKFLOW_SLUG,
+// WORKFLOW_TIER, WORKFLOW_PROMPT) or WORKFLOW_TASKS, a JSON array of
+// {slug, tier, prompt} to run several DIFFERENT workflows in one go.
 
 const ESCROW_ABI_FUND = "fund(bytes32,uint256)";
 const USDC_ABI_APPROVE = "approve(address,uint256)";
@@ -119,16 +122,11 @@ async function cmdRun() {
   }
   const fundlineKey = requireEnv("FUNDLINE_API_KEY");
   const base = env("FUNDLINE_BASE_URL", "http://127.0.0.1:5190").replace(/\/$/, "");
-  const slug = env("WORKFLOW_SLUG", "client-research");
-  const tier = env("WORKFLOW_TIER", "normal");
-  const prompt = env("WORKFLOW_PROMPT", "Research Acme Labs for a partnership call.");
   const payMode = env("PAY_MODE", "escrow");
-  const runCount = Math.max(1, Number(env("RUN_COUNT", "1")) || 1);
 
   const walletResp = await circle.getWallet({ id: walletId });
   const walletAddress = walletResp.data.wallet.address;
   console.log("Agent Circle wallet: " + walletAddress + " (" + walletId + ")");
-
   const bal = await readUsdcBalance(circle, walletId);
   if (bal != null) console.log("USDC balance: " + bal);
 
@@ -139,11 +137,42 @@ async function cmdRun() {
     process.exit(1);
   }
   const usdc = cfg.json.usdcTokenAddress;
-  console.log("USDC: " + usdc + " | chainId: " + cfg.json.chainId + " | mode: " + payMode);
 
-  for (let i = 1; i <= runCount; i++) {
-    console.log(`\n===== Run ${i}/${runCount} =====`);
-    const ctx = { circle, walletId, walletAddress, usdc, base, slug, tier, prompt, fundlineKey };
+  // 1. DISCOVER the workflow menu, so the agent chooses from real, priced options.
+  const menu = await getJson(base + "/api/workflows");
+  const catalog = (menu.json && menu.json.workflows) || [];
+  const bySlug = {};
+  catalog.forEach((w) => { bySlug[w.slug] = w; });
+  console.log("\nAvailable workflows (" + catalog.length + "):");
+  catalog.slice(0, 30).forEach((w) => {
+    const p = w.tiers && w.tiers.normal ? w.tiers.normal.usdc : "?";
+    console.log("  - " + w.slug + "  (" + w.name + ")  from " + p + " USDC");
+  });
+
+  // 2. CHOOSE what to run. WORKFLOW_TASKS is a JSON array of {slug, tier, prompt}
+  //    so the agent can run several DIFFERENT workflows; otherwise a single task
+  //    from WORKFLOW_SLUG / WORKFLOW_TIER / WORKFLOW_PROMPT.
+  let tasks;
+  try {
+    tasks = JSON.parse(env("WORKFLOW_TASKS", ""));
+    if (!Array.isArray(tasks) || !tasks.length) throw new Error("empty");
+  } catch (_) {
+    tasks = [{
+      slug: env("WORKFLOW_SLUG", "client-research"),
+      tier: env("WORKFLOW_TIER", "normal"),
+      prompt: env("WORKFLOW_PROMPT", "Research Acme Labs for a partnership call."),
+    }];
+  }
+
+  // 3. RUN each chosen workflow (discover -> choose -> pay -> run, fully automatic).
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    const chosen = bySlug[t.slug];
+    if (!chosen) { console.error(`\nTask ${i + 1}: unknown workflow "${t.slug}" (not in the menu), skipping.`); continue; }
+    const tier = t.tier || "normal";
+    const price = chosen.tiers && chosen.tiers[tier] ? chosen.tiers[tier].usdc : "?";
+    console.log(`\n===== Task ${i + 1}/${tasks.length}: ${t.slug} [${tier}] ${price} USDC =====`);
+    const ctx = { circle, walletId, walletAddress, usdc, base, slug: t.slug, tier, prompt: t.prompt || "", fundlineKey };
     if (payMode === "x402") { await runX402(ctx); } else { await runEscrow(ctx); }
   }
 }

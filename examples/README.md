@@ -34,7 +34,8 @@ for you (they involve signing up, a security registration, and funding a wallet)
 
 ### Phase 2: the agent runs autonomously
 
-Once set up, the agent does quote -> pay -> run with zero human clicks, repeatable:
+Once set up, the agent DISCOVERS the workflow menu, CHOOSES what to run, then does
+quote -> pay -> run with zero human clicks:
 
 ```
 export CIRCLE_API_KEY=...
@@ -42,24 +43,32 @@ export CIRCLE_ENTITY_SECRET=...
 export CIRCLE_WALLET_ID=...        # printed by setup
 export FUNDLINE_API_KEY=...
 export FUNDLINE_BASE_URL=http://127.0.0.1:5190
+export PAY_MODE=escrow             # or x402
+
+# Option A: a single chosen workflow
 export WORKFLOW_SLUG=client-research
 export WORKFLOW_TIER=normal
-export PAY_MODE=escrow             # or x402
-export RUN_COUNT=1                 # run the workflow N times back to back
+export WORKFLOW_PROMPT="Research Acme Labs for a partnership call."
+
+# Option B: several DIFFERENT workflows in one go (overrides Option A)
+export WORKFLOW_TASKS='[
+  {"slug":"client-research","tier":"normal","prompt":"Research Acme Labs"},
+  {"slug":"swot-analysis","tier":"normal","prompt":"SWOT for a new SaaS invoicing tool"}
+]'
 
 node examples/circle-agent-demo.js run
 ```
 
-Every run signs and pays on-chain by itself and returns the result. Set
-`RUN_COUNT` higher to watch it run many times with no human in the loop.
+The agent first calls `GET /api/workflows` to see the available workflows and their
+prices, then runs the ones you chose, paying for each by itself.
 
 ### What is manual vs automatic
 
 - Manual (Phase 1, one time): Circle signup, entity-secret registration, funding
   the wallet, creating a Fundline key. These involve accounts and money, so they
   need a human, exactly like giving an employee a funded company card once.
-- Automatic (Phase 2, every run): discover price, sign approve/fund or the x402
-  transfer, run the workflow, receive the output. No clicks.
+- Automatic (Phase 2, every run): discover the workflow menu, choose, sign
+  approve/fund or the x402 transfer, run the workflow, receive the output. No clicks.
 
 ### Payment modes
 

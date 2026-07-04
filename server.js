@@ -531,6 +531,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/workflows") {
+    handleWorkflowList(req, res);
+    return;
+  }
+
   const wfQuoteMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/quote$/i);
   if (wfQuoteMatch) {
     handleWorkflowQuote(req, res, wfQuoteMatch[1]);
@@ -842,6 +847,33 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
     console.error("[Workflow] build-prompt error:", error.message);
     sendJson(res, 502, { error: "provider_error", message: "Could not generate a prompt right now." });
   }
+}
+
+// GET /api/workflows - public discovery menu for agents: the runnable workflows and
+// their per-tier USDC price, so an agent can choose which to run and know the cost
+// before quoting. No auth (discovery).
+function handleWorkflowList(req, res) {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED) { sendJson(res, 404, { error: "Not found" }); return; }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const workflows = Object.keys(WORKFLOW_RUN_DEFS).map((slug) => {
+    const def = WORKFLOW_RUN_DEFS[slug];
+    const tiers = {};
+    ["normal", "plus", "pro"].forEach((t) => {
+      if (def.tiers && def.tiers[t]) {
+        tiers[t] = { units: String(def.tiers[t].priceUnits), usdc: (def.tiers[t].priceUnits / 1000000).toFixed(6) };
+      }
+    });
+    return { slug, name: def.name, tiers };
+  });
+  sendJson(res, 200, {
+    workflows,
+    billingEnabled: WORKFLOW_BILLING_ENABLED,
+    chainId: ARC_CHAIN_ID,
+    usdc: ARC_USDC_TOKEN_ADDRESS,
+  });
 }
 
 // POST /api/workflows/:slug/quote - issue a high-entropy runId + the fixed price so
