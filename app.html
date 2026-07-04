@@ -76,10 +76,6 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-5M9 8V2M15 8V2M17 8H7a2 2 0 0 0-2 2v5a5 5 0 0 0 10 0v-5a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 Agent API
               </a>
-              <a class="nav-item" href="/dashboard#apikeys">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                API keys
-              </a>
               <a class="nav-item" href="/docs">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 Docs
@@ -390,6 +386,40 @@
               </div>
               <p class="muted">Payments are designed to move directly from the payer wallet to this merchant wallet. The app does not hold funds.</p>
             </form>
+
+            <div class="settings-panel" style="margin-top: 20px;">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Developers</p>
+                  <h2>API keys</h2>
+                </div>
+                <button class="primary-action" id="newApiKeyBtn" type="button">New API key</button>
+              </div>
+              <p class="settings-note">Use an API key to create invoices programmatically via the Agent API (send it as the X-API-Key header). AI agents that run workflows do not need a key; they pay per run with x402.</p>
+
+              <form id="apiKeyForm" hidden style="margin: 8px 0 4px;">
+                <div class="form-grid">
+                  <label>
+                    <span class="field-label">Key name</span>
+                    <input type="text" name="name" required placeholder="My integration" />
+                  </label>
+                </div>
+                <div class="settings-actions">
+                  <button type="button" class="ghost-action" id="cancelApiKeyBtn">Cancel</button>
+                  <button type="submit" class="primary-action">Create key</button>
+                </div>
+              </form>
+
+              <div id="newApiKeyDisplay" hidden style="margin: 8px 0;">
+                <p class="eyebrow">Copy this key now, it will not be shown again</p>
+                <div class="copy-row">
+                  <input type="text" id="newApiSecretInput" readonly />
+                  <button type="button" class="ghost-action" id="copyApiSecretBtn">Copy</button>
+                </div>
+              </div>
+
+              <div class="pay-items" id="apiKeysList"></div>
+            </div>
           </section>
         </section>
       </main>

@@ -7,6 +7,21 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Latest work (read first)
 
+- 2026-07: API KEYS MOVED into the invoice app's Settings (per user: agents are keyless via MCP+x402,
+  so a key is only for the Invoice API / dev integration -> belongs with invoicing, not "Agents").
+  Removed "API keys" from the Agents nav (Agents is now just Agent API + Docs, both -> docs). Added an
+  "API keys" section to app.html Settings view (data-panel="settings", after the settings form):
+  New key button, name form, one-time secret display + copy, and a list with revoke. app.js: NEW
+  sellerFetch(path,opts) helper (signed seller session x-fundline-wallet/signature/issued-at, retry
+  once on 401 after re-sign - same pattern as saveSettingsFromForm; app.js already had getSellerSession
+  + shares SELLER_SESSION_KEY "fundline_dashboard_session" with dashboard.js) + loadApiKeys /
+  createApiKeyFromForm / handleApiKeyListClick (revoke), wired in the events section, and setView()
+  calls loadApiKeys() when the settings view opens. Endpoints unchanged (/api/dashboard/api-keys under
+  requireSellerAuth). dashboard.html still has its own API keys tab (redundant now but dashboard is
+  hidden from nav; left as-is, not deleted). Frontend-only (app.html, workflows.html, app.js) -> FTP
+  deploy, no restart. node --check app.js OK; escapeHtml/showToast confirmed present. NOT browser-tested
+  by me (signed-session flow needs a real wallet) but reuses the proven settings-save auth pattern.
+
 - 2026-07: NAV cleanup per user product decisions. (a) REMOVED the "Developers" nav group from the app
   sidebar (app.html + workflows.html) - the seller dashboard is de-emphasized (not deleted): invoicing
   + workflow have their own history, no marketplace yet so Products/sales dashboard not needed, Telegram

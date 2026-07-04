@@ -201,6 +201,20 @@ function bindEvents() {
   els.connectWalletSettings?.addEventListener("click", handleWalletButton);
   els.sendTelegramTest?.addEventListener("click", sendTelegramTestAlert);
   els.exportCsv?.addEventListener("click", exportInvoicesXls);
+  document.getElementById("newApiKeyBtn")?.addEventListener("click", () => {
+    document.getElementById("apiKeyForm").hidden = false;
+    document.getElementById("newApiKeyDisplay").hidden = true;
+  });
+  document.getElementById("cancelApiKeyBtn")?.addEventListener("click", () => {
+    document.getElementById("apiKeyForm").hidden = true;
+  });
+  document.getElementById("apiKeyForm")?.addEventListener("submit", createApiKeyFromForm);
+  document.getElementById("copyApiSecretBtn")?.addEventListener("click", () => {
+    const input = document.getElementById("newApiSecretInput");
+    input.select();
+    navigator.clipboard?.writeText(input.value).then(() => showToast("API key copied")).catch(() => {});
+  });
+  document.getElementById("apiKeysList")?.addEventListener("click", handleApiKeyListClick);
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeWalletMenu();
@@ -233,6 +247,7 @@ function getBatchId() {
 function setView(view) {
   state.activeView = view || "dashboard";
   renderApp();
+  if (state.activeView === "settings") loadApiKeys();
 }
 
 function renderApp() {
@@ -888,6 +903,94 @@ async function getSellerSession(connected, forceNew = false) {
   const session = { wallet: connected, signature, issuedAt };
   localStorage.setItem(SELLER_SESSION_KEY, JSON.stringify(session));
   return session;
+}
+
+// --- API keys (for creating invoices via the Agent API). Uses the signed seller
+// session; retries once on 401 after re-signing. AI agents that run workflows do
+// not need a key (they pay per run via x402). ---
+async function sellerFetch(path, options) {
+  const connected = getConnectedWallet();
+  if (!connected) throw new Error("Connect your wallet first.");
+  const opts = options || {};
+  const build = (session) => fetch(path, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+      "x-fundline-wallet": session.wallet,
+      "x-fundline-signature": session.signature,
+      "x-fundline-issued-at": session.issuedAt,
+    },
+  });
+  let res = await build(await getSellerSession(connected));
+  if (res.status === 401) {
+    localStorage.removeItem(SELLER_SESSION_KEY);
+    res = await build(await getSellerSession(connected, true));
+  }
+  return res;
+}
+
+async function loadApiKeys() {
+  const listEl = document.getElementById("apiKeysList");
+  if (!listEl) return;
+  if (!getConnectedWallet()) {
+    listEl.innerHTML = `<div class="empty-state">Connect your wallet to manage API keys.</div>`;
+    return;
+  }
+  try {
+    const res = await sellerFetch("/api/dashboard/api-keys", { method: "GET" });
+    const data = await res.json().catch(() => ({}));
+    const keys = (data && data.apiKeys) || [];
+    if (!keys.length) {
+      listEl.innerHTML = `<div class="empty-state">No API keys yet.</div>`;
+      return;
+    }
+    listEl.innerHTML = keys.map((k) => `
+      <div class="pay-item">
+        <div>
+          <strong>${escapeHtml(k.name || "API key")}</strong>
+          <span>${escapeHtml(k.keyPrefix || "")}... ${k.lastUsedAt ? "used " + new Date(k.lastUsedAt).toLocaleDateString() : "never used"}</span>
+        </div>
+        ${k.revokedAt
+          ? `<span class="status status-expired">Revoked</span>`
+          : `<button class="ghost-action revoke-key" data-id="${escapeHtml(k.id)}" type="button">Revoke</button>`}
+      </div>`).join("");
+  } catch (e) {
+    if (e.code !== 4001) listEl.innerHTML = `<div class="empty-state">${escapeHtml(e.message || "Could not load API keys.")}</div>`;
+  }
+}
+
+async function createApiKeyFromForm(event) {
+  event.preventDefault();
+  const form = event.target;
+  const name = String(form.name.value || "").trim();
+  if (!name) { showToast("Key name is required."); return; }
+  try {
+    const res = await sellerFetch("/api/dashboard/api-keys", { method: "POST", body: JSON.stringify({ name }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.apiKey) throw new Error((data.error && data.error.message) || data.error || "Could not create the key.");
+    form.hidden = true;
+    form.reset();
+    const disp = document.getElementById("newApiKeyDisplay");
+    disp.hidden = false;
+    document.getElementById("newApiSecretInput").value = data.apiKey.secret;
+    loadApiKeys();
+  } catch (e) {
+    if (e.code !== 4001) showToast(e.message);
+  }
+}
+
+async function handleApiKeyListClick(event) {
+  const btn = event.target.closest(".revoke-key");
+  if (!btn) return;
+  if (!confirm("Revoke this key? It will stop working immediately.")) return;
+  try {
+    const res = await sellerFetch(`/api/dashboard/api-keys/${encodeURIComponent(btn.dataset.id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Could not revoke the key.");
+    loadApiKeys();
+  } catch (e) {
+    if (e.code !== 4001) showToast(e.message);
+  }
 }
 
 async function saveSettingsFromForm(event) {
