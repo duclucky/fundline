@@ -13,14 +13,20 @@ const ESCROW_ABI = [
   "function refund(bytes32 runId)",
 ];
 
+const USDC_ABI = [
+  "function transfer(address to, uint256 amount) returns (bool)",
+];
+
 function createRunEscrowClient(config) {
   const escrowAddress = String((config && config.escrowAddress) || "").trim();
   const rpcUrl = String((config && config.rpcUrl) || "").trim();
   const treasuryKey = String((config && config.treasuryKey) || "").trim();
+  const usdcAddress = String((config && config.usdcAddress) || "").trim();
 
   let provider = null;
   let readContract = null;
   let treasuryContract = null;
+  let treasuryUsdc = null;
 
   function ensureRead() {
     if (!escrowAddress || !rpcUrl) throw new Error("Run escrow is not configured (address or RPC).");
@@ -64,6 +70,24 @@ function createRunEscrowClient(config) {
 
     async refund(runId) {
       const tx = await ensureTreasury().refund(runId);
+      await tx.wait(1);
+      return tx.hash;
+    },
+
+    // Treasury-signed plain USDC transfer. Used only to refund an x402 run payer
+    // when a paid run fails (x402 pays the treasury directly, so there is no escrow
+    // to auto-refund). The treasury holds no other user's funds and cannot pull from
+    // any wallet; this only sends the treasury's own USDC back to the payer.
+    canTransfer() { return Boolean(escrowAddress && rpcUrl && treasuryKey && usdcAddress); },
+    async transferUsdc(to, amount) {
+      if (!usdcAddress) throw new Error("USDC address is not configured.");
+      if (!treasuryKey) throw new Error("Treasury key is not configured.");
+      ensureRead();
+      if (!treasuryUsdc) {
+        const key = treasuryKey.startsWith("0x") ? treasuryKey : `0x${treasuryKey}`;
+        treasuryUsdc = new Contract(usdcAddress, USDC_ABI, new Wallet(key, provider));
+      }
+      const tx = await treasuryUsdc.transfer(to, BigInt(amount));
       await tx.wait(1);
       return tx.hash;
     },

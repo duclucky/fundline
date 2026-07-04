@@ -46,5 +46,12 @@ check("invalid key -> sellerId null", d.sellerId === null);
 const e = server.optionalAgentApiKey(fakeReq({ authorization: "Bearer " }));
 check("empty bearer -> present false", e.present === false);
 
+// unitsToUsdcString: exact base-units -> decimal string, and roundtrip via amountToUnits.
+check("units 30000 -> 0.030000", server.unitsToUsdcString(30000, 6) === "0.030000");
+check("units 100000 -> 0.100000", server.unitsToUsdcString(100000, 6) === "0.100000");
+check("units 1000000 -> 1.000000", server.unitsToUsdcString(1000000, 6) === "1.000000");
+check("roundtrip 30000", server.amountToUnits(server.unitsToUsdcString(30000, 6), 6) === 30000n);
+check("roundtrip 60000", server.amountToUnits(server.unitsToUsdcString(60000, 6), 6) === 60000n);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

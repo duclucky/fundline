@@ -35,6 +35,30 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
   same cPanel env (WORKFLOW_RATE_LIMIT_ENABLED + escrow + treasury + V98) to work live (testnet beta).
   FUTURE (not v1): x402 for runs, prepaid on-chain credit balance per key.
 
+- 2026-07: x402 FOR WORKFLOW RUNS built (user prioritized it right after the agent API; the
+  earlier "future" note is now done). Spec in `.claude/agent-api-spec.md` Part 3. Also a Circle
+  Wallet integration spec `.claude/circle-wallet-integration-spec.md` was written (agent brings its
+  OWN Circle Developer-Controlled Wallet, non-custodial; demo+docs pending, NOT built yet). x402
+  runs: handleWorkflowRun now has THREE payment modes when billing on: (a) X-PAYMENT header -> x402
+  settle (verify a direct USDC transfer of the exact tier price to ARC_TREASURY_ADDRESS via
+  findPaymentInRpcReceipt requireInvoiceReference:false; consume the txHash so it settles one run;
+  run; on failure treasury refunds via a plain USDC transfer back); (b) runId -> escrow (unchanged);
+  (c) neither -> HTTP 402 challenge {accepts:[{scheme exact, network eip155:chainId, maxAmountRequired
+  = priceUnits, asset USDC, payTo treasury, resource, extra:{slug,tier}}]}. x402 forces jsonMode + sets
+  X-PAYMENT-RESPONSE header (base64 {txHash}) on success. Rate-limited on "x402:"+payer with
+  WORKFLOW_KEY_LIMITS + global budget. NEW: run-escrow-client.transferUsdc(to,amount) (treasury-signed
+  plain USDC transfer, only for x402 refunds; added usdcAddress to client config = ARC_USDC_TOKEN_ADDRESS);
+  data/workflow-payments.json consumed-txHash store (isRunPaymentConsumed/consumeRunPayment/
+  markRunPaymentRefunded); unitsToUsdcString(units,dec) exact base-units->decimal string (inverse of
+  amountToUnits) so the verifier gets a decimal amount. Trade-off (user accepted): x402 refund is a
+  treasury transfer back (less trustless than the escrow's contract-guaranteed refund); escrow stays
+  available for agents wanting trustless refund. Docs.html #agent-api got a "Pay per call with x402"
+  section (challenge+settle curl). Test_agent_api.js now 17 (added unitsToUsdcString roundtrip).
+  VERIFIED OFFLINE: node --check server+run-escrow-client; test_agent_api 17/17, test_run_escrow 179/179
+  (no regression), cvgig 27/27; requires clean. NOTE: browser SSE path unchanged (no key, runId ->
+  escrow). x402 only activates when billing on (escrow+treasury+usdc configured) in cPanel env.
+  STILL FUTURE: Circle Gateway nanopayments (prefund once, gasless per run) for high-frequency agents.
+
 - 2026-06-30: NEW WORKFLOW "CV + Freelance Gig Match" (slug cv-gig-match) BUILT v1, NOT pushed,
   NOT live-tested. Spec: `.claude/workflow-cv-gigmatch-spec.md`. This is the FIRST workflow with a
   CUSTOM executor (not the generic node-graph engine) because it fetches real gigs from external

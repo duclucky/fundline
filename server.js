@@ -36,6 +36,7 @@ const BATCH_DB_PATH = path.join(DATA_DIR, "batches.json");
 const WORKFLOW_USAGE_DB_PATH = path.join(DATA_DIR, "workflow-usage.json");
 const WORKFLOW_BUDGET_DB_PATH = path.join(DATA_DIR, "workflow-budget.json");
 const JSEARCH_USAGE_DB_PATH = path.join(DATA_DIR, "jsearch-usage.json");
+const WORKFLOW_PAYMENTS_DB_PATH = path.join(DATA_DIR, "workflow-payments.json");
 
 const AGENT_RATE_LIMIT_PER_MIN = Number(process.env.AGENT_RATE_LIMIT_PER_MIN || 60);
 const rateLimits = new Map();
@@ -290,6 +291,7 @@ const runEscrow = runEscrowClient.createRunEscrowClient({
   escrowAddress: ARC_RUN_ESCROW_ADDRESS,
   rpcUrl: ARC_RPC_URL,
   treasuryKey: ARC_TREASURY_PRIVATE_KEY,
+  usdcAddress: ARC_USDC_TOKEN_ADDRESS,
 });
 // Billing is active only when the escrow is deployed AND the treasury can sign.
 const WORKFLOW_BILLING_ENABLED = Boolean(ARC_RUN_ESCROW_ADDRESS && ARC_USDC_TOKEN_ADDRESS && ARC_TREASURY_PRIVATE_KEY);
@@ -632,6 +634,7 @@ module.exports = {
   findBatchPaidInReceipt,
   optionalAgentApiKey,
   requireAgentApiKey,
+  unitsToUsdcString,
   TELEGRAM_LINK_DB_PATH,
   TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
@@ -739,6 +742,40 @@ function bumpJsearchUsage() {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(JSEARCH_USAGE_DB_PATH, JSON.stringify({ month, count }));
   } catch (e) { console.error("[Workflow] jsearch usage write:", e.message); }
+}
+
+// x402 run payments: a txHash settles at most one run (double-spend guard, mirrors
+// the invoice (chainId,txHash) rule; Arc-only so txHash-keyed).
+function readWorkflowPayments() {
+  try {
+    const o = JSON.parse(fs.readFileSync(WORKFLOW_PAYMENTS_DB_PATH, "utf8"));
+    if (o && o.payments) return o;
+  } catch (_) {}
+  return { payments: {} };
+}
+function isRunPaymentConsumed(txHash) {
+  const key = String(txHash || "").toLowerCase();
+  if (!key) return true;
+  return Boolean(readWorkflowPayments().payments[key]);
+}
+function consumeRunPayment(txHash, info) {
+  const key = String(txHash || "").toLowerCase();
+  if (!key) return;
+  const db = readWorkflowPayments();
+  db.payments[key] = Object.assign({ at: new Date().toISOString() }, info || {});
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(WORKFLOW_PAYMENTS_DB_PATH, JSON.stringify(db));
+  } catch (e) { console.error("[Workflow] payments write:", e.message); }
+}
+function markRunPaymentRefunded(txHash, refundTx) {
+  const key = String(txHash || "").toLowerCase();
+  const db = readWorkflowPayments();
+  if (db.payments[key]) {
+    db.payments[key].refunded = true;
+    db.payments[key].refundTx = refundTx || null;
+    try { fs.writeFileSync(WORKFLOW_PAYMENTS_DB_PATH, JSON.stringify(db)); } catch (_) {}
+  }
 }
 
 // POST /api/workflows/:slug/build-prompt - turn a short description into a polished
@@ -907,33 +944,95 @@ async function handleWorkflowRun(req, res, slug) {
     return;
   }
 
-  // Billing: verify the run is funded on-chain BEFORE doing any paid work.
+  // Billing. When on, there are three payment modes:
+  //  - X-PAYMENT header -> x402: a direct USDC transfer of the tier price to the
+  //    treasury (light pay-per-call; refund on failure is a treasury transfer back).
+  //  - runId -> escrow: the run was funded via FundlineRunEscrow (trustless refund).
+  //  - neither -> return a 402 challenge so agents can discover x402.
   const billing = WORKFLOW_BILLING_ENABLED;
+  const priceUnits = BigInt(tierDef.priceUnits);
+  const xPaymentHeader = String(req.headers["x-payment"] || "").trim();
   let runId = "";
+  let x402 = false;
+  let x402Payer = "";
+  let x402TxHash = "";
   if (billing) {
-    runId = String(input.runId || "");
-    if (!/^0x[0-9a-fA-F]{64}$/.test(runId)) {
-      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A funded runId is required" } });
-      return;
-    }
-    let onchain;
-    try {
-      onchain = await runEscrow.readRun(runId);
-    } catch (error) {
-      console.error("[Workflow] escrow read error:", error.message);
-      sendJson(res, 502, { error: "escrow_error", message: "Could not verify the funded run." });
-      return;
-    }
-    if (/^0x0+$/.test(onchain.payer)) {
-      sendJson(res, 402, { error: "not_funded", message: "This run is not funded yet." });
-      return;
-    }
-    if (onchain.released || onchain.refunded) {
-      sendJson(res, 409, { error: "already_settled", message: "This run was already settled." });
-      return;
-    }
-    if (onchain.amount !== BigInt(tierDef.priceUnits)) {
-      sendJson(res, 400, { error: "amount_mismatch", message: "Funded amount does not match the tier price." });
+    if (xPaymentHeader) {
+      x402 = true;
+      if (!ARC_TREASURY_ADDRESS) {
+        sendJson(res, 503, { error: "billing_unconfigured", message: "Treasury is not configured." });
+        return;
+      }
+      let payment;
+      try { payment = JSON.parse(Buffer.from(xPaymentHeader, "base64").toString("utf8")); }
+      catch (_) { sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid X-PAYMENT header" } }); return; }
+      x402Payer = normalizeAddress(payment.payerWallet || payment.payer || "");
+      x402TxHash = normalizeTxHash(payment.txHash || payment.transactionHash || "");
+      if (!x402Payer || !x402TxHash) {
+        sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "X-PAYMENT needs payerWallet and txHash" } });
+        return;
+      }
+      if (isRunPaymentConsumed(x402TxHash)) {
+        sendJson(res, 409, { error: "already_settled", message: "This payment was already used for a run." });
+        return;
+      }
+      let verified;
+      try {
+        verified = await findPaymentInRpcReceipt({
+          txHash: x402TxHash,
+          payerWallet: x402Payer,
+          merchantWallet: ARC_TREASURY_ADDRESS,
+          amount: unitsToUsdcString(priceUnits),
+          requireInvoiceReference: false,
+        });
+      } catch (error) {
+        console.error("[Workflow] x402 verify error:", error.message);
+        sendJson(res, 502, { error: "verify_error", message: "Could not verify the payment." });
+        return;
+      }
+      if (!verified) {
+        sendJson(res, 402, { error: "payment_invalid", message: "No matching USDC payment of the exact price to the treasury was found in that transaction." });
+        return;
+      }
+    } else if (input.runId) {
+      runId = String(input.runId || "");
+      if (!/^0x[0-9a-fA-F]{64}$/.test(runId)) {
+        sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A funded runId is required" } });
+        return;
+      }
+      let onchain;
+      try {
+        onchain = await runEscrow.readRun(runId);
+      } catch (error) {
+        console.error("[Workflow] escrow read error:", error.message);
+        sendJson(res, 502, { error: "escrow_error", message: "Could not verify the funded run." });
+        return;
+      }
+      if (/^0x0+$/.test(onchain.payer)) {
+        sendJson(res, 402, { error: "not_funded", message: "This run is not funded yet." });
+        return;
+      }
+      if (onchain.released || onchain.refunded) {
+        sendJson(res, 409, { error: "already_settled", message: "This run was already settled." });
+        return;
+      }
+      if (onchain.amount !== priceUnits) {
+        sendJson(res, 400, { error: "amount_mismatch", message: "Funded amount does not match the tier price." });
+        return;
+      }
+    } else {
+      // x402 challenge: tell the agent how to pay (transfer the price to the treasury).
+      sendJson(res, 402, { accepts: [{
+        scheme: "exact",
+        network: "eip155:" + ARC_CHAIN_ID,
+        maxAmountRequired: String(tierDef.priceUnits),
+        asset: ARC_USDC_TOKEN_ADDRESS,
+        payTo: ARC_TREASURY_ADDRESS,
+        resource: getRequestBaseUrl(req) + req.url,
+        description: "Fundline workflow run: " + def.name + " (" + tier + ")",
+        maxTimeoutSeconds: 3600,
+        extra: { slug: slug, tier: tier },
+      }] });
       return;
     }
   }
@@ -946,19 +1045,28 @@ async function handleWorkflowRun(req, res, slug) {
     sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
     return;
   }
-  const jsonMode = agentAuth.ok || input.stream === false;
+  // x402 and API-key agents get a single JSON response; the browser keeps SSE.
+  const jsonMode = agentAuth.ok || x402 || input.stream === false;
 
   const paths = workflowLimiterPaths();
-  const ipKey = agentAuth.ok ? agentAuth.rateKey : workflowClientIpKey(req);
-  const runLimits = agentAuth.ok ? WORKFLOW_KEY_LIMITS : WORKFLOW_LIMITS;
+  let ipKey;
+  let runLimits;
+  if (x402) { ipKey = "x402:" + x402Payer; runLimits = WORKFLOW_KEY_LIMITS; }
+  else if (agentAuth.ok) { ipKey = agentAuth.rateKey; runLimits = WORKFLOW_KEY_LIMITS; }
+  else { ipKey = workflowClientIpKey(req); runLimits = WORKFLOW_LIMITS; }
   const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: runLimits });
   if (!reserve.ok) {
-    if (billing) {
+    if (x402) {
+      runEscrow.transferUsdc(x402Payer, priceUnits).catch((e) => console.error("[Workflow] x402 refund on rate-limit:", e.message));
+    } else if (billing && runId) {
       runEscrow.refund(runId).catch((e) => console.error("[Workflow] refund on rate-limit:", e.message));
     }
     sendJson(res, reserve.status, { error: reserve.error, message: workflowLimitMessage(reserve.error), remaining: 0, resetsAt: reserve.resetsAt });
     return;
   }
+  // x402 payment verified and rate-limit reserved: consume the txHash now so it cannot
+  // settle another run (the on-chain transfer already happened before this request).
+  if (x402) consumeRunPayment(x402TxHash, { slug: slug, tier: tier, payer: x402Payer, amount: String(priceUnits) });
 
   // Transport: Server-Sent Events for the browser (real-time step progress), or a
   // single JSON object for API agents (jsonMode). sendSSE is a no-op in jsonMode.
@@ -1025,7 +1133,8 @@ async function handleWorkflowRun(req, res, slug) {
 
     let releaseTx = null;
     let memoText = null;
-    if (billing) {
+    if (billing && !x402) {
+      // Escrow path: treasury releases the funded run with an InvoiceMemo receipt.
       memoText = fundlineMemo.buildWorkflowMemoText({
         workflowName: def.name,
         steps: result.steps.map((s) => ({ name: s.name, model: s.model })),
@@ -1037,6 +1146,10 @@ async function handleWorkflowRun(req, res, slug) {
         // Do NOT refund -- funds stay in escrow until a retry or claimRefund window.
         console.error("[Workflow] release error:", error.message);
       }
+    } else if (x402) {
+      // x402 path: the payment already went to the treasury directly; the payment tx
+      // is the settlement reference.
+      releaseTx = x402TxHash;
     }
 
     const resultPayload = {
@@ -1050,10 +1163,21 @@ async function handleWorkflowRun(req, res, slug) {
       remaining: reserve.remaining,
       resetsAt: reserve.resetsAt,
     };
+    if (x402) {
+      try { res.setHeader("X-PAYMENT-RESPONSE", Buffer.from(JSON.stringify({ txHash: x402TxHash })).toString("base64")); } catch (_) {}
+    }
     if (jsonMode) { sendJson(res, 200, resultPayload); } else { sendSSE("result", resultPayload); }
   } catch (error) {
     workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "run" });
-    if (billing) {
+    if (x402) {
+      // x402 paid the treasury directly; refund by sending the price back to the payer.
+      try {
+        const refundTx = await runEscrow.transferUsdc(x402Payer, priceUnits);
+        markRunPaymentRefunded(x402TxHash, refundTx);
+      } catch (refundError) {
+        console.error("[Workflow] x402 refund error:", refundError.message);
+      }
+    } else if (billing && runId) {
       try {
         await runEscrow.refund(runId);
       } catch (refundError) {
@@ -1063,7 +1187,7 @@ async function handleWorkflowRun(req, res, slug) {
     console.error("[Workflow] run error:", error.message);
     const errPayload = {
       error: "provider_error",
-      message: billing
+      message: (billing || x402)
         ? "The workflow could not complete; your payment was refunded."
         : "The workflow could not complete right now.",
     };
@@ -4234,6 +4358,15 @@ function amountToUnits(amount, decimals) {
 function toRpcQuantity(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? `0x${Math.trunc(number).toString(16)}` : "";
+}
+
+// Exact base-units -> decimal string (e.g. 30000, 6 -> "0.030000"), the inverse of
+// amountToUnits, with no float. Used to hand the verifier a decimal amount.
+function unitsToUsdcString(units, decimals) {
+  const dec = Number.isFinite(decimals) ? decimals : ARC_USDC_DECIMALS;
+  const s = String(BigInt(units));
+  const padded = s.padStart(dec + 1, "0");
+  return padded.slice(0, padded.length - dec) + "." + padded.slice(padded.length - dec);
 }
 
 function sendJson(res, status, payload) {

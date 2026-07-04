@@ -76,9 +76,52 @@ no real keys/wallets. Keep the internal verification recipe out (docs policy).
   (beta: user pays testnet USDC, v98 cost is real USD).
 - Per-key run count high in beta; revisit when moving to real revenue + x402/prepaid options.
 
-## Future (not v1)
+## Part 3: x402 for workflow runs (built this phase)
 
-- x402 for workflow runs (402 + X-PAYMENT direct pay) as a lighter alternative to escrow-fund.
+A lighter, agent-native pay-per-call path alongside escrow-fund. Reuses the existing x402
+invoice pattern (handleX402Invoice) and the payment-verification building blocks.
+
+Trade-off vs escrow (user accepted): x402 is a direct USDC transfer to the treasury (1 tx,
+no approve), so refund-on-failure is treasury-initiated (best-effort transfer back), not the
+contract-guaranteed refund the escrow gives. Escrow stays available for agents that want the
+trustless refund; x402 is the light option.
+
+Trigger (in handleWorkflowRun, billing on):
+- `X-PAYMENT` header present -> x402 SETTLE path.
+- `runId` present -> existing escrow path (browser + escrow agents).
+- neither -> return 402 CHALLENGE with a quote (so agents discover x402). Browser always
+  sends runId, so it is unaffected.
+
+402 challenge body: `{ accepts: [ { scheme:"exact", network:"eip155:<chainId>",
+maxAmountRequired: String(priceUnits), asset: usdcAddress, payTo: ARC_TREASURY_ADDRESS,
+resource, description, maxTimeoutSeconds:3600, extra:{ slug, tier } } ] }`.
+
+Settle: decode base64 `X-PAYMENT` = `{ payerWallet|payer, txHash }`. Verify:
+- txHash not already consumed for a run (new store data/workflow-payments.json) and has a
+  non-empty hash.
+- on-chain: exactly `priceUnits` USDC transferred to `ARC_TREASURY_ADDRESS` in that tx
+  (reuse findPaymentInRpcReceipt / findUsdcTransferLog with merchantWallet = treasury,
+  requireInvoiceReference:false, 6-decimal exact). Reject otherwise (402).
+Then: mark the txHash consumed, rate-limit (WORKFLOW_KEY_LIMITS keyed on "x402:"+payer),
+run, JSON result (always JSON in x402), set `X-PAYMENT-RESPONSE` = base64 `{txHash}`.
+On run failure: treasury sends `priceUnits` USDC back to the payer (best-effort), mark the
+payment refunded, return 502.
+
+New pieces:
+- `run-escrow-client.transferUsdc(to, amount)`: treasury-signed plain USDC transfer for x402
+  refunds (needs usdcAddress in the client config). Non-custodial note: this ONLY refunds an
+  x402 payer; the treasury never holds other users' funds and cannot pull from any wallet.
+- `data/workflow-payments.json`: consumed-txHash guard for runs (mirrors the invoice
+  (chainId,txHash) double-spend rule; Arc-only so txHash-keyed).
+- workflow-payments load/consume helpers in server.js.
+
+Double-spend: a txHash settles at most one run. Amount binds to the slug/tier price; a
+payment buys exactly one run at that price.
+
+## Future (not this phase)
+
+- Circle Gateway nanopayments (prefund once, instant gasless per run) for high-frequency
+  agents. Revive the parked Gateway code; best for volume.
 - Prepaid on-chain credit balance per key (fund once, run many) to cut per-run tx overhead.
 
 ## Tests

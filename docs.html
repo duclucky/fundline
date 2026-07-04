@@ -588,6 +588,33 @@ curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
             and settled by the escrow. No owner or admin can withdraw a funded run: it can only release to the
             workflow provider on success or refund to the payer on failure.
           </p>
+
+          <h3>Pay per call with x402</h3>
+          <p>
+            For lighter pay-per-call, an agent can use the x402 flow instead of the escrow. Call
+            <code>POST /api/workflows/:slug/run</code> with no payment: you get an HTTP <code>402</code> with a
+            quote. Pay by transferring the exact USDC price to the <code>payTo</code> treasury address, then retry
+            the same request with an <code>X-PAYMENT</code> header (base64 JSON of your payer wallet and the
+            transaction hash). The response is JSON, with an <code>X-PAYMENT-RESPONSE</code> header echoing the
+            settled transaction. Each payment settles one run; a failed run is refunded to the payer.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>402 challenge and settle</span><button data-copy="#wf-x402" type="button">Copy</button></div>
+            <pre id="wf-x402"><code># 1. Request with no payment -> HTTP 402 with a quote:
+curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
+  -H "X-API-Key: $FUNDLINE_API_KEY" -H "Content-Type: application/json" \
+  -d '{ "tier": "normal", "prompt": "Research Acme Labs" }'
+# -> 402 { "accepts": [ { "scheme": "exact", "maxAmountRequired": "30000",
+#      "asset": "0x3600...0000", "payTo": "0xTreasury", "network": "eip155:5042002" } ] }
+
+# 2. Transfer 30000 (0.03 USDC) to payTo from your wallet, then retry with proof:
+PAYMENT=$(printf '{"payerWallet":"0xYourWallet","txHash":"0xYourTransferTx"}' | base64)
+curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
+  -H "X-API-Key: $FUNDLINE_API_KEY" -H "Accept: application/json" \
+  -H "X-PAYMENT: $PAYMENT" -H "Content-Type: application/json" \
+  -d '{ "tier": "normal", "prompt": "Research Acme Labs" }'
+# -> 200 { "output": "...", "releaseTx": "0xYourTransferTx", ... }</code></pre>
+          </div>
         </section>
 
         <section class="doc-section" id="webhooks">
