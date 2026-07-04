@@ -1,0 +1,85 @@
+/* Shared styles for Fundline SEO/GEO landing pages. Dark/gold brand, self-contained,
+   no JS needed (crawler-friendly). */
+:root {
+  --bg: #09100c;
+  --panel: #121410;
+  --line: rgba(212, 175, 55, 0.16);
+  --ink: #f6f1e6;
+  --muted: #b7b1a1;
+  --gold: #d4af37;
+  --gold-bright: #f2d27a;
+  --radius: 16px;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-behavior: smooth; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse at 70% 0%, rgba(212, 175, 55, 0.10), transparent 45%),
+    var(--bg);
+  font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 17px;
+  line-height: 1.65;
+}
+a { color: var(--gold-bright); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { width: min(920px, 92vw); margin: 0 auto; }
+
+.lp-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 0; border-bottom: 1px solid var(--line);
+}
+.lp-brand { display: flex; align-items: center; gap: 9px; color: var(--ink); font-weight: 900; font-size: 20px; letter-spacing: -0.03em; }
+.lp-brand img { height: 30px; }
+.lp-nav-links { display: flex; gap: 18px; align-items: center; }
+.lp-nav-links a { color: var(--muted); font-weight: 700; font-size: 15px; }
+.lp-nav-links a:hover { color: var(--gold); text-decoration: none; }
+.lp-cta {
+  display: inline-block; padding: 10px 18px; border-radius: 11px; font-weight: 800;
+  color: #0a0a08; background: linear-gradient(135deg, #f2d27a, #d4af37); border: 0;
+}
+.lp-cta:hover { text-decoration: none; opacity: 0.94; }
+
+.hero { padding: 64px 0 40px; }
+.hero h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.02; letter-spacing: -0.04em; margin: 0 0 18px; }
+.hero .lede { font-size: 20px; color: var(--muted); max-width: 640px; margin: 0 0 28px; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.btn-ghost { display: inline-block; padding: 10px 18px; border-radius: 11px; font-weight: 800; color: var(--ink); border: 1px solid var(--line); }
+.btn-ghost:hover { border-color: var(--gold); text-decoration: none; }
+
+section.block { padding: 34px 0; border-top: 1px solid var(--line); }
+section.block h2 { font-size: clamp(24px, 4vw, 34px); letter-spacing: -0.02em; margin: 0 0 8px; }
+section.block > p { color: var(--muted); max-width: 680px; }
+
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 20px; }
+.step { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+.step .n { color: var(--gold); font-family: ui-monospace, monospace; font-weight: 900; font-size: 13px; }
+.step h3 { margin: 8px 0 6px; font-size: 18px; }
+.step p { margin: 0; color: var(--muted); font-size: 15px; }
+
+.cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 18px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+.card h3 { margin: 0 0 6px; font-size: 16px; }
+.card p { margin: 0; color: var(--muted); font-size: 14px; }
+
+.faq { display: grid; gap: 12px; margin-top: 18px; }
+.faq details { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 18px; }
+.faq summary { cursor: pointer; font-weight: 800; padding: 14px 0; list-style: none; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; float: right; color: var(--gold); font-weight: 900; }
+.faq details[open] summary::after { content: "-"; }
+.faq details p { margin: 0 0 16px; color: var(--muted); }
+
+.cta-band { text-align: center; padding: 48px 0 20px; }
+.cta-band h2 { margin: 0 0 16px; }
+
+.lp-foot { border-top: 1px solid var(--line); padding: 28px 0 48px; margin-top: 24px; color: var(--muted); font-size: 14px; }
+.lp-foot .cols { display: flex; flex-wrap: wrap; gap: 18px 26px; margin-bottom: 14px; }
+.lp-foot a { color: var(--muted); }
+.lp-foot a:hover { color: var(--gold); }
+
+@media (max-width: 720px) {
+  .steps, .cards { grid-template-columns: 1fr; }
+  .lp-nav-links { display: none; }
+}

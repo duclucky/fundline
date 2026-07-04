@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Workflows for Freelancers, Paid in USDC | Fundline</title>
+    <meta name="description" content="Run ready-made AI workflows (client research, proposals, CV and freelance gig matching, SEO, crypto research) and pay per run in USDC. AI agents can run them via API and MCP." />
+    <link rel="canonical" href="https://fundline.xyz/ai-workflows" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta property="og:title" content="AI Workflows for Freelancers, Paid in USDC | Fundline" />
+    <meta property="og:description" content="Ready-made AI workflows with real data and structured output, paid per run in USDC. Humans and AI agents can run them." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://fundline.xyz/ai-workflows" />
+    <meta property="og:image" content="/og-image.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/landing.css" />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        { "@type": "BreadcrumbList", "itemListElement": [
+          { "@type": "ListItem", "position": 1, "name": "Fundline", "item": "https://fundline.xyz/" },
+          { "@type": "ListItem", "position": 2, "name": "AI workflows", "item": "https://fundline.xyz/ai-workflows" }
+        ]},
+        { "@type": "FAQPage", "mainEntity": [
+          { "@type": "Question", "name": "What AI workflows can I run on Fundline?", "acceptedAnswer": { "@type": "Answer", "text": "Ready-made multi-step workflows for freelancers and businesses: client research, proposals and scope of work, CV plus freelance gig matching, SEO briefs and audits, crypto and tokenomics research, competitor analysis, and more. Each returns a structured, ready-to-use result." } },
+          { "@type": "Question", "name": "How much does an AI workflow cost?", "acceptedAnswer": { "@type": "Answer", "text": "You pay per run in USDC, typically from 0.01 to 0.12 USDC depending on the workflow and quality tier. There is no subscription; you only pay when you run one." } },
+          { "@type": "Question", "name": "Why use Fundline instead of plain ChatGPT?", "acceptedAnswer": { "@type": "Answer", "text": "Workflows are pre-engineered multi-step chains that pull real data (live web search, real freelance gig listings) and return structured deliverables like a PDF CV or a Word report. You fill a form instead of prompt engineering, and pay per use." } },
+          { "@type": "Question", "name": "Can an AI agent run a workflow automatically?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Fundline exposes an HTTP API and a Model Context Protocol (MCP) endpoint. An AI agent can discover workflows and run them, paying per run from its own wallet via x402, with no account required." } },
+          { "@type": "Question", "name": "How do I pay for a run?", "acceptedAnswer": { "@type": "Answer", "text": "From your connected wallet in USDC on Arc. Payment is held by a non-custodial per-run escrow and refunded automatically if the run fails." } }
+        ]}
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="lp-nav">
+        <a class="lp-brand" href="/"><img src="/assets/fundline-logo.png?v=2" alt="Fundline" />Fundline</a>
+        <nav class="lp-nav-links">
+          <a href="/create-invoice">Invoices</a>
+          <a href="/cv-gigs">CV + gigs</a>
+          <a href="/docs">Docs</a>
+        </nav>
+        <a class="lp-cta" href="/workflows">Browse workflows</a>
+      </header>
+
+      <main>
+        <section class="hero">
+          <h1>AI workflows for freelancers, paid per run in USDC</h1>
+          <p class="lede">Ready-made, multi-step AI workflows that do real work: research a client, write a proposal, build a CV and find gigs, produce an SEO brief, or analyze a crypto project. Fill a form, pay a few cents in USDC, get a finished result.</p>
+          <div class="hero-actions">
+            <a class="lp-cta" href="/workflows">Browse workflows</a>
+            <a class="btn-ghost" href="/docs">Agent API and docs</a>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Popular workflows</h2>
+          <div class="cards">
+            <div class="card"><h3>Client Research</h3><p>A cited brief on a company or person before a call, from live web sources. From 0.03 USDC.</p></div>
+            <div class="card"><h3>Proposal &amp; Scope of Work</h3><p>Turn a brief into a structured proposal and estimate. From 0.03 USDC.</p></div>
+            <div class="card"><h3>CV + Freelance Gig Match</h3><p>A styled CV plus real freelance gigs matched to your skills. From 0.02 USDC.</p></div>
+            <div class="card"><h3>SEO Content Brief</h3><p>A keyword-driven content brief with real search research. From 0.06 USDC.</p></div>
+            <div class="card"><h3>Crypto Project Research</h3><p>A cited research report on a token or protocol. From 0.02 USDC.</p></div>
+            <div class="card"><h3>Competitor Analysis</h3><p>A structured competitor scan with real sources. From 0.02 USDC.</p></div>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Built for people and for AI agents</h2>
+          <div class="cards">
+            <div class="card"><h3>No prompt engineering</h3><p>Each workflow is a tuned multi-step chain. You fill a form; it handles the rest.</p></div>
+            <div class="card"><h3>Real data, real output</h3><p>Live web search and real gig listings, returned as a PDF, Word doc, or structured report.</p></div>
+            <div class="card"><h3>Pay per run</h3><p>No subscription. A few cents of USDC per run, settled on-chain.</p></div>
+            <div class="card"><h3>Agent-ready</h3><p>An HTTP API and MCP endpoint let AI agents discover and run workflows, paying via x402.</p></div>
+          </div>
+        </section>
+
+        <section class="block">
+          <h2>Frequently asked questions</h2>
+          <div class="faq">
+            <details open><summary>What AI workflows can I run on Fundline?</summary><p>Ready-made multi-step workflows for freelancers and businesses: client research, proposals and scope of work, CV plus freelance gig matching, SEO briefs and audits, crypto and tokenomics research, competitor analysis, and more. Each returns a structured, ready-to-use result.</p></details>
+            <details><summary>How much does an AI workflow cost?</summary><p>You pay per run in USDC, typically from 0.01 to 0.12 USDC depending on the workflow and quality tier. There is no subscription; you only pay when you run one.</p></details>
+            <details><summary>Why use Fundline instead of plain ChatGPT?</summary><p>Workflows are pre-engineered multi-step chains that pull real data (live web search, real freelance gig listings) and return structured deliverables like a PDF CV or a Word report. You fill a form instead of prompt engineering, and pay per use.</p></details>
+            <details><summary>Can an AI agent run a workflow automatically?</summary><p>Yes. Fundline exposes an HTTP API and a Model Context Protocol (MCP) endpoint. An AI agent can discover workflows and run them, paying per run from its own wallet via x402, with no account required.</p></details>
+            <details><summary>How do I pay for a run?</summary><p>From your connected wallet in USDC on Arc. Payment is held by a non-custodial per-run escrow and refunded automatically if the run fails.</p></details>
+          </div>
+        </section>
+
+        <section class="cta-band">
+          <h2>Run your first AI workflow</h2>
+          <a class="lp-cta" href="/workflows">Browse workflows</a>
+        </section>
+      </main>
+
+      <footer class="lp-foot">
+        <div class="cols">
+          <a href="/">Home</a>
+          <a href="/create-invoice">Create invoice</a>
+          <a href="/ai-workflows">AI workflows</a>
+          <a href="/cv-gigs">CV + gigs</a>
+          <a href="/docs">Docs</a>
+        </div>
+        <div>Fundline is a non-custodial invoicing and AI workflow layer settled in USDC on Arc.</div>
+      </footer>
+    </div>
+  </body>
+</html>

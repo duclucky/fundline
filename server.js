@@ -597,6 +597,9 @@ function resolveRequestPath(pathname) {
   if (pathname === "/dashboard" || pathname === "/dashboard/") return "/dashboard.html";
   if (pathname.startsWith("/s/")) return "/storefront.html";
   if (pathname === "/docs") return "/docs.html";
+  if (pathname === "/create-invoice" || pathname === "/create-invoice/") return "/create-invoice.html";
+  if (pathname === "/ai-workflows" || pathname === "/ai-workflows/") return "/ai-workflows.html";
+  if (pathname === "/cv-gigs" || pathname === "/cv-gigs/") return "/cv-gigs.html";
   if (pathname === "/") return "/index.html";
   if (pathname === "/app" || pathname === "/app/" || pathname.startsWith("/pay/")) return "/app.html";
   if (pathname.startsWith("/batch/")) return "/app.html";
