@@ -532,7 +532,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url.pathname === "/api/workflows") {
-    handleWorkflowList(req, res);
+    handleWorkflowList(req, res, url);
     return;
   }
 
@@ -849,16 +849,18 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
   }
 }
 
-// GET /api/workflows - public discovery menu for agents: the runnable workflows and
-// their per-tier USDC price, so an agent can choose which to run and know the cost
-// before quoting. No auth (discovery).
-function handleWorkflowList(req, res) {
+// GET /api/workflows[?q=keyword] - public discovery menu for agents: the runnable
+// workflows and their per-tier USDC price, so an agent can search, choose which to
+// run, and know the cost before quoting. No auth (discovery). `q` matches the slug
+// or name (case-insensitive substring).
+function handleWorkflowList(req, res, url) {
   if (!WORKFLOW_RATE_LIMIT_ENABLED) { sendJson(res, 404, { error: "Not found" }); return; }
   if (req.method !== "GET") {
     sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
-  const workflows = Object.keys(WORKFLOW_RUN_DEFS).map((slug) => {
+  const q = String((url && url.searchParams.get("q")) || "").trim().toLowerCase();
+  let workflows = Object.keys(WORKFLOW_RUN_DEFS).map((slug) => {
     const def = WORKFLOW_RUN_DEFS[slug];
     const tiers = {};
     ["normal", "plus", "pro"].forEach((t) => {
@@ -868,8 +870,12 @@ function handleWorkflowList(req, res) {
     });
     return { slug, name: def.name, tiers };
   });
+  if (q) {
+    workflows = workflows.filter((w) => w.slug.toLowerCase().indexOf(q) !== -1 || String(w.name).toLowerCase().indexOf(q) !== -1);
+  }
   sendJson(res, 200, {
     workflows,
+    query: q || null,
     billingEnabled: WORKFLOW_BILLING_ENABLED,
     chainId: ARC_CHAIN_ID,
     usdc: ARC_USDC_TOKEN_ADDRESS,

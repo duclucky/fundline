@@ -139,11 +139,14 @@ async function cmdRun() {
   const usdc = cfg.json.usdcTokenAddress;
 
   // 1. DISCOVER the workflow menu, so the agent chooses from real, priced options.
-  const menu = await getJson(base + "/api/workflows");
+  //    Optional WORKFLOW_QUERY does a keyword search on the server.
+  const queryStr = env("WORKFLOW_QUERY", "");
+  const menuUrl = base + "/api/workflows" + (queryStr ? "?q=" + encodeURIComponent(queryStr) : "");
+  const menu = await getJson(menuUrl);
   const catalog = (menu.json && menu.json.workflows) || [];
   const bySlug = {};
   catalog.forEach((w) => { bySlug[w.slug] = w; });
-  console.log("\nAvailable workflows (" + catalog.length + "):");
+  console.log("\nAvailable workflows" + (queryStr ? ` matching "${queryStr}"` : "") + " (" + catalog.length + "):");
   catalog.slice(0, 30).forEach((w) => {
     const p = w.tiers && w.tiers.normal ? w.tiers.normal.usdc : "?";
     console.log("  - " + w.slug + "  (" + w.name + ")  from " + p + " USDC");
