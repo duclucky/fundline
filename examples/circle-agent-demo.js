@@ -99,7 +99,7 @@ async function cmdRun() {
         circle, walletId, walletAddress, usdc, base, fundlineKey,
         slug: t.slug, tier, prompt: t.prompt || "", payMode,
       });
-      console.log("charged (v98 USD): " + result.costUsd + " | settlement tx: " + (result.releaseTx || "(none)"));
+      console.log("paid: " + (result.priceUsdc || "?") + " USDC | settlement tx: " + (result.releaseTx || "(none)") + (result.explorerUrl ? " | " + result.explorerUrl : ""));
       console.log("--- output ---\n" + String(result.output || "").slice(0, 1500));
     } catch (e) {
       console.error("Task failed: " + e.message);

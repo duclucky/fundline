@@ -541,6 +541,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/workflows/runs") {
+    handleWorkflowRunHistory(req, res);
+    return;
+  }
+
   if (url.pathname === "/mcp") {
     handleMcp(req, res);
     return;
@@ -801,6 +806,37 @@ function markRunPaymentRefunded(txHash, refundTx) {
   }
 }
 
+// Run history, keyed by the paying wallet (the agent's identity). Everything here is
+// already public on chain; the read endpoint still requires a wallet signature so an
+// agent only pulls its own list. We keep the last RUN_HISTORY_MAX entries per wallet.
+const WORKFLOW_RUNS_DB_PATH = path.join(DATA_DIR, "workflow-runs.json");
+const RUN_HISTORY_MAX = 200;
+function readWorkflowRuns() {
+  try {
+    const o = JSON.parse(fs.readFileSync(WORKFLOW_RUNS_DB_PATH, "utf8"));
+    if (o && o.runs) return o;
+  } catch (_) {}
+  return { runs: {} };
+}
+function recordWorkflowRun(wallet, entry) {
+  const key = normalizeAddress(wallet);
+  if (!key) return;
+  const db = readWorkflowRuns();
+  const list = Array.isArray(db.runs[key]) ? db.runs[key] : [];
+  list.unshift(entry);
+  db.runs[key] = list.slice(0, RUN_HISTORY_MAX);
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(WORKFLOW_RUNS_DB_PATH, JSON.stringify(db));
+  } catch (e) { console.error("[Workflow] runs write:", e.message); }
+}
+function listWorkflowRuns(wallet) {
+  const key = normalizeAddress(wallet);
+  if (!key) return [];
+  const list = readWorkflowRuns().runs[key];
+  return Array.isArray(list) ? list : [];
+}
+
 // POST /api/workflows/:slug/build-prompt - turn a short description into a polished
 // prompt with one v98store call. Free, but has its own per-IP daily quota (genCount)
 // and still counts against the per-IP spend cap and the global daily budget.
@@ -896,6 +932,19 @@ const MCP_TOOLS = [
       required: ["slug", "prompt"],
     },
   },
+  {
+    name: "list_runs",
+    description: "List your own past paid runs. Identity is your wallet: sign the message 'Sign in to Fundline\\n\\nThis signature proves you control this wallet.\\nIt does not move funds or create an on-chain transaction.\\n\\nIssued at: <issuedAt>' with the same wallet you paid from, then pass wallet, signature and issuedAt (ISO-8601, valid 24h).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        wallet: { type: "string", description: "Your wallet address (the one you paid runs from)." },
+        signature: { type: "string", description: "Signature of the standard Fundline sign-in message." },
+        issuedAt: { type: "string", description: "ISO-8601 timestamp embedded in the signed message; must be within the last 24h." },
+      },
+      required: ["wallet", "signature", "issuedAt"],
+    },
+  },
 ];
 
 // GET /llms.txt - a machine-readable guide so an AI agent told "go to fundline.xyz"
@@ -934,6 +983,12 @@ function handleLlmsTxt(req, res) {
     "POST " + base + "/api/workflows/<slug>/quote -> {runId, amount, escrowAddress}.",
     "Fund the escrow (approve USDC, then fund(runId, amount)), then POST .../run with",
     "{runId, tier, prompt}.",
+    "",
+    "## Run history",
+    "Each paid run also returns priceUsdc, releaseTx and explorerUrl (Arcscan link).",
+    "To list your past runs: GET " + base + "/api/workflows/runs signed with your wallet",
+    "(headers x-fundline-wallet, x-fundline-signature, x-fundline-issued-at). It returns",
+    "runs recorded under that wallet. All runs are also public on chain under your wallet.",
     "",
     "## Docs",
     base + "/docs  (see the Agent API section for full details and examples).",
@@ -1023,7 +1078,24 @@ async function handleMcp(req, res) {
         if (r.status !== 200) {
           return { content: [{ type: "text", text: "Run failed: " + (j.message || j.error || r.status) }], isError: true };
         }
-        return { content: [{ type: "text", text: "Charged v98 " + j.costUsd + " USD; settlement " + (j.releaseTx || "(none)") + ".\n\n" + String(j.output || "") }] };
+        return { content: [{ type: "text", text: "Charged " + (j.priceUsdc || "") + " USDC; settlement " + (j.releaseTx || "(none)") + ".\n\n" + String(j.output || "") }] };
+      }
+      if (name === "list_runs") {
+        if (!args.wallet || !args.signature || !args.issuedAt) throw new Error("wallet, signature and issuedAt are required");
+        const r = await fetch(selfBase + "/api/workflows/runs", {
+          headers: {
+            "Accept": "application/json",
+            "x-fundline-wallet": String(args.wallet),
+            "x-fundline-signature": String(args.signature),
+            "x-fundline-issued-at": String(args.issuedAt),
+          },
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.status !== 200) {
+          return { content: [{ type: "text", text: "Could not list runs: " + (j.error || r.status) }], isError: true };
+        }
+        const rows = (j.runs || []).map((x) => "- " + x.at + "  " + x.slug + " [" + x.tier + "]  " + x.priceUsdc + " USDC  " + (x.explorerUrl || x.settlementTx || "")).join("\n");
+        return { content: [{ type: "text", text: (j.count || 0) + " runs for " + j.wallet + ":\n" + rows }] };
       }
       throw new Error("Unknown tool: " + name);
     } catch (error) {
@@ -1072,6 +1144,27 @@ function handleWorkflowList(req, res, url) {
     billingEnabled: WORKFLOW_BILLING_ENABLED,
     chainId: ARC_CHAIN_ID,
     usdc: ARC_USDC_TOKEN_ADDRESS,
+  });
+}
+
+// GET /api/workflows/runs - an agent pulls its own paid-run history. Identity is the
+// wallet: the agent signs the standard Fundline message with the same wallet it paid
+// from, and we return the runs recorded under that address. All of this is public on
+// chain (Arcscan by wallet); the signature just scopes the response to the caller.
+function handleWorkflowRunHistory(req, res) {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED) { sendJson(res, 404, { error: "Not found" }); return; }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const wallet = requireSellerAuth(req, res);
+  if (!wallet) return;
+  const runs = listWorkflowRuns(wallet);
+  sendJson(res, 200, {
+    wallet,
+    count: runs.length,
+    runs,
+    explorerBase: ARCSCAN_EXPLORER_BASE,
   });
 }
 
@@ -1187,6 +1280,7 @@ async function handleWorkflowRun(req, res, slug) {
   let x402 = false;
   let x402Payer = "";
   let x402TxHash = "";
+  let escrowPayer = "";
   if (billing) {
     if (xPaymentHeader) {
       x402 = true;
@@ -1251,6 +1345,7 @@ async function handleWorkflowRun(req, res, slug) {
         sendJson(res, 400, { error: "amount_mismatch", message: "Funded amount does not match the tier price." });
         return;
       }
+      escrowPayer = normalizeAddress(onchain.payer);
     } else {
       // x402 challenge: tell the agent how to pay (transfer the price to the treasury).
       sendJson(res, 402, { accepts: [{
@@ -1385,10 +1480,12 @@ async function handleWorkflowRun(req, res, slug) {
 
     const resultPayload = {
       output: result.report,
-      steps: result.steps,
+      // Only expose step name + model; never our internal per-step provider cost.
+      steps: (result.steps || []).map((s) => ({ name: s.name, model: s.model })),
       cvJson: result.cvJson || null,
-      costUsd: (result.totalCostMicros / 1000000).toFixed(6),
+      priceUsdc: unitsToUsdcString(priceUnits),
       releaseTx,
+      explorerUrl: releaseTx ? `${ARCSCAN_EXPLORER_BASE}/tx/${releaseTx}` : null,
       memo: memoText,
       runId: runId || null,
       remaining: reserve.remaining,
@@ -1396,6 +1493,21 @@ async function handleWorkflowRun(req, res, slug) {
     };
     if (x402) {
       try { res.setHeader("X-PAYMENT-RESPONSE", Buffer.from(JSON.stringify({ txHash: x402TxHash })).toString("base64")); } catch (_) {}
+    }
+    // Log the paid run under the payer wallet so the agent can pull its own history later.
+    const historyWallet = x402 ? x402Payer : escrowPayer;
+    if (historyWallet) {
+      recordWorkflowRun(historyWallet, {
+        at: new Date().toISOString(),
+        slug: slug,
+        name: def.name,
+        tier: tier,
+        priceUsdc: resultPayload.priceUsdc,
+        mode: x402 ? "x402" : "escrow",
+        runId: runId || null,
+        settlementTx: releaseTx || (x402 ? x402TxHash : null),
+        explorerUrl: resultPayload.explorerUrl,
+      });
     }
     if (jsonMode) { sendJson(res, 200, resultPayload); } else { sendSSE("result", resultPayload); }
   } catch (error) {

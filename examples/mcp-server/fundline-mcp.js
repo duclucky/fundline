@@ -116,7 +116,7 @@ async function main() {
           base: BASE, fundlineKey: FUNDLINE_API_KEY,
           slug: args.slug, tier: args.tier || "normal", prompt: args.prompt, payMode: PAY_MODE,
         });
-        const head = `Ran ${args.slug} [${args.tier || "normal"}]. Charged v98 ${result.costUsd} USD; settlement tx ${result.releaseTx || "(none)"}.`;
+        const head = `Ran ${args.slug} [${args.tier || "normal"}]. Paid ${result.priceUsdc || "?"} USDC; settlement tx ${result.releaseTx || "(none)"}${result.explorerUrl ? " (" + result.explorerUrl + ")" : ""}.`;
         return { content: [{ type: "text", text: head + "\n\n" + String(result.output || "") }] };
       }
       throw new Error("Unknown tool: " + name);

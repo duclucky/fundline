@@ -616,7 +616,8 @@ curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
     "prompt": "Research Acme Labs for a partnership call"
   }'
 # -> { "output": "...markdown report...", "steps": [...],
-#      "costUsd": "0.003218", "releaseTx": "0x...", "runId": "0x..." }</code></pre>
+#      "priceUsdc": "0.030000", "releaseTx": "0x...", "runId": "0x...",
+#      "explorerUrl": "https://testnet.arcscan.app/tx/0x..." }</code></pre>
           </div>
           <p>
             Every run charges its fixed per-tier USDC price (see <code>workflowPrices</code> in the config), held
@@ -651,13 +652,35 @@ curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
 # -> 200 { "output": "...", "releaseTx": "0xYourTransferTx", ... }</code></pre>
           </div>
 
+          <h3>Run history</h3>
+          <p>
+            Every run response already returns <code>priceUsdc</code>, the settlement
+            <code>releaseTx</code>, and an <code>explorerUrl</code> (Arcscan link) so an agent can
+            verify each run on chain. To list past runs, an agent identifies itself by wallet: it
+            signs the standard Fundline sign-in message with the same wallet it paid from, then calls
+            <code>GET /api/workflows/runs</code> with the wallet, signature, and issued-at headers. The
+            response holds the runs recorded under that wallet. All of this is also public on chain
+            under the agent wallet, so Arcscan is the ultimate source of truth.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>List your runs</span><button data-copy="#wf-runs" type="button">Copy</button></div>
+            <pre id="wf-runs"><code>curl https://fundline.xyz/api/workflows/runs \
+  -H "x-fundline-wallet: 0xYourWallet" \
+  -H "x-fundline-signature: 0xYourSignature" \
+  -H "x-fundline-issued-at: 2026-07-04T00:00:00.000Z"
+# -> { "wallet": "0xYourWallet", "count": 2, "runs": [
+#      { "at": "...", "slug": "client-research", "tier": "normal",
+#        "priceUsdc": "0.030000", "mode": "x402", "settlementTx": "0x...",
+#        "explorerUrl": "https://testnet.arcscan.app/tx/0x..." } ] }</code></pre>
+          </div>
+
           <h3>Remote MCP server</h3>
           <p>
             Fundline also speaks the Model Context Protocol at <code>POST /mcp</code>, so an MCP
             client (Claude, Cursor, and autonomous agents like Hermes Agent or OpenClaw) can connect
             by URL and use Fundline workflows as tools. Authenticate with your API key; pay per run
-            from your own wallet via x402 (Fundline holds no funds). Tools: <code>list_workflows</code>
-            and <code>run_workflow</code>.
+            from your own wallet via x402 (Fundline holds no funds). Tools: <code>list_workflows</code>,
+            <code>run_workflow</code>, and <code>list_runs</code> (your run history, signed by wallet).
           </p>
           <div class="code-card">
             <div class="code-head"><span>MCP client config</span><button data-copy="#mcp-config" type="button">Copy</button></div>
