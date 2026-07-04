@@ -7,6 +7,21 @@ made, dead ends, user preferences, and open threads. Do not duplicate what CLAUD
 
 ## Latest work (read first)
 
+- 2026-07: SEO/GEO Phase 1 (foundation) DONE + live-verified (commit 9a9d739). robots.txt (allow all
+  + explicitly allow AI answer engines GPTBot/OAI-SearchBot/ChatGPT-User/ClaudeBot/Claude-Web/
+  PerplexityBot/Google-Extended/Applebot-Extended; disallow /dashboard,/pay/,/batch/,/api/agent/,
+  /api/dashboard/; Sitemap line + llms.txt note); sitemap.xml (/, /docs, /workflows); index.html got
+  canonical + link rel=alternate to /llms.txt + JSON-LD @graph (Organization, WebSite,
+  SoftwareApplication with offers). server.js MIME_TYPES gained .txt + .xml (robots/sitemap serve as
+  static ROOT files; resolveRequestPath returns unknown paths as-is). Verified live: robots.txt 200
+  text/plain, sitemap.xml 200 application/xml, homepage JSON-LD present. PHASE 2 (NOT built) = the real
+  ranking/GEO driver: crawlable intent landing pages (create USDC invoice / run AI workflows / create
+  CV + find freelance gigs) with visible H1/H2 + FAQ + FAQPage JSON-LD + internal links, and a
+  crawlable (SSR or static) workflow catalog (app pages are JS-rendered = crawler sees a shell today).
+  Honest: on-page is code; Google ranking also needs off-page (backlinks, authority, time). User to add
+  Google/Bing Search Console + submit sitemap. GEO already works: ChatGPT browsing read /llms.txt +
+  /api/workflows and correctly summarized Fundline + prices + x402 (user-confirmed).
+
 - 2026-07: REMOTE MCP SERVER hosted at POST /mcp (spec .claude/remote-mcp-spec.md; NOT pushed at
   time of writing - check git). User chose: host remote MCP (URL + API key), x402 payment (agent's
   OWN wallet), and transport T2 = the OFFICIAL @modelcontextprotocol/sdk (added as an APP dependency,
