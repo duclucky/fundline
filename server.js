@@ -15,6 +15,8 @@ const runEscrowClient = require("./run-escrow-client");
 const fundlineMemo = require("./memo-util");
 const gigSources = require("./gig-sources");
 const cvGig = require("./workflow-cvgig");
+const cryptoData = require("./crypto-data");
+const cryptoDd = require("./workflow-cryptodd");
 
 const PORT = Number(process.env.PORT || 5190);
 const ROOT = __dirname;
@@ -285,6 +287,20 @@ WORKFLOW_RUN_DEFS["cv-gig-match"] = {
     normal: { priceUnits: 20000, models: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2" } },
     plus: { priceUnits: 30000, models: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini" } },
     pro: { priceUnits: 60000, models: { FAST: "gpt-4.1-mini", STRONG: "claude-sonnet-4-6" } },
+  },
+};
+// Crypto Due-Diligence Pack. type "cryptodd" -> custom executor (workflow-cryptodd.js):
+// parallel free/keyless data fetch (DexScreener + GoPlus) + deterministic risk scoring +
+// a report writer and an adversarial verifier. FAST = intake + news, STRONG = writer +
+// verifier. Cost-based prices (compete on price); confirm with a live measure pass before
+// heavy promotion. EVM chains only in v1. See .claude/workflow-crypto-dd-spec.md.
+WORKFLOW_RUN_DEFS["crypto-dd"] = {
+  type: "cryptodd",
+  name: "Crypto Due-Diligence Pack",
+  tiers: {
+    normal: { priceUnits: 20000, models: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2" } },
+    plus: { priceUnits: 30000, models: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini" } },
+    pro: { priceUnits: 60000, models: { FAST: "gpt-4o-mini", STRONG: "claude-sonnet-4-6" } },
   },
 };
 // Treasury hot key that signs release/refund (Fundline-controlled, matches
@@ -1248,8 +1264,9 @@ async function handleWorkflowRun(req, res, slug) {
   }
   const def = WORKFLOW_RUN_DEFS[slug];
   const graph = workflowDefs.getGraph(slug);
-  // cvgig has a custom executor and no node graph; every other slug needs a graph.
-  if (!def || (def.type !== "cvgig" && !graph)) {
+  // cvgig and cryptodd have custom executors and no node graph; every other slug needs one.
+  const customType = def && (def.type === "cvgig" || def.type === "cryptodd");
+  if (!def || (!customType && !graph)) {
     sendJson(res, 501, { error: "not_implemented", message: "This workflow is not available for live runs yet." });
     return;
   }
@@ -1265,8 +1282,13 @@ async function handleWorkflowRun(req, res, slug) {
   const query = String(input.prompt || input.query || "").trim().slice(0, 4000);
   const mode = input.mode === "paste" ? "paste" : "search";
   const pastedSources = input.sources;
-  if (mode === "search" && !query) {
+  // crypto-dd takes a chain + token, not a free-text prompt; skip the prompt-required check.
+  if (mode === "search" && !query && def.type !== "cryptodd") {
     sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A prompt is required" } });
+    return;
+  }
+  if (def.type === "cryptodd" && !query && !String(input.token || input.address || "").trim()) {
+    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A token address (or name) is required" } });
     return;
   }
   if (mode === "paste" && (!pastedSources || (Array.isArray(pastedSources) && !pastedSources.length))) {
@@ -1508,6 +1530,27 @@ async function handleWorkflowRun(req, res, slug) {
       if (result.meta && result.meta.sourceCounts && ("JSearch" in result.meta.sourceCounts)) {
         bumpJsearchUsage();
       }
+    } else if (def.type === "cryptodd") {
+      // Crypto due-diligence always wants live web search for the news node,
+      // regardless of the paste/search toggle other workflows use.
+      const cryptoSearchWeb = TAVILY_API_KEY
+        ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 6 }).then((r) => r.results)
+        : null;
+      result = await cryptoDd.runCryptoDdWorkflow({
+        input: query,
+        chain: input.chain,
+        address: input.token || input.address,
+        intakeModel: tierDef.models.FAST,
+        newsModel: tierDef.models.FAST,
+        writerModel: tierDef.models.STRONG,
+        verifierModel: tierDef.models.STRONG,
+        groupRatio: V98STORE_GROUP_RATIO,
+        callModel,
+        fetchData: (o) => cryptoData.fetchTokenData(o),
+        searchToken: (q, chainSlug) => cryptoData.searchToken(q, chainSlug && cryptoData.chainInfo(chainSlug) ? cryptoData.chainInfo(chainSlug).dsChain : ""),
+        searchWeb: cryptoSearchWeb,
+        onProgress: (evt) => sendSSE("progress", evt),
+      });
     } else {
       result = await workflowEngine.runWorkflowGraph({
         graph,
@@ -1567,6 +1610,7 @@ async function handleWorkflowRun(req, res, slug) {
       // Only expose step name + model; never our internal per-step provider cost.
       steps: (result.steps || []).map((s) => ({ name: s.name, model: s.model })),
       cvJson: result.cvJson || null,
+      riskJson: result.riskJson || null,
       priceUsdc: unitsToUsdcString(priceUnits),
       releaseTx,
       explorerUrl: releaseTx ? `${ARCSCAN_EXPLORER_BASE}/tx/${releaseTx}` : null,

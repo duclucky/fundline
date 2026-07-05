@@ -140,6 +140,75 @@ const WORKFLOWS = {
     examplePrompt: "Senior Solidity developer, 5 years. Built DEX and ERC-20 platforms. Skills: Solidity, Hardhat, React, TypeScript. Portfolio: github.com/example. Looking for remote smart-contract contracts.",
     exampleOutput: "# CV and matched gigs\n\n## Your profile\n- Profession: Blockchain Developer (Senior)\n- Skills: Solidity, Hardhat, React, TypeScript\n\n## Your CV\nA styled CV is ready (template: modern). Use the View CV button to open it and save as PDF.\n\n## Matched gigs (8)\n\n### 1. Expert Solidity Contract Development  (92% fit)\n750 - 1500 USD | Remote | Freelancer.com\nLink: https://www.freelancer.com/projects/solidity/Expert-Solidity-Contract-Development\nWhy: Direct match on Solidity contract work at your seniority.\nProposal opener: I build production Solidity contracts and have shipped DEX and ERC-20 platforms...",
   },
+  "crypto-dd": {
+    name: "Crypto Due-Diligence Pack",
+    description: "Check a token for rug, honeypot, tax, ownership, holder concentration, and liquidity risk, with a scored report and citations.",
+    longDesc: "A crew of specialists pulls live on-chain and market data (DexScreener + GoPlus), computes a deterministic risk score across honeypot/tax, ownership controls, holder concentration, liquidity, and contract verification, then a writer explains it and a separate verifier checks every statement against the fetched data. Real data, real citations; EVM chains only for now. This is an automated risk summary, not financial advice.",
+    category: "Crypto",
+    live: true,
+    usesRetrieval: true,
+    price: "0.02",
+    version: "v1.0.0",
+    runtime: "~40s",
+    modelCount: 2,
+    calls: 0,
+    inputLabel: "Token to analyze",
+    inputHint: "Pick the chain and paste the token contract address (or a token name to resolve to the deepest-liquidity match).",
+    outputHint: "A risk-scored report: honeypot/tax, ownership, holder concentration, liquidity, contract, plus news and a verification check.",
+    limits: { inputChars: 200, outputWords: 1500 },
+    fields: [
+      { key: "chain", label: "Chain", type: "select", required: true, options: ["ethereum", "bsc", "base", "arbitrum", "polygon", "optimism", "avalanche"] },
+      { key: "token", label: "Token contract address (or name)", type: "text", required: true, placeholder: "0x6982508145454ce325dDbE47a25d4ec3d2311933" },
+    ],
+    steps: [
+      { serverKey: "intake", name: "Intake", model: "gpt-4o-mini", purpose: "Resolve the chain and token address.", tokens: "~150" },
+      { serverKey: "fetch", name: "On-chain and market data", model: "DexScreener + GoPlus", purpose: "Fetch price, liquidity, security, holders (free, keyless).", tokens: "~" },
+      { serverKey: "news", name: "News and narrative", model: "gpt-4o-mini", purpose: "Summarize recent news and community signal with citations.", tokens: "~500" },
+      { serverKey: "writer", name: "Report writer", model: "deepseek-v3.2", purpose: "Explain the computed risk scores; no invented facts.", tokens: "~1200" },
+      { serverKey: "verifier", name: "Verifier", model: "deepseek-v3.2", purpose: "Check every statement against the fetched data.", tokens: "~600" },
+    ],
+    tiers: {
+      normal: {
+        price: "0.02",
+        steps: [
+          { serverKey: "intake", name: "Intake", model: "gpt-4o-mini", purpose: "Resolve the chain and token address.", tokens: "~150" },
+          { serverKey: "fetch", name: "On-chain and market data", model: "DexScreener + GoPlus", purpose: "Fetch price, liquidity, security, holders.", tokens: "~" },
+          { serverKey: "news", name: "News and narrative", model: "gpt-4o-mini", purpose: "Summarize news and community signal.", tokens: "~500" },
+          { serverKey: "writer", name: "Report writer", model: "deepseek-v3.2", purpose: "Explain the computed risk scores.", tokens: "~1200" },
+          { serverKey: "verifier", name: "Verifier", model: "deepseek-v3.2", purpose: "Check statements against the data.", tokens: "~600" },
+        ],
+      },
+      plus: {
+        price: "0.03",
+        steps: [
+          { serverKey: "intake", name: "Intake", model: "gpt-4o-mini", purpose: "Resolve the chain and token address.", tokens: "~150" },
+          { serverKey: "fetch", name: "On-chain and market data", model: "DexScreener + GoPlus", purpose: "Fetch price, liquidity, security, holders.", tokens: "~" },
+          { serverKey: "news", name: "News and narrative", model: "gpt-4o-mini", purpose: "Summarize news and community signal.", tokens: "~500" },
+          { serverKey: "writer", name: "Report writer", model: "gpt-4.1-mini", purpose: "Explain the computed risk scores.", tokens: "~1200" },
+          { serverKey: "verifier", name: "Verifier", model: "gpt-4.1-mini", purpose: "Check statements against the data.", tokens: "~600" },
+        ],
+      },
+      pro: {
+        price: "0.06",
+        steps: [
+          { serverKey: "intake", name: "Intake", model: "gpt-4o-mini", purpose: "Resolve the chain and token address.", tokens: "~150" },
+          { serverKey: "fetch", name: "On-chain and market data", model: "DexScreener + GoPlus", purpose: "Fetch price, liquidity, security, holders.", tokens: "~" },
+          { serverKey: "news", name: "News and narrative", model: "gpt-4o-mini", purpose: "Summarize news and community signal.", tokens: "~500" },
+          { serverKey: "writer", name: "Report writer", model: "claude-sonnet-4-6", purpose: "Explain the computed risk scores.", tokens: "~1200" },
+          { serverKey: "verifier", name: "Verifier", model: "claude-sonnet-4-6", purpose: "Check statements against the data.", tokens: "~600" },
+        ],
+      },
+    },
+    pricing: [
+      { step: "Intake", model: "gpt-4o-mini", inputTokens: 120, outputTokens: 60, cost: "" },
+      { step: "On-chain and market data", model: "DexScreener + GoPlus", inputTokens: 0, outputTokens: 0, cost: "" },
+      { step: "News and narrative", model: "gpt-4o-mini", inputTokens: 1200, outputTokens: 300, cost: "" },
+      { step: "Report writer", model: "deepseek-v3.2", inputTokens: 900, outputTokens: 900, cost: "" },
+      { step: "Verifier", model: "deepseek-v3.2", inputTokens: 900, outputTokens: 300, cost: "" },
+    ],
+    examplePrompt: "Chain: ethereum; Token: 0x6982508145454ce325dDbE47a25d4ec3d2311933",
+    exampleOutput: "# Crypto due-diligence: Pepe (PEPE)\n\n**Overall risk: 18/100 - Lower risk**\n\nChain: ethereum | Contract: 0x6982...1933\n\n## Risk scores\n\n| Dimension | Score | Severity | Basis |\n|---|---|---|---|\n| Honeypot and trading tax | 0/100 | low | Trading tax is low (buy 0%, sell 0%). |\n| Ownership and admin controls | 10/100 | low | Ownership renounced; no dangerous admin controls found. |\n| Holder concentration | 15/100 | low | Top 10 holders control 22% of supply. |\n| Liquidity depth and LP lock | 12/100 | low | Liquidity is $19,978,779. |\n| Contract verification and age | 0/100 | low | source verified; pair is 800+ days old. |\n\n## Summary\nPEPE shows deep liquidity, renounced ownership, and a verified contract...\n\n## Verification\nAll statements in this report were checked against the fetched on-chain and market data.",
+  },
 };
 
 // ─── Live workflow catalog (graph-driven, server-backed) ───────────────────
@@ -1553,6 +1622,8 @@ function renderRunPanel(slug, wf) {
         const ph = esc(f.placeholder || "");
         const ctrl = f.type === "textarea"
           ? `<textarea id="wff_${esc(f.key)}" class="wf-run-textarea" rows="${f.rows || 2}" placeholder="${ph}"></textarea>`
+          : f.type === "select"
+          ? `<select id="wff_${esc(f.key)}" class="wf-run-textarea">${(f.options || []).map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join("")}</select>`
           : `<input type="text" id="wff_${esc(f.key)}" class="wf-run-textarea" placeholder="${ph}" />`;
         return `<div class="wf-run-field"><label class="wf-run-label" for="wff_${esc(f.key)}">${esc(f.label)}${req}</label>${ctrl}</div>`;
       }).join("")}
@@ -1751,6 +1822,7 @@ function bindDetail(slug, wf) {
     // Run workflow (real call to /run)
     document.getElementById("wfRunBtn").addEventListener("click", () => {
       let prompt = "";
+      const fieldMap = {};
       if (wf.fields) {
         // Gather the structured form into labeled lines so the model maps each field.
         const parts = [];
@@ -1759,7 +1831,7 @@ function bindDetail(slug, wf) {
           const fel = document.getElementById("wff_" + f.key);
           const val = fel && fel.value ? fel.value.trim() : "";
           if (f.required && !val && !missing) missing = fel;
-          if (val) parts.push(f.label + ": " + val);
+          if (val) { parts.push(f.label + ": " + val); fieldMap[f.key] = val; }
         });
         if (missing) { flashOutline(missing); return; }
         prompt = parts.join("\n");
@@ -1792,14 +1864,14 @@ function bindDetail(slug, wf) {
         document.getElementById("wfRunResult").hidden = true;
         document.getElementById("wfRunReceipt").hidden = true;
         fundWorkflowRun(slug, (text) => { runBtn.innerHTML = esc(text); }, activeTier)
-          .then((runId) => runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, runId, tier: activeTier }))
+          .then((runId) => runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, runId, tier: activeTier, chain: fieldMap.chain, token: fieldMap.token }))
           .catch((err) => {
             runBtn.disabled = false;
             runBtn.innerHTML = `${runIcon} Run Workflow`;
             displayRunError(err.message || "Payment was not completed.");
           });
       } else {
-        runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, tier: activeTier });
+        runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, tier: activeTier, chain: fieldMap.chain, token: fieldMap.token });
       }
     });
   }
@@ -1852,6 +1924,8 @@ function runWorkflow(slug, wf, opts) {
   const reqBody = { prompt: opts.prompt, mode: opts.mode, tier };
   if (opts.sources && opts.sources.length) reqBody.sources = opts.sources;
   if (opts.runId) reqBody.runId = opts.runId;
+  if (opts.chain) reqBody.chain = opts.chain;
+  if (opts.token) reqBody.token = opts.token;
 
   (async () => {
     setNodeState(0, "completed");
