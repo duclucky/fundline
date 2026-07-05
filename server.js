@@ -306,7 +306,7 @@ const WORKFLOW_BILLING_ENABLED = Boolean(ARC_RUN_ESCROW_ADDRESS && ARC_USDC_TOKE
 const gatewayClient = require("./gateway-client").createGatewayClient({
   enabled: String(process.env.WORKFLOW_GATEWAY_ENABLED || "").toLowerCase() === "true",
   url: process.env.GATEWAY_API_URL || undefined,
-  sellerAddress: normalizeAddress(process.env.GATEWAY_SELLER_ADDRESS || ""),
+  sellerAddress: normalizeAddress(process.env.GATEWAY_SELLER_ADDRESS || ARC_TREASURY_ADDRESS || ""),
   network: "eip155:" + ARC_CHAIN_ID,
   asset: ARC_USDC_TOKEN_ADDRESS,
   arcPrivateMainnet: String(process.env.GATEWAY_ARC_PRIVATE_MAINNET || "").toLowerCase() === "true",
