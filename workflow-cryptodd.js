@@ -224,12 +224,13 @@ function buildWriterMessages(name, symbol, sheet, news) {
   return [{ role: "system", content: system }, { role: "user", content: user }];
 }
 
-function buildVerifierMessages(narrative, sheet) {
-  const system = "You are an adversarial fact-checker. You are given an analyst's narrative and the underlying data sheet. "
-    + "List ONLY statements in the narrative that are NOT supported by the data sheet (invented figures, claims with no "
-    + "backing data, or contradictions). Respond ONLY with a JSON array: [{\"statement\":\"\",\"issue\":\"\"}]. "
-    + "If every statement is supported, respond with []. Default to flagging when a specific claim has no matching data.";
-  const user = `Data sheet:\n${sheet}\n\nNarrative to check:\n${narrative}`;
+function buildVerifierMessages(narrative, sheet, newsContext) {
+  const system = "You are an adversarial fact-checker. You are given an analyst's narrative, the underlying data sheet, "
+    + "and the news summary the writer was given. List ONLY statements in the narrative that are NOT supported by EITHER "
+    + "the data sheet OR the news summary (invented figures, claims with no backing, or contradictions). News-derived "
+    + "statements that match the news summary are supported. Respond ONLY with a JSON array: [{\"statement\":\"\",\"issue\":\"\"}]. "
+    + "If every statement is supported, respond with []. Default to flagging when a specific numeric claim has no matching data.";
+  const user = `Data sheet:\n${sheet}\n\nNews summary provided to the writer:\n${newsContext || "(none)"}\n\nNarrative to check:\n${narrative}`;
   return [{ role: "system", content: system }, { role: "user", content: user }];
 }
 
@@ -403,7 +404,10 @@ async function runCryptoDdWorkflow(opts) {
   // 6. Verifier (STRONG, adversarial data-check).
   onProgress({ step: "verifier", status: "running" });
   let verifierNotes = [];
-  const verifyRes = await callModel(verifierModel, buildVerifierMessages(narrative, sheet), 600);
+  const newsContext = news && (news.summary || (news.redFlags && news.redFlags.length))
+    ? `${news.summary || ""}${news.redFlags && news.redFlags.length ? "\nRed flags: " + news.redFlags.join("; ") : ""}`
+    : "";
+  const verifyRes = await callModel(verifierModel, buildVerifierMessages(narrative, sheet, newsContext), 600);
   account("Verifier", verifierModel, verifyRes.usage);
   const parsedNotes = safeParse(verifyRes.content, extractJsonArray);
   if (Array.isArray(parsedNotes)) {

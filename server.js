@@ -294,13 +294,17 @@ WORKFLOW_RUN_DEFS["cv-gig-match"] = {
 // a report writer and an adversarial verifier. FAST = intake + news, STRONG = writer +
 // verifier. Cost-based prices (compete on price); confirm with a live measure pass before
 // heavy promotion. EVM chains only in v1. See .claude/workflow-crypto-dd-spec.md.
+// VERIFY is a separate model from STRONG: the adversarial verifier needs a reliable
+// instruction-follower (a live measure showed deepseek over-flags), so normal/plus use
+// gpt-4.1-mini for verification while the writer can stay cheaper. Prices set from the
+// live measure 2026-07-05 (real v98 cost normal ~$0.003 / plus ~$0.004 / pro ~$0.015).
 WORKFLOW_RUN_DEFS["crypto-dd"] = {
   type: "cryptodd",
   name: "Crypto Due-Diligence Pack",
   tiers: {
-    normal: { priceUnits: 20000, models: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2" } },
-    plus: { priceUnits: 30000, models: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini" } },
-    pro: { priceUnits: 60000, models: { FAST: "gpt-4o-mini", STRONG: "claude-sonnet-4-6" } },
+    normal: { priceUnits: 10000, models: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", VERIFY: "gpt-4.1-mini" } },
+    plus: { priceUnits: 20000, models: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", VERIFY: "gpt-4.1-mini" } },
+    pro: { priceUnits: 30000, models: { FAST: "gpt-4o-mini", STRONG: "claude-sonnet-4-6", VERIFY: "claude-sonnet-4-6" } },
   },
 };
 // Treasury hot key that signs release/refund (Fundline-controlled, matches
@@ -1543,7 +1547,7 @@ async function handleWorkflowRun(req, res, slug) {
         intakeModel: tierDef.models.FAST,
         newsModel: tierDef.models.FAST,
         writerModel: tierDef.models.STRONG,
-        verifierModel: tierDef.models.STRONG,
+        verifierModel: tierDef.models.VERIFY || tierDef.models.STRONG,
         groupRatio: V98STORE_GROUP_RATIO,
         callModel,
         fetchData: (o) => cryptoData.fetchTokenData(o),
