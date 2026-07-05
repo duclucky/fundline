@@ -298,6 +298,19 @@ const runEscrow = runEscrowClient.createRunEscrowClient({
 });
 // Billing is active only when the escrow is deployed AND the treasury can sign.
 const WORKFLOW_BILLING_ENABLED = Boolean(ARC_RUN_ESCROW_ADDRESS && ARC_USDC_TOKEN_ADDRESS && ARC_TREASURY_PRIVATE_KEY);
+
+// Circle Gateway (Nanopayments) is an OPTIONAL, parallel payment gate for runs.
+// It is off unless WORKFLOW_GATEWAY_ENABLED=true AND a seller Gateway address is
+// set. When off (default), only the on-chain x402 + escrow gates are offered, so
+// prod is unchanged until the SDK is installed and this is switched on in cPanel.
+const gatewayClient = require("./gateway-client").createGatewayClient({
+  enabled: String(process.env.WORKFLOW_GATEWAY_ENABLED || "").toLowerCase() === "true",
+  url: process.env.GATEWAY_API_URL || undefined,
+  sellerAddress: normalizeAddress(process.env.GATEWAY_SELLER_ADDRESS || ""),
+  network: "eip155:" + ARC_CHAIN_ID,
+  asset: ARC_USDC_TOKEN_ADDRESS,
+  arcPrivateMainnet: String(process.env.GATEWAY_ARC_PRIVATE_MAINNET || "").toLowerCase() === "true",
+});
 const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
@@ -713,6 +726,7 @@ function handlePublicConfig(req, res) {
     maxBatchRecipients: MAX_BATCH_RECIPIENTS,
     runEscrowAddress: ARC_RUN_ESCROW_ADDRESS,
     workflowBillingEnabled: WORKFLOW_BILLING_ENABLED,
+    workflowGatewayEnabled: gatewayClient.available(),
     workflowPrices: Object.fromEntries(Object.entries(WORKFLOW_RUN_DEFS).map(([slug, d]) => [slug, { units: String(d.priceUnits), usdc: (d.priceUnits / 1000000).toFixed(6) }])),
     gatewayWalletAddress: GATEWAY_WALLET_ADDRESS,
     gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
@@ -1281,43 +1295,80 @@ async function handleWorkflowRun(req, res, slug) {
   let x402Payer = "";
   let x402TxHash = "";
   let escrowPayer = "";
+  let gateway = false;
+  let gatewayPayer = "";
+  let gatewayPayload = null;
+  let gatewayRequirements = null;
   if (billing) {
     if (xPaymentHeader) {
-      x402 = true;
-      if (!ARC_TREASURY_ADDRESS) {
-        sendJson(res, 503, { error: "billing_unconfigured", message: "Treasury is not configured." });
-        return;
-      }
       let payment;
       try { payment = JSON.parse(Buffer.from(xPaymentHeader, "base64").toString("utf8")); }
       catch (_) { sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid X-PAYMENT header" } }); return; }
-      x402Payer = normalizeAddress(payment.payerWallet || payment.payer || "");
-      x402TxHash = normalizeTxHash(payment.txHash || payment.transactionHash || "");
-      if (!x402Payer || !x402TxHash) {
-        sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "X-PAYMENT needs payerWallet and txHash" } });
-        return;
-      }
-      if (isRunPaymentConsumed(x402TxHash)) {
-        sendJson(res, 409, { error: "already_settled", message: "This payment was already used for a run." });
-        return;
-      }
-      let verified;
-      try {
-        verified = await findPaymentInRpcReceipt({
-          txHash: x402TxHash,
-          payerWallet: x402Payer,
-          merchantWallet: ARC_TREASURY_ADDRESS,
-          amount: unitsToUsdcString(priceUnits),
-          requireInvoiceReference: false,
-        });
-      } catch (error) {
-        console.error("[Workflow] x402 verify error:", error.message);
-        sendJson(res, 502, { error: "verify_error", message: "Could not verify the payment." });
-        return;
-      }
-      if (!verified) {
-        sendJson(res, 402, { error: "payment_invalid", message: "No matching USDC payment of the exact price to the treasury was found in that transaction." });
-        return;
+      // Route by payment shape: our on-chain x402 payload carries a txHash; a Circle
+      // Gateway (batching) payload does not (it is a signed off-chain authorization
+      // settled later). If the header has no txHash and the Gateway gate is on, treat
+      // it as a Gateway payment; otherwise fall back to the on-chain x402 path.
+      const looksOnchain = Boolean(payment.txHash || payment.transactionHash);
+      if (!looksOnchain && gatewayClient.available()) {
+        gateway = true;
+        gatewayPayload = payment;
+        try {
+          gatewayRequirements = await gatewayClient.buildRequirements({ amount: String(priceUnits), slug: slug, tier: tier });
+        } catch (error) {
+          console.error("[Gateway] buildRequirements error:", error.message);
+          gatewayRequirements = null;
+        }
+        if (!gatewayRequirements) {
+          sendJson(res, 402, { error: "gateway_unsupported", message: "Gateway payment is not available for this network." });
+          return;
+        }
+        let vr;
+        try {
+          vr = await gatewayClient.verify(gatewayPayload, gatewayRequirements);
+        } catch (error) {
+          console.error("[Gateway] verify error:", error.message);
+          sendJson(res, 502, { error: "verify_error", message: "Could not verify the Gateway payment." });
+          return;
+        }
+        if (!vr || !vr.isValid) {
+          sendJson(res, 402, { error: "payment_invalid", message: (vr && vr.invalidReason) || "Gateway payment authorization is not valid." });
+          return;
+        }
+        gatewayPayer = normalizeAddress(vr.payer || "");
+      } else {
+        x402 = true;
+        if (!ARC_TREASURY_ADDRESS) {
+          sendJson(res, 503, { error: "billing_unconfigured", message: "Treasury is not configured." });
+          return;
+        }
+        x402Payer = normalizeAddress(payment.payerWallet || payment.payer || "");
+        x402TxHash = normalizeTxHash(payment.txHash || payment.transactionHash || "");
+        if (!x402Payer || !x402TxHash) {
+          sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "X-PAYMENT needs payerWallet and txHash" } });
+          return;
+        }
+        if (isRunPaymentConsumed(x402TxHash)) {
+          sendJson(res, 409, { error: "already_settled", message: "This payment was already used for a run." });
+          return;
+        }
+        let verified;
+        try {
+          verified = await findPaymentInRpcReceipt({
+            txHash: x402TxHash,
+            payerWallet: x402Payer,
+            merchantWallet: ARC_TREASURY_ADDRESS,
+            amount: unitsToUsdcString(priceUnits),
+            requireInvoiceReference: false,
+          });
+        } catch (error) {
+          console.error("[Workflow] x402 verify error:", error.message);
+          sendJson(res, 502, { error: "verify_error", message: "Could not verify the payment." });
+          return;
+        }
+        if (!verified) {
+          sendJson(res, 402, { error: "payment_invalid", message: "No matching USDC payment of the exact price to the treasury was found in that transaction." });
+          return;
+        }
       }
     } else if (input.runId) {
       runId = String(input.runId || "");
@@ -1347,8 +1398,10 @@ async function handleWorkflowRun(req, res, slug) {
       }
       escrowPayer = normalizeAddress(onchain.payer);
     } else {
-      // x402 challenge: tell the agent how to pay (transfer the price to the treasury).
-      sendJson(res, 402, { accepts: [{
+      // 402 challenge: advertise every available gate so the agent picks one and
+      // pays through it. On-chain x402 (direct transfer to the treasury) is always
+      // offered; the Circle Gateway batching gate is added when enabled.
+      const accepts = [{
         scheme: "exact",
         network: "eip155:" + ARC_CHAIN_ID,
         maxAmountRequired: String(tierDef.priceUnits),
@@ -1358,7 +1411,22 @@ async function handleWorkflowRun(req, res, slug) {
         description: "Fundline workflow run: " + def.name + " (" + tier + ")",
         maxTimeoutSeconds: 3600,
         extra: { slug: slug, tier: tier },
-      }] });
+      }];
+      if (gatewayClient.available()) {
+        try {
+          const gwReq = await gatewayClient.buildRequirements({ amount: String(priceUnits), slug: slug, tier: tier });
+          if (gwReq) {
+            accepts.push(Object.assign({}, gwReq, {
+              maxAmountRequired: String(gwReq.amount),
+              resource: getRequestBaseUrl(req) + req.url,
+              description: "Fundline workflow run via Circle Gateway: " + def.name + " (" + tier + ")",
+            }));
+          }
+        } catch (error) {
+          console.error("[Gateway] challenge build error:", error.message);
+        }
+      }
+      sendJson(res, 402, { accepts: accepts });
       return;
     }
   }
@@ -1371,13 +1439,14 @@ async function handleWorkflowRun(req, res, slug) {
     sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
     return;
   }
-  // x402 and API-key agents get a single JSON response; the browser keeps SSE.
-  const jsonMode = agentAuth.ok || x402 || input.stream === false;
+  // x402, Gateway, and API-key agents get a single JSON response; the browser keeps SSE.
+  const jsonMode = agentAuth.ok || x402 || gateway || input.stream === false;
 
   const paths = workflowLimiterPaths();
   let ipKey;
   let runLimits;
   if (x402) { ipKey = "x402:" + x402Payer; runLimits = WORKFLOW_KEY_LIMITS; }
+  else if (gateway) { ipKey = "gw:" + gatewayPayer; runLimits = WORKFLOW_KEY_LIMITS; }
   else if (agentAuth.ok) { ipKey = agentAuth.rateKey; runLimits = WORKFLOW_KEY_LIMITS; }
   else { ipKey = workflowClientIpKey(req); runLimits = WORKFLOW_LIMITS; }
   const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: runLimits });
@@ -1459,7 +1528,22 @@ async function handleWorkflowRun(req, res, slug) {
 
     let releaseTx = null;
     let memoText = null;
-    if (billing && !x402) {
+    if (gateway) {
+      // Gateway path: verify() ran before the workflow; capture the payment now.
+      // A settle failure after a successful run means we were not paid, so we do
+      // NOT return output (the agent is not charged for an uncaptured run).
+      let sr;
+      try {
+        sr = await gatewayClient.settle(gatewayPayload, gatewayRequirements);
+      } catch (error) {
+        console.error("[Gateway] settle error:", error.message);
+        throw new Error("gateway_settle_failed");
+      }
+      if (!sr || !sr.success) {
+        throw new Error("gateway_settle_failed");
+      }
+      releaseTx = sr.transaction || null;
+    } else if (billing && !x402) {
       // Escrow path: treasury releases the funded run with an InvoiceMemo receipt.
       memoText = fundlineMemo.buildWorkflowMemoText({
         workflowName: def.name,
@@ -1495,7 +1579,7 @@ async function handleWorkflowRun(req, res, slug) {
       try { res.setHeader("X-PAYMENT-RESPONSE", Buffer.from(JSON.stringify({ txHash: x402TxHash })).toString("base64")); } catch (_) {}
     }
     // Log the paid run under the payer wallet so the agent can pull its own history later.
-    const historyWallet = x402 ? x402Payer : escrowPayer;
+    const historyWallet = x402 ? x402Payer : gateway ? gatewayPayer : escrowPayer;
     if (historyWallet) {
       recordWorkflowRun(historyWallet, {
         at: new Date().toISOString(),
@@ -1503,7 +1587,7 @@ async function handleWorkflowRun(req, res, slug) {
         name: def.name,
         tier: tier,
         priceUsdc: resultPayload.priceUsdc,
-        mode: x402 ? "x402" : "escrow",
+        mode: x402 ? "x402" : gateway ? "gateway" : "escrow",
         runId: runId || null,
         settlementTx: releaseTx || (x402 ? x402TxHash : null),
         explorerUrl: resultPayload.explorerUrl,
@@ -1530,9 +1614,11 @@ async function handleWorkflowRun(req, res, slug) {
     console.error("[Workflow] run error:", error.message);
     const errPayload = {
       error: "provider_error",
-      message: (billing || x402)
-        ? "The workflow could not complete; your payment was refunded."
-        : "The workflow could not complete right now.",
+      message: gateway
+        ? "The workflow could not complete; you were not charged."
+        : ((billing || x402)
+          ? "The workflow could not complete; your payment was refunded."
+          : "The workflow could not complete right now."),
     };
     if (jsonMode) { sendJson(res, 502, errPayload); } else { sendSSE("error", errPayload); }
   } finally {
