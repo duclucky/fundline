@@ -24,3 +24,11 @@ node_modules/
 Thumbs.db
 .vscode/
 .idea/
+
+# Internal dev tooling and scratch (kept local, not published)
+.claude/
+CLAUDE.md
+measure-*.js
+run-workflow-once.js
+estimate-workflow-cost.js
+patch_app.js
