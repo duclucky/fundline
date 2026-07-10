@@ -342,6 +342,12 @@ const WALLET_CIRCLE_ENABLED =
   Boolean(String(process.env.CIRCLE_API_KEY || "").trim());
 // Social login (Google) is a further opt-in; needs the provider's OAuth client set in the Console.
 const WALLET_CIRCLE_SOCIAL_ENABLED = String(process.env.WALLET_CIRCLE_SOCIAL_ENABLED || "").toLowerCase() === "true";
+
+// Privy embedded wallet (React island, wallet-privy.bundle.js) - an alternative wallet layer that
+// supports private-key export (import into MetaMask). App ID is PUBLIC (client-side). Off unless
+// WALLET_PRIVY_ENABLED=true; when on, wallet-loader.js loads the Privy bundle instead of wallet.js.
+const PRIVY_APP_ID = String(process.env.PRIVY_APP_ID || "cmrf5askg00c50ck5zu5r4cju").trim();
+const WALLET_PRIVY_ENABLED = String(process.env.WALLET_PRIVY_ENABLED || "").toLowerCase() === "true" && Boolean(PRIVY_APP_ID);
 const circleWalletClient = require("./circle-wallet-client").createCircleWalletClient({
   apiKey: String(process.env.CIRCLE_API_KEY || "").trim(),
   blockchain: process.env.CIRCLE_WALLET_BLOCKCHAIN || "ARC-TESTNET",
@@ -800,6 +806,8 @@ function handlePublicConfig(req, res) {
     circleAppId: CIRCLE_APP_ID,
     walletCircleEnabled: WALLET_CIRCLE_ENABLED,
     circleSocialEnabled: WALLET_CIRCLE_ENABLED && WALLET_CIRCLE_SOCIAL_ENABLED,
+    privyAppId: PRIVY_APP_ID,
+    walletPrivyEnabled: WALLET_PRIVY_ENABLED,
     workflowRunnerEnabled: WORKFLOW_RATE_LIMIT_ENABLED,
     workflowFreeRunsPerDay: WORKFLOW_RUNS_PER_IP_PER_DAY,
     workflowGenPromptsPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,

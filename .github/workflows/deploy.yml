@@ -48,6 +48,7 @@ jobs:
             **/CLAUDE.md
             **/docs-internal/**
             **/node_modules/**
+            wallet-privy/**
             **/.env
             **/*.env
             **/data/**

@@ -1,0 +1,19 @@
+{
+  "name": "wallet-privy",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "React wallet island (Privy embedded wallet) bundled to a single static file served by the Fundline app. Source lives here; the built artifact is ../wallet-privy.bundle.js. This subproject is NOT part of the app's npm install or CI; build it locally with npm install && npm run build.",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@privy-io/react-auth": "^2.13.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}
