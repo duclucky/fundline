@@ -51,7 +51,10 @@ window.FundlineWallet = {
         body: JSON.stringify({ walletId: api.walletId, address: api.address, to: tx.to, data: tx.data || "0x", value: tx.value }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.hash) throw new Error((j.error && j.error.message) || "Transaction failed.");
+      if (!r.ok || !j.hash) {
+        try { console.error("[privy] run-tx failed", r.status, JSON.stringify(j)); } catch (e) {}
+        throw new Error((j.error && j.error.message) || "Transaction failed.");
+      }
       return j.hash;
     }
     if (!api.getProvider) throw new Error("Wallet is not ready.");
