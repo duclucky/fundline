@@ -129,7 +129,7 @@ function Widget() {
         <span className="ww-addr-text">{shortAddr(address)}</span>
       </button>
       {open ? (
-        <div className="ww-panel is-open" style={{ position: "fixed", left: 300, bottom: 20 }}>
+        <div className="ww-panel is-open" style={{ position: "fixed", left: 16, right: "auto", bottom: 16, zIndex: 90, width: "min(320px, calc(100vw - 32px))", maxHeight: "80vh", overflowY: "auto" }}>
           <div className="ww-panel-head">
             <strong>Wallet</strong>
             <button className="ww-panel-close" onClick={() => setOpen(false)} aria-label="Close">x</button>
