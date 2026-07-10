@@ -90,6 +90,39 @@ a {
   overflow: hidden auto;
 }
 
+/* Mobile nav: floating hamburger + off-canvas drawer. Hidden on wide screens;
+   the media query below turns the sidebar into the drawer under 980px. */
+.nav-toggle {
+  display: none;
+  position: fixed;
+  top: 10px;
+  left: 12px;
+  z-index: 70;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+  background: rgba(10, 9, 5, 0.96);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+}
+
+.nav-toggle svg {
+  width: 22px;
+  height: 22px;
+}
+
+.nav-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(4, 6, 4, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -404,7 +437,8 @@ a {
   gap: 20px;
   align-content: start;
   width: 100%;
-  max-width: 1220px;
+  max-width: 1500px;
+  margin: 0 auto;
   padding: 34px;
 }
 
@@ -1861,6 +1895,46 @@ select {
   text-decoration: none;
 }
 
+.payment-received-title {
+  color: #dce9ff;
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.payment-received-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.payment-received-list > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.payment-received-list dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.payment-received-list dd {
+  margin: 0;
+  color: #dce9ff;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.payment-received-detail {
+  justify-self: start;
+}
+
 .pay-item,
 .summary-line {
   display: grid;
@@ -1966,9 +2040,45 @@ select {
     grid-template-columns: 1fr;
   }
 
+  /* Sidebar slides in from the left as an off-canvas drawer. */
   .side {
-    position: static;
-    height: auto;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 60;
+    width: min(86vw, 300px);
+    height: 100vh;
+    height: 100dvh;
+    transform: translateX(-100%);
+    transition: transform 0.28s ease;
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.55);
+  }
+
+  body.nav-open .side {
+    transform: translateX(0);
+  }
+
+  body.nav-open .nav-overlay {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .nav-toggle {
+    display: inline-flex;
+  }
+
+  /* Leave room at the top for the fixed hamburger. */
+  body {
+    padding-top: 60px;
+  }
+
+  /* The pay page hides the sidebar, so it needs neither the hamburger nor the offset. */
+  .payment-mode {
+    padding-top: 0;
+  }
+
+  .payment-mode .nav-toggle {
+    display: none;
   }
 
   .stats-grid {

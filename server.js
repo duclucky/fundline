@@ -331,6 +331,20 @@ const gatewayClient = require("./gateway-client").createGatewayClient({
   asset: ARC_USDC_TOKEN_ADDRESS,
   arcPrivateMainnet: String(process.env.GATEWAY_ARC_PRIVATE_MAINNET || "").toLowerCase() === "true",
 });
+// Circle User-Controlled Wallets (email/social login), an OPTIONAL parallel wallet option
+// alongside the external wallets. OFF unless WALLET_CIRCLE_ENABLED=true AND CIRCLE_API_KEY is set,
+// so prod is unchanged until configured in cPanel. Non-custodial: the user controls the key via
+// Circle MPC; Fundline only proxies challenge orchestration with the API key and never holds a key
+// or an entity secret (UCW does not use one). Spec: .claude/circle-ucw-wallet-spec.md
+const CIRCLE_APP_ID = String(process.env.CIRCLE_APP_ID || "").trim();
+const WALLET_CIRCLE_ENABLED =
+  String(process.env.WALLET_CIRCLE_ENABLED || "").toLowerCase() === "true" &&
+  Boolean(String(process.env.CIRCLE_API_KEY || "").trim());
+const circleWalletClient = require("./circle-wallet-client").createCircleWalletClient({
+  apiKey: String(process.env.CIRCLE_API_KEY || "").trim(),
+  blockchain: process.env.CIRCLE_WALLET_BLOCKCHAIN || "ARC-TESTNET",
+  accountType: process.env.CIRCLE_WALLET_ACCOUNT_TYPE || "SCA",
+});
 const TELEGRAM_LONG_POLL_SECONDS = getTelegramLongPollSeconds();
 const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const INVOICE_PAID_TOPIC = "0x3c732fcd5451057e3d8cb6784128fcc1db83ea499c9d5e0141f37aee34d328db";
@@ -569,6 +583,23 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/wallet/circle/email/token") {
+    handleCircleEmailToken(req, res);
+    return;
+  }
+  if (url.pathname === "/api/wallet/circle/initialize") {
+    handleCircleInitialize(req, res);
+    return;
+  }
+  if (url.pathname === "/api/wallet/circle/wallets") {
+    handleCircleWallets(req, res);
+    return;
+  }
+  if (url.pathname === "/api/wallet/circle/user-token") {
+    handleCircleUserToken(req, res);
+    return;
+  }
+
   if (url.pathname === "/api/workflows") {
     handleWorkflowList(req, res, url);
     return;
@@ -752,6 +783,8 @@ function handlePublicConfig(req, res) {
     gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
     gatewayEnabled: Boolean(CIRCLE_GATEWAY_API_KEY),
     walletConnectProjectId: WALLETCONNECT_PROJECT_ID,
+    circleAppId: CIRCLE_APP_ID,
+    walletCircleEnabled: WALLET_CIRCLE_ENABLED,
     workflowRunnerEnabled: WORKFLOW_RATE_LIMIT_ENABLED,
     workflowFreeRunsPerDay: WORKFLOW_RUNS_PER_IP_PER_DAY,
     workflowGenPromptsPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
@@ -4615,6 +4648,92 @@ async function handleGatewayTransfer(req, res) {
   } catch (error) {
     console.error("[Gateway] transfer error:", error.message);
     sendJson(res, 502, { error: { code: "GATEWAY_ERROR", message: error.message } });
+  }
+}
+
+// --- Circle User-Controlled Wallet proxy endpoints (P1: email login + create + read) ---
+// These add the server-only Circle API key (Bearer) to each call and forward to Circle, so the key
+// never reaches the browser. They orchestrate the user's own wallet challenges; they never move
+// funds (the user approves each challenge in the Web SDK). Off unless WALLET_CIRCLE_ENABLED.
+function circleGuard(req, res) {
+  if (!WALLET_CIRCLE_ENABLED) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Circle wallet is not enabled" } });
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return false;
+  }
+  return true;
+}
+
+async function handleCircleEmailToken(req, res) {
+  if (!circleGuard(req, res)) return;
+  try {
+    const body = await readJsonBody(req);
+    const deviceId = String(body.deviceId || "").trim();
+    const email = String(body.email || "").trim();
+    if (!deviceId || !email) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "deviceId and email are required" } });
+      return;
+    }
+    const data = await circleWalletClient.createEmailDeviceToken({ deviceId, email });
+    sendJson(res, 200, data);
+  } catch (error) {
+    console.error("[Circle] email token error:", error.message);
+    sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
+  }
+}
+
+async function handleCircleInitialize(req, res) {
+  if (!circleGuard(req, res)) return;
+  try {
+    const body = await readJsonBody(req);
+    const userToken = String(body.userToken || "").trim();
+    if (!userToken) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "userToken is required" } });
+      return;
+    }
+    const data = await circleWalletClient.initializeWallet({ userToken });
+    sendJson(res, 200, data);
+  } catch (error) {
+    console.error("[Circle] initialize error:", error.message);
+    sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
+  }
+}
+
+async function handleCircleWallets(req, res) {
+  if (!circleGuard(req, res)) return;
+  try {
+    const body = await readJsonBody(req);
+    const userToken = String(body.userToken || "").trim();
+    if (!userToken) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "userToken is required" } });
+      return;
+    }
+    const wallets = await circleWalletClient.listWallets({ userToken });
+    const primary = await circleWalletClient.getPrimaryWallet({ userToken });
+    sendJson(res, 200, { wallets, primary });
+  } catch (error) {
+    console.error("[Circle] wallets error:", error.message);
+    sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
+  }
+}
+
+async function handleCircleUserToken(req, res) {
+  if (!circleGuard(req, res)) return;
+  try {
+    const body = await readJsonBody(req);
+    const userId = String(body.userId || "").trim();
+    if (!userId) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "userId is required" } });
+      return;
+    }
+    const data = await circleWalletClient.createUserToken({ userId });
+    sendJson(res, 200, data);
+  } catch (error) {
+    console.error("[Circle] user token error:", error.message);
+    sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
   }
 }
 

@@ -11,6 +11,7 @@
   var ARC_CHAIN_ID_HEX = "0x4cef52"; // 5042002
   var ARC_USDC = "0x3600000000000000000000000000000000000000";
   var ARC_EXPLORER = "https://testnet.arcscan.app";
+  var ARC_RPC = "https://rpc.testnet.arc.network";
   var ERC20_BALANCE_OF = "0x70a08231";
 
   var session = null;         // { address, authAt }
@@ -69,7 +70,7 @@
     try {
       var raw = localStorage.getItem(SESSION_KEY);
       var obj = raw ? JSON.parse(raw) : null;
-      if (obj && normalizeAddress(obj.address)) return { address: normalizeAddress(obj.address), authAt: obj.authAt || "" };
+      if (obj && normalizeAddress(obj.address)) return { address: normalizeAddress(obj.address), authAt: obj.authAt || "", kind: obj.kind || "" };
     } catch (e) {}
     return null;
   }
@@ -115,6 +116,10 @@
     if (config.walletConnectProjectId) {
       options.push({ kind: "walletconnect", name: "WalletConnect (scan with mobile)", icon: "" });
     }
+    // Mainstream option first: create or open a wallet with just an email (Circle, no extension).
+    if (config.walletCircleEnabled && config.circleAppId) {
+      options.unshift({ kind: "circle", name: "Continue with email" });
+    }
     return options;
   }
 
@@ -143,7 +148,42 @@
       await connectWithWalletConnect();
       return session ? session.address : "";
     }
+    if (option.kind === "circle") {
+      await connectWithCircleEmail();
+      return session ? session.address : "";
+    }
     return await connectWithProvider(option.provider, option.name);
+  }
+
+  // Make sure the wallet is on Arc Testnet. Tries to switch, and adds the network if the
+  // wallet does not know it yet, so the user never has to add or switch the chain by hand.
+  // Best-effort: any failure (including the user declining) is swallowed so it never blocks
+  // the session. The pay and run flows re-check the network before sending a transaction.
+  async function ensureArcNetwork(p) {
+    if (!p || !p.request) return;
+    try {
+      var current = String(await p.request({ method: "eth_chainId" })).toLowerCase();
+      if (current === ARC_CHAIN_ID_HEX) return;
+      try {
+        await p.request({ method: "wallet_switchEthereumChain", params: [{ chainId: ARC_CHAIN_ID_HEX }] });
+      } catch (err) {
+        if (Number(err && err.code) !== 4902) throw err;
+        await p.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: ARC_CHAIN_ID_HEX,
+              chainName: "Arc Testnet",
+              nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+              rpcUrls: [ARC_RPC],
+              blockExplorerUrls: [ARC_EXPLORER],
+            },
+          ],
+        });
+      }
+    } catch (err) {
+      if (typeof console !== "undefined") console.warn("Arc network switch skipped:", err && err.message);
+    }
   }
 
   async function connectWithProvider(p, name) {
@@ -153,6 +193,7 @@
       var accounts = await p.request({ method: "eth_requestAccounts" });
       var address = normalizeAddress(accounts && accounts[0]);
       if (!address) throw new Error("Wallet did not return a valid address.");
+      await ensureArcNetwork(p);
       var issuedAt = new Date().toISOString();
       var message = [
         "Sign in to Fundline",
@@ -248,6 +289,103 @@
     } catch (err) {
       closePickerDialog();
       if (Number(err && err.code) !== 4001) alert((err && err.message) || "WalletConnect connection cancelled.");
+    }
+  }
+
+  // --- Circle user-controlled wallet (email login) ---
+  // Optional wallet option so a mainstream user can create or open a wallet with just an email,
+  // no extension. The user controls the key via Circle MPC; the server only proxies the calls with
+  // its API key (never a key or entity secret). Gated on /api/config.walletCircleEnabled, so it is
+  // dormant until configured. NOTE: the Web SDK method sequence (updateConfigs + verifyOtp) follows
+  // Circle's docs; re-verify it live against the installed SDK version when first enabling this.
+  var _circleSdkPromise = null;
+  function loadCircleSdk() {
+    if (!_circleSdkPromise) {
+      _circleSdkPromise = import("https://esm.sh/@circle-fin/w3s-pw-web-sdk").then(function (mod) {
+        var W3SSdk = mod.W3SSdk || (mod.default && mod.default.W3SSdk) || mod.default;
+        if (!W3SSdk) throw new Error("Circle Web SDK failed to load.");
+        return W3SSdk;
+      });
+    }
+    return _circleSdkPromise;
+  }
+
+  async function circlePostJson(path, body) {
+    var res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    var json = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error((json && json.error && json.error.message) || "Request failed.");
+    return json;
+  }
+
+  // Drive the SDK OTP UI and resolve with { userToken, encryptionKey }.
+  function circleVerifyEmailOtp(sdk, appId, tokenResp) {
+    return new Promise(function (resolve, reject) {
+      try {
+        sdk.updateConfigs(
+          {
+            appSettings: { appId: appId },
+            authentication: {
+              userToken: "",
+              encryptionKey: "",
+              otpToken: tokenResp.otpToken,
+              deviceToken: tokenResp.deviceToken,
+              deviceEncryptionKey: tokenResp.deviceEncryptionKey,
+            },
+          },
+          function (error, result) {
+            if (error) { reject(new Error(error.message || "OTP verification failed.")); return; }
+            if (result && result.userToken && result.encryptionKey) {
+              resolve({ userToken: result.userToken, encryptionKey: result.encryptionKey });
+            } else {
+              reject(new Error("OTP verification did not return a session."));
+            }
+          },
+        );
+        sdk.verifyOtp();
+      } catch (err) { reject(err); }
+    });
+  }
+
+  // Execute a wallet-creation (or other) challenge in the SDK.
+  function circleExecute(sdk, userToken, encryptionKey, challengeId) {
+    return new Promise(function (resolve, reject) {
+      try {
+        sdk.setAuthentication({ userToken: userToken, encryptionKey: encryptionKey });
+        sdk.execute(challengeId, function (error, result) {
+          if (error) { reject(new Error(error.message || "Wallet setup failed.")); return; }
+          resolve(result);
+        });
+      } catch (err) { reject(err); }
+    });
+  }
+
+  async function connectWithCircleEmail() {
+    var config = await getPublicConfig();
+    if (!config.walletCircleEnabled || !config.circleAppId) { alert("Email sign-in is not available right now."); return; }
+    var email = (window.prompt("Enter your email to create or open your wallet:") || "").trim();
+    if (!email) return;
+    try {
+      var W3SSdk = await loadCircleSdk();
+      var sdk = new W3SSdk({ configs: { appSettings: { appId: config.circleAppId } } });
+      var deviceId = await sdk.getDeviceId();
+      var tokenResp = await circlePostJson("/api/wallet/circle/email/token", { deviceId: deviceId, email: email });
+      var login = await circleVerifyEmailOtp(sdk, config.circleAppId, tokenResp);
+      var walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
+      if (!walletsResp.primary || !walletsResp.primary.address) {
+        var init = await circlePostJson("/api/wallet/circle/initialize", { userToken: login.userToken });
+        if (init.challengeId) await circleExecute(sdk, login.userToken, login.encryptionKey, init.challengeId);
+        walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
+      }
+      var address = normalizeAddress(walletsResp.primary && walletsResp.primary.address);
+      if (!address) throw new Error("Wallet was not created. Please try again.");
+      session = { address: address, authAt: new Date().toISOString(), kind: "circle" };
+      saveSession(session);
+      closePickerDialog();
+      render();
+      emitChange();
+    } catch (err) {
+      closePickerDialog();
+      alert((err && err.message) || "Email sign-in failed. Please try again.");
     }
   }
 
@@ -355,6 +493,8 @@
     render();
     var stored = loadSession();
     if (!stored) return;
+    // Circle wallets have no injected provider to check against; restore the address directly.
+    if (stored.kind === "circle") { session = stored; render(); emitChange(); return; }
     // Give EIP-6963 wallets a tick to announce themselves before reading ethereum.
     await new Promise(function (r) { setTimeout(r, 50); });
     var p = getProvider();
@@ -376,10 +516,24 @@
 
   // --- balance ---
   async function fetchArcUsdcBalance() {
+    if (!session) return null;
+    var data = ERC20_BALANCE_OF + encAddr(session.address);
+    // Circle wallets have no injected provider; read the balance over the public Arc RPC.
+    if (session.kind === "circle") {
+      try {
+        var cfg = await getPublicConfig();
+        var r = await fetch(cfg.rpcUrl || ARC_RPC, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: ARC_USDC, data: data }, "latest"] }),
+        });
+        var j = await r.json();
+        return formatUnits6(j && j.result);
+      } catch (e) { return null; }
+    }
     var p = getProvider();
-    if (!p || !session) return null;
+    if (!p) return null;
     try {
-      var data = ERC20_BALANCE_OF + encAddr(session.address);
       var res = await p.request({ method: "eth_call", params: [{ to: ARC_USDC, data: data }, "latest"] });
       return formatUnits6(res);
     } catch (e) { return null; }
@@ -472,15 +626,30 @@
     panel.hidden = true;
   }
 
+  // Single send path for the whole dApp. Today it is a thin EIP-1193 eth_sendTransaction on the
+  // active external wallet; centralizing it here means a future non-EOA wallet kind (e.g. a Circle
+  // user-controlled wallet, which signs via a challenge instead of eth_sendTransaction) can be
+  // added in ONE place without touching every call site. The caller is responsible for putting the
+  // wallet on the correct network first (ensureArcChain / ensurePaymentNetwork), same as before.
+  async function sendTransaction(tx) {
+    tx = tx || {};
+    var p = getProvider();
+    if (!p || !p.request) throw new Error("No wallet provider available.");
+    var params = { from: tx.from || (session && session.address) || "", to: tx.to, data: tx.data || "0x" };
+    if (tx.value !== undefined && tx.value !== null) params.value = tx.value;
+    return await p.request({ method: "eth_sendTransaction", params: [params] });
+  }
+
   // --- public API ---
   window.FundlineWallet = {
     getAddress: function () { return session ? session.address : ""; },
-    getSession: function () { return session ? { address: session.address, authAt: session.authAt } : null; },
+    getSession: function () { return session ? { address: session.address, authAt: session.authAt, kind: session.kind || "" } : null; },
     isConnected: function () { return Boolean(session && session.address); },
     getProvider: getProvider,
     connect: connect,
     disconnect: disconnect,
     refreshBalance: fetchArcUsdcBalance,
+    sendTransaction: sendTransaction,
   };
 
   if (document.readyState === "loading") {

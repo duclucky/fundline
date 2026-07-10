@@ -907,7 +907,10 @@ const ESCROW_FUND_SELECTOR = "0xe46bbc9e"; // fund(bytes32,uint256)
 const MAX_UINT256 = (2n ** 256n) - 1n; // one-time approval cap
 
 function getEthProvider() {
-  return (typeof window !== "undefined" && window.ethereum) ? window.ethereum : null;
+  if (typeof window === "undefined") return null;
+  // Prefer the shared dApp session's active provider so network-ensure and the send agree on the
+  // same wallet (matches app.js). Falls back to the injected provider.
+  return (window.FundlineWallet && window.FundlineWallet.getProvider && window.FundlineWallet.getProvider()) || window.ethereum || null;
 }
 function encAddr(a) { return String(a).toLowerCase().replace(/^0x/, "").padStart(64, "0"); }
 function encUint(n) { return BigInt(n).toString(16).padStart(64, "0"); }
@@ -928,7 +931,8 @@ async function readAllowance(provider, usdc, owner, spender) {
   return BigInt(res || "0x0");
 }
 async function sendWalletTx(provider, from, to, data) {
-  return provider.request({ method: "eth_sendTransaction", params: [{ from, to, data, value: "0x0" }] });
+  // Route through the shared wallet adapter so a future non-EOA wallet kind is handled in one place.
+  return window.FundlineWallet.sendTransaction({ from, to, data, value: "0x0" });
 }
 async function waitWalletTx(provider, hash) {
   for (let i = 0; i < 60; i += 1) {

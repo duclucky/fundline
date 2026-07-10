@@ -444,14 +444,16 @@ function syncWalletFromShared() {
 function disconnectWallet(options = {}) {
   state.wallet = { connected: false, address: "", balance: "", authAt: "" };
   state.walletMenuOpen = false;
+  // On the public pay page, state.invoices holds only the single invoice being paid
+  // (fetched by id), not the payer's own invoices. Disconnecting must not wipe it, or the
+  // pay page would flip to "Invoice not found" until a reload. Only clear the merchant
+  // cache when we are in the dashboard, where the wipe is a security requirement.
   if (!isPayRoute()) {
     state.settings = { ...state.settings, merchantWallet: "" };
     saveSettings();
+    state.invoices = [];
+    saveInvoices();
   }
-  
-  state.invoices = [];
-  saveInvoices();
-  
   refreshCurrentView();
   if (!options.silent) showToast("Wallet disconnected.");
 }
@@ -585,18 +587,30 @@ async function syncInvoicesFromServer() {
   }
 }
 
-async function loadPayInvoice(invoiceId) {
+async function loadPayInvoice(invoiceId, attempt = 0) {
   if (!invoiceId) return null;
+  let transient = false;
   try {
     const response = await fetch(`/api/invoices/${encodeURIComponent(invoiceId)}`);
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.invoice) throw new Error(payload.error || "Invoice not found");
-    upsertInvoice(payload.invoice);
-    saveInvoices();
-    return payload.invoice;
+    if (response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      if (payload.invoice) {
+        upsertInvoice(payload.invoice);
+        saveInvoices();
+        return payload.invoice;
+      }
+    } else if (response.status >= 500) {
+      transient = true; // server hiccup or cold start, worth a retry
+    }
+    // A 404 (or other 4xx) means the invoice is genuinely missing, so do not retry.
   } catch {
-    return state.invoices.find((item) => item.id === invoiceId) || null;
+    transient = true; // network error, worth a retry
   }
+  if (transient && attempt < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    return loadPayInvoice(invoiceId, attempt + 1);
+  }
+  return state.invoices.find((item) => item.id === invoiceId) || null;
 }
 
 function upsertInvoice(invoice) {
@@ -660,6 +674,7 @@ function getFilteredInvoices() {
     .filter((invoice) => {
       if (state.filter === "paid") return invoice.status === "paid";
       if (state.filter === "open") return getInvoiceStatus(invoice) === "open";
+      if (state.filter === "overdue") return getInvoiceStatus(invoice) === "expired";
       return true;
     })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1186,7 +1201,6 @@ function renderPayPage(invoiceId) {
             <article><span>Client</span><strong>${escapeHtml(invoice.clientName)}</strong></article>
             <article><span>Due date</span><strong>${escapeHtml(formatDate(invoice.dueDate))}</strong></article>
             <article><span>Receiving wallet</span><strong>${escapeHtml(invoice.merchantWallet)}</strong></article>
-            <article><span>Payment reference ID</span><strong>${escapeHtml(invoice.onchainInvoiceId)}</strong></article>
           </div>
         </section>
 
@@ -1288,10 +1302,17 @@ function renderPaymentVerification(invoice) {
 
 function renderVerifiedPayment(invoice) {
   const explorerUrl = invoice.txHash ? getTxExplorerUrl(invoice.txHash) : "";
+  const paidAt = invoice.paidAt ? formatDateTime(invoice.paidAt) : "";
   return `
-    <div class="verified-payment">
-      <span>Verified payment</span>
-      ${explorerUrl ? `<a href="${escapeHtml(explorerUrl)}" target="_blank" rel="noreferrer" class="tx-hash-link"><strong>${escapeHtml(invoice.txHash || "demo")}</strong></a>` : `<strong>${escapeHtml(invoice.txHash || "demo")}</strong>`}
+    <div class="verified-payment payment-received">
+      <span class="payment-received-title">Payment received</span>
+      <dl class="payment-received-list">
+        <div><dt>Invoice</dt><dd>${escapeHtml(invoice.number)}</dd></div>
+        <div><dt>Client</dt><dd>${escapeHtml(invoice.clientName)}</dd></div>
+        <div><dt>Amount</dt><dd>${formatUsdc(invoice.total)} USDC</dd></div>
+        ${paidAt ? `<div><dt>Paid at</dt><dd>${escapeHtml(paidAt)}</dd></div>` : ""}
+      </dl>
+      ${explorerUrl ? `<a href="${escapeHtml(explorerUrl)}" target="_blank" rel="noreferrer" class="payment-received-detail">Detail</a>` : ""}
     </div>
   `;
 }
@@ -2070,10 +2091,7 @@ async function rpcCall(rpcUrl, method, params) {
 
 function sendUsdcApprove(provider, { from, token, spender, amount }) {
   const data = `${ERC20_APPROVE_SELECTOR}${encodeAddress(spender)}${encodeUint256(amount)}`;
-  return provider.request({
-    method: "eth_sendTransaction",
-    params: [{ from, to: token, data, value: "0x0" }],
-  });
+  return window.FundlineWallet.sendTransaction({ from, to: token, data, value: "0x0" });
 }
 
 async function waitForArcTx(provider, txHash) {
@@ -2095,10 +2113,7 @@ function sendRouterPayment(provider, { from, router, invoiceId, merchantWallet, 
   const invoiceBytes = normalizeBytes32(invoiceId);
   if (!invoiceBytes) throw new Error("Invoice is missing a valid onchain invoice ID.");
   const data = `${PAYMENT_ROUTER_PAY_SELECTOR}${encodeBytes32(invoiceBytes)}${encodeAddress(merchantWallet)}${encodeUint256(amount)}`;
-  return provider.request({
-    method: "eth_sendTransaction",
-    params: [{ from, to: router, data, value: "0x0" }],
-  });
+  return window.FundlineWallet.sendTransaction({ from, to: router, data, value: "0x0" });
 }
 
 async function resolveCctpFee({ sourceDomain, destinationDomain, amountUnits, fast }) {
@@ -2181,10 +2196,7 @@ async function sendCctpBurn(provider, { from, source, destination, amount, recip
     encodeUint256(feeInfo.maxFee) +
     encodeUint256(feeInfo.minFinalityThreshold);
     
-  return provider.request({
-    method: "eth_sendTransaction",
-    params: [{ from, to: CCTP_TOKEN_MESSENGER_V2, data, value: "0x0" }],
-  });
+  return window.FundlineWallet.sendTransaction({ from, to: CCTP_TOKEN_MESSENGER_V2, data, value: "0x0" });
 }
 
 async function fetchCctpAttestation(sourceDomain, txHash) {
@@ -2208,10 +2220,7 @@ async function fetchCctpAttestation(sourceDomain, txHash) {
 
 function sendCctpMint(provider, { from, message, attestation }) {
   const data = CCTP_RECEIVE_MESSAGE_SELECTOR + encodeDynamicBytesPair(message, attestation);
-  return provider.request({
-    method: "eth_sendTransaction",
-    params: [{ from, to: CCTP_MESSAGE_TRANSMITTER_V2, data, value: "0x0" }],
-  });
+  return window.FundlineWallet.sendTransaction({ from, to: CCTP_MESSAGE_TRANSMITTER_V2, data, value: "0x0" });
 }
 
 async function waitForTransaction(provider, txHash, options = {}) {
@@ -3523,10 +3532,7 @@ function sendBatchPayment(provider, { from, router, batch }) {
   const data = batch.withMemo
     ? window.FundlineBatch.encodePayBatchWithMemo({ batchId, recipients, amounts, memos: batch.items.map((item) => item.reference || "") })
     : window.FundlineBatch.encodePayBatch({ batchId, recipients, amounts });
-  return provider.request({
-    method: "eth_sendTransaction",
-    params: [{ from, to: router, data, value: "0x0" }],
-  });
+  return window.FundlineWallet.sendTransaction({ from, to: router, data, value: "0x0" });
 }
 
 async function verifyBatch(id, payerWallet, txHash) {
