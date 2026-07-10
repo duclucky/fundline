@@ -426,7 +426,7 @@
         // fire the challenge and poll for the wallet instead of blocking on the callback (this was the
         // "entered PIN, popup closed, but still not logged in" hang on first-time wallet creation).
         circleExecute(sdk, login.userToken, login.encryptionKey, init.challengeId).catch(function () {});
-        walletsResp = await pollCircleWallet(login.userToken, 30);
+        walletsResp = await pollCircleWallet(login.userToken, 45);
       }
     }
     var address = normalizeAddress(walletsResp.primary && walletsResp.primary.address);
