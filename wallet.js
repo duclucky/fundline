@@ -360,7 +360,6 @@
       var sdk = new W3SSdk(
         { appSettings: { appId: appId } },
         function (error, result) {
-          try { console.log("[circle] onLoginComplete", error, result); } catch (e) {}
           if (error) { reject(new Error(error.message || "OTP verification failed.")); return; }
           var auth = circlePickAuth(result);
           if (auth.userToken && auth.encryptionKey) resolve({ sdk: sdk, userToken: auth.userToken, encryptionKey: auth.encryptionKey });
@@ -392,14 +391,12 @@
   function circleExecute(sdk, userToken, encryptionKey, challengeId) {
     return new Promise(function (resolve, reject) {
       try {
-        try { console.log("[circle] execute challenge", challengeId); } catch (e) {}
         sdk.setAuthentication({ userToken: userToken, encryptionKey: encryptionKey });
         sdk.execute(challengeId, function (error, result) {
-          try { console.log("[circle] execute result", error, result); } catch (e) {}
           if (error) { reject(new Error(error.message || "Wallet setup failed.")); return; }
           resolve(result);
         });
-      } catch (err) { try { console.error("[circle] execute threw", err); } catch (e) {} reject(err); }
+      } catch (err) { reject(err); }
     });
   }
 
@@ -407,16 +404,11 @@
   // set the shared session. Keeps the live SDK + userToken in memory for signing (P2/P3); the
   // userToken is short-lived and never persisted, so the signing path re-authenticates after reload.
   async function finishCircleLogin(sdk, login) {
-    try { console.log("[circle] finishCircleLogin: fetching wallets"); } catch (e) {}
     var walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
-    try { console.log("[circle] wallets", walletsResp); } catch (e) {}
     if (!walletsResp.primary || !walletsResp.primary.address) {
-      try { console.log("[circle] no wallet yet, initializing"); } catch (e) {}
       var init = await circlePostJson("/api/wallet/circle/initialize", { userToken: login.userToken });
-      try { console.log("[circle] initialize", init); } catch (e) {}
       if (init.challengeId) await circleExecute(sdk, login.userToken, login.encryptionKey, init.challengeId);
       walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
-      try { console.log("[circle] wallets after init", walletsResp); } catch (e) {}
     }
     var address = normalizeAddress(walletsResp.primary && walletsResp.primary.address);
     if (!address) throw new Error("Wallet was not created. Please try again.");
@@ -475,11 +467,8 @@
     try {
       var W3SSdk = await loadCircleSdk();
       var login = await circleEmailLogin(W3SSdk, config.circleAppId, email);
-      try { console.log("[circle] login resolved, finishing"); } catch (e) {}
       await finishCircleLogin(login.sdk, { userToken: login.userToken, encryptionKey: login.encryptionKey });
-      try { console.log("[circle] login complete, session set"); } catch (e) {}
     } catch (err) {
-      try { console.error("[circle] email login failed", err); } catch (e) {}
       renderCircleEmailStep(config, (err && err.message) || "Sign-in failed. Please try again.");
     }
   }
