@@ -313,9 +313,11 @@
     if (!_circleSdkPromise) {
       // The SDK bundles poorly as a raw ESM import, so try CDNs that inline dependencies. If all
       // fail, reset so the next attempt can retry (a rejected cached promise would stick forever).
+      // jsDelivr /+esm is pre-built and CDN-cached (most stable). esm.sh?bundle builds on demand and
+      // can be slow or 500 on a cold build, which is the likely cause of intermittent load failures.
       var urls = [
-        "https://esm.sh/@circle-fin/w3s-pw-web-sdk?bundle",
         "https://cdn.jsdelivr.net/npm/@circle-fin/w3s-pw-web-sdk/+esm",
+        "https://esm.sh/@circle-fin/w3s-pw-web-sdk?bundle",
         "https://esm.sh/@circle-fin/w3s-pw-web-sdk",
       ];
       _circleSdkPromise = (async function () {
@@ -326,7 +328,7 @@
             var W3SSdk = mod.W3SSdk || (mod.default && mod.default.W3SSdk) || mod.default;
             if (W3SSdk) return W3SSdk;
             lastErr = new Error("W3SSdk export not found");
-          } catch (e) { lastErr = e; }
+          } catch (e) { lastErr = e; try { console.warn("[circle] SDK load failed:", urls[i], (e && e.message) || e); } catch (er) {} }
         }
         throw new Error("Circle Web SDK failed to load. " + ((lastErr && lastErr.message) || ""));
       })().catch(function (e) { _circleSdkPromise = null; throw e; });
@@ -469,6 +471,7 @@
       var login = await circleEmailLogin(W3SSdk, config.circleAppId, email);
       await finishCircleLogin(login.sdk, { userToken: login.userToken, encryptionKey: login.encryptionKey });
     } catch (err) {
+      try { console.error("[circle] email login failed:", err); } catch (e) {}
       renderCircleEmailStep(config, (err && err.message) || "Sign-in failed. Please try again.");
     }
   }
