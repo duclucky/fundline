@@ -143,7 +143,10 @@ function Widget() {
             </div>
           </div>
           {mfaEnrolled ? (
-            <div className="ww-panel-note" style={{ color: "#6df7a0" }}>2FA is on. Export and signing require your authenticator code.</div>
+            <>
+              <div className="ww-panel-note" style={{ color: "#6df7a0" }}>2FA is on. Export requires your authenticator code.</div>
+              <button className="ww-send" onClick={() => exportWallet()}>Export private key</button>
+            </>
           ) : mfaStep === "setup" ? (
             <div>
               <div className="ww-panel-label">Set up 2FA</div>
@@ -162,10 +165,12 @@ function Widget() {
               <button className="ww-send" onClick={confirmMfa}>Confirm 2FA</button>
             </div>
           ) : (
-            <button className="ww-send" onClick={startMfa}>Enable 2FA (protect export)</button>
+            <>
+              <p className="ww-panel-note">Enable 2FA to protect your private key. Export is locked until 2FA is on.</p>
+              <button className="ww-send" onClick={startMfa}>Enable 2FA to export</button>
+            </>
           )}
           {mfaMsg ? <div className="ww-panel-note">{mfaMsg}</div> : null}
-          <button className="ww-send" onClick={() => exportWallet()}>Export private key</button>
           <button className="ww-logout" onClick={() => { logout(); setOpen(false); }}>Disconnect</button>
         </div>
       ) : null}
