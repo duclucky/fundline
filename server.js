@@ -352,7 +352,7 @@ const WALLET_PRIVY_ENABLED = String(process.env.WALLET_PRIVY_ENABLED || "").toLo
 // authorization key so those runs skip the user's MFA, while export + withdraw stay client-side (MFA).
 // Secrets (app secret + authorization private key) are server-only. Off unless WALLET_PRIVY_POLICY_ENABLED.
 const PRIVY_APP_SECRET = String(process.env.PRIVY_APP_SECRET || "").trim();
-const PRIVY_AUTHORIZATION_KEY_ID = String(process.env.PRIVY_AUTHORIZATION_KEY_ID || "t53hfhmx4yvn0iae8i33kzw2").trim();
+const PRIVY_AUTHORIZATION_KEY_ID = String(process.env.PRIVY_AUTHORIZATION_KEY_ID || "").trim();
 const PRIVY_AUTHORIZATION_PRIVATE_KEY = String(process.env.PRIVY_AUTHORIZATION_PRIVATE_KEY || "").trim();
 const WALLET_PRIVY_POLICY_ENABLED = String(process.env.WALLET_PRIVY_POLICY_ENABLED || "").toLowerCase() === "true";
 const privyServerClient = require("./privy-server-client").createPrivyServerClient({
