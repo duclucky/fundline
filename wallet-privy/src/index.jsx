@@ -162,14 +162,18 @@ function Widget() {
     api.logout = logout;
     api.exportWallet = () => exportWallet();
     api.getProvider = embedded ? (() => embedded.getEthereumProvider()) : null;
-    api.walletId = (embedded && (embedded.id || embedded.walletId)) || "";
+    api.walletId =
+      (embedded && (embedded.id || embedded.walletId)) ||
+      (user && user.wallet && user.wallet.id) ||
+      "";
     try {
-      console.log("[privy] wallet fields", {
-        walletId: api.walletId,
-        address: api.address,
-        embeddedKeys: embedded ? Object.keys(embedded) : null,
-        userWallet: user ? user.wallet : null,
-      });
+      console.log(
+        "[privy] embeddedKeys:", embedded ? Object.keys(embedded).join(",") : "",
+        "| embeddedId:", embedded ? embedded.id : "",
+        "| userWalletKeys:", user && user.wallet ? Object.keys(user.wallet).join(",") : "",
+        "| userWalletId:", user && user.wallet ? user.wallet.id : "",
+        "| resolved walletId:", api.walletId,
+      );
     } catch (e) {}
     const prev = api.address;
     api.address = address;
