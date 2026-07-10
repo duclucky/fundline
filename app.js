@@ -1173,7 +1173,6 @@ function renderPayPage(invoiceId) {
 
   const status = getInvoiceStatus(invoice);
   const payLink = getInvoicePayLink(invoice);
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&margin=8&data=${encodeURIComponent(payLink)}`;
   els.payPage.innerHTML = `
     <section class="pay-card checkout-card">
       <div class="payment-hero">
@@ -1190,10 +1189,6 @@ function renderPayPage(invoiceId) {
             <span>Amount due</span>
             <strong>${escapeHtml(formatUsdc(invoice.total))} USDC</strong>
             <small>Arc Testnet - Due ${escapeHtml(formatDate(invoice.dueDate))}</small>
-          </div>
-          <div class="qr-box">
-            <img src="${escapeHtml(qrUrl)}" alt="Payment QR code" />
-            <span>Payment link QR</span>
           </div>
         </div>
       </div>

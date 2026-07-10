@@ -854,7 +854,18 @@ const RUN_HISTORY = (() => {
     return saved ? JSON.parse(saved) : [];
   } catch (_) { return []; }
 })();
+function currentWallet() {
+  try { return (window.FundlineWallet && window.FundlineWallet.getAddress && window.FundlineWallet.getAddress()) || ""; } catch (_) { return ""; }
+}
+// Only surface runs made by the currently connected wallet. sessionStorage persists across logout
+// until the tab closes, so without this filter a new wallet would see the previous wallet's history.
+function visibleRuns() {
+  const cur = String(currentWallet() || "").toLowerCase();
+  if (!cur) return [];
+  return RUN_HISTORY.filter((r) => r.wallet && String(r.wallet).toLowerCase() === cur);
+}
 function pushRunHistory(entry) {
+  entry.wallet = currentWallet();
   RUN_HISTORY.unshift(entry);
   try { sessionStorage.setItem(RUN_HISTORY_KEY, JSON.stringify(RUN_HISTORY.slice(0, 50))); } catch (_) {}
 }
@@ -1256,6 +1267,14 @@ function render() {
     document.title = "Workflow Settings - Fundline";
     root.innerHTML = renderSettings();
   }
+}
+
+// Re-render the run history when the wallet changes so a switch/disconnect immediately reflects the
+// current wallet's runs (never the previous wallet's).
+if (typeof document !== "undefined") {
+  document.addEventListener("fundline:walletchange", function () {
+    try { if (getRoute().page === "runs") render(); } catch (_) {}
+  });
 }
 
 function setSidebarActive(route) {
@@ -2145,7 +2164,18 @@ function renderRuns() {
       </div>
     </header>`;
 
-  if (!RUN_HISTORY.length) {
+  const runs = visibleRuns();
+  if (!currentWallet()) {
+    return header + `
+    <div class="wf-explore-body">
+      <div class="wf-settings-placeholder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        <h3>Connect your wallet</h3>
+        <p>Sign in to see your run history.</p>
+      </div>
+    </div>`;
+  }
+  if (!runs.length) {
     return header + `
     <div class="wf-explore-body">
       <div class="wf-settings-placeholder">
@@ -2157,7 +2187,7 @@ function renderRuns() {
   }
 
   const explorer = WF_CONFIG.explorerBase || "https://testnet.arcscan.app";
-  const rows = RUN_HISTORY.map((r, idx) => {
+  const rows = runs.map((r, idx) => {
     // Shorten run ID: "0x6d8f...b60e" or keep short randId as-is
     const shortId = r.id.startsWith("0x")
       ? r.id.slice(0, 6) + "..." + r.id.slice(-4)
@@ -2184,7 +2214,7 @@ function renderRuns() {
 
   return header + `
     <div class="wf-explore-body">
-      <p class="wf-hist-meta">${RUN_HISTORY.length} run${RUN_HISTORY.length === 1 ? "" : "s"} this session</p>
+      <p class="wf-hist-meta">${runs.length} run${runs.length === 1 ? "" : "s"} this session</p>
       <div class="wf-table-wrap">
         <table class="wf-runs-table">
           <thead><tr>
@@ -2204,9 +2234,10 @@ function bindRuns() {
       navigate(el.dataset.nav);
     });
   });
+  const runs = visibleRuns();
   document.querySelectorAll(".wf-receipt-btn[data-idx]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const run = RUN_HISTORY[parseInt(btn.dataset.idx, 10)];
+      const run = runs[parseInt(btn.dataset.idx, 10)];
       if (run && run.output) openResultModal(run.output, run.slug);
     });
   });
