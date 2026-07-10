@@ -43,6 +43,7 @@ window.FundlineWallet = {
   sendTransaction: async (tx, opts) => {
     // Routine workflow-run funding is co-signed server-side (policy) so it skips MFA; everything else
     // (invoice pay, withdraw, batch) signs on the client, which prompts MFA when enrolled.
+    try { console.log("[privy] send", { viaServer: !!(opts && opts.viaServer), policy: CFG.walletPrivyPolicyEnabled, walletId: api.walletId }); } catch (e) {}
     if (opts && opts.viaServer && api.walletId && CFG.walletPrivyPolicyEnabled) {
       const r = await fetch("/api/wallet/privy/run-tx", {
         method: "POST",
@@ -162,6 +163,14 @@ function Widget() {
     api.exportWallet = () => exportWallet();
     api.getProvider = embedded ? (() => embedded.getEthereumProvider()) : null;
     api.walletId = (embedded && (embedded.id || embedded.walletId)) || "";
+    try {
+      console.log("[privy] wallet fields", {
+        walletId: api.walletId,
+        address: api.address,
+        embeddedKeys: embedded ? Object.keys(embedded) : null,
+        userWallet: user ? user.wallet : null,
+      });
+    } catch (e) {}
     const prev = api.address;
     api.address = address;
     if (address !== prev) { emitChange(); if (address) resolveConnect(address); }
