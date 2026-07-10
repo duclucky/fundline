@@ -392,12 +392,14 @@
   function circleExecute(sdk, userToken, encryptionKey, challengeId) {
     return new Promise(function (resolve, reject) {
       try {
+        try { console.log("[circle] execute challenge", challengeId); } catch (e) {}
         sdk.setAuthentication({ userToken: userToken, encryptionKey: encryptionKey });
         sdk.execute(challengeId, function (error, result) {
+          try { console.log("[circle] execute result", error, result); } catch (e) {}
           if (error) { reject(new Error(error.message || "Wallet setup failed.")); return; }
           resolve(result);
         });
-      } catch (err) { reject(err); }
+      } catch (err) { try { console.error("[circle] execute threw", err); } catch (e) {} reject(err); }
     });
   }
 
