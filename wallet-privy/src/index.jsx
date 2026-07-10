@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { PrivyProvider, usePrivy, useWallets } from "@privy-io/react-auth";
+import { PrivyProvider, usePrivy, useWallets, useMfaEnrollment } from "@privy-io/react-auth";
 import { defineChain } from "viem";
 
 // Runtime config is fetched from /api/config before mount (privyAppId, rpcUrl, chainId, etc.).
@@ -70,10 +70,37 @@ async function readBalance(addr) {
 function shortAddr(a) { return a ? a.slice(0, 6) + "..." + a.slice(-4) : ""; }
 
 function Widget() {
-  const { ready, authenticated, login, logout, exportWallet } = usePrivy();
+  const { ready, authenticated, user, login, logout, exportWallet } = usePrivy();
   const { wallets } = useWallets();
+  const mfa = useMfaEnrollment();
   const [open, setOpen] = useState(false);
   const [bal, setBal] = useState(null);
+  const [mfaStep, setMfaStep] = useState(null); // null | "setup"
+  const [mfaSecret, setMfaSecret] = useState("");
+  const [mfaUri, setMfaUri] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaMsg, setMfaMsg] = useState("");
+
+  const mfaEnrolled = Boolean(user && Array.isArray(user.mfaMethods) && user.mfaMethods.length > 0);
+
+  async function startMfa() {
+    setMfaMsg("");
+    try {
+      const res = (await mfa.initEnrollmentWithTotp()) || {};
+      setMfaSecret(res.secret || res.totpSecret || "");
+      setMfaUri(res.authenticatorUrl || res.uri || res.provisioningUri || res.otpauthUrl || "");
+      setMfaStep("setup");
+    } catch (e) { setMfaMsg((e && e.message) || "Could not start 2FA setup."); }
+  }
+  async function confirmMfa() {
+    setMfaMsg("");
+    try {
+      try { await mfa.submitEnrollmentWithTotp({ mfaCode: mfaCode }); }
+      catch (inner) { await mfa.submitEnrollmentWithTotp(mfaCode); }
+      setMfaStep(null); setMfaCode("");
+      setMfaMsg("2FA enabled. Exporting and signing now require your authenticator code.");
+    } catch (e) { setMfaMsg((e && e.message) || "Wrong code, please try again."); }
+  }
 
   const embedded = wallets.find((w) => w.walletClientType === "privy") || wallets[0];
   const address = embedded && embedded.address ? embedded.address.toLowerCase() : "";
@@ -115,6 +142,29 @@ function Widget() {
               <span className="ww-bal-amt">{bal == null ? "Checking..." : bal + " USDC"}</span>
             </div>
           </div>
+          {mfaEnrolled ? (
+            <div className="ww-panel-note" style={{ color: "#6df7a0" }}>2FA is on. Export and signing require your authenticator code.</div>
+          ) : mfaStep === "setup" ? (
+            <div>
+              <div className="ww-panel-label">Set up 2FA</div>
+              <p className="ww-panel-note">Add this key to Google Authenticator or Authy, then enter the 6-digit code.</p>
+              {mfaSecret ? (
+                <div style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all", padding: 8, background: "rgba(255,255,255,0.06)", borderRadius: 8, margin: "6px 0" }}>{mfaSecret}</div>
+              ) : null}
+              {mfaUri ? <a className="ww-panel-addr" href={mfaUri}>Open in authenticator app</a> : null}
+              <input
+                inputMode="numeric"
+                placeholder="6-digit code"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.trim())}
+                style={{ width: "100%", boxSizing: "border-box", padding: 10, borderRadius: 10, border: "1px solid rgba(212,175,55,0.3)", background: "rgba(18,16,10,0.5)", color: "#f6f1e6", margin: "6px 0" }}
+              />
+              <button className="ww-send" onClick={confirmMfa}>Confirm 2FA</button>
+            </div>
+          ) : (
+            <button className="ww-send" onClick={startMfa}>Enable 2FA (protect export)</button>
+          )}
+          {mfaMsg ? <div className="ww-panel-note">{mfaMsg}</div> : null}
           <button className="ww-send" onClick={() => exportWallet()}>Export private key</button>
           <button className="ww-logout" onClick={() => { logout(); setOpen(false); }}>Disconnect</button>
         </div>
