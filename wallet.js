@@ -405,15 +405,32 @@
   // Shared post-login step (email + social): create the wallet if needed, read the address, and
   // set the shared session. Keeps the live SDK + userToken in memory for signing (P2/P3); the
   // userToken is short-lived and never persisted, so the signing path re-authenticates after reload.
+  // Poll for the user's wallet to appear (used after a creation challenge, whose SDK callback does
+  // not reliably fire). Returns the wallets response once a primary address exists, or the last one.
+  async function pollCircleWallet(userToken, tries) {
+    var resp = {};
+    for (var i = 0; i < tries; i += 1) {
+      resp = await circlePostJson("/api/wallet/circle/wallets", { userToken: userToken }).catch(function () { return {}; });
+      if (resp && resp.primary && resp.primary.address) return resp;
+      await new Promise(function (r) { setTimeout(r, 2000); });
+    }
+    return resp;
+  }
+
   async function finishCircleLogin(sdk, login) {
     var walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
     if (!walletsResp.primary || !walletsResp.primary.address) {
       var init = await circlePostJson("/api/wallet/circle/initialize", { userToken: login.userToken });
-      if (init.challengeId) await circleExecute(sdk, login.userToken, login.encryptionKey, init.challengeId);
-      walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
+      if (init.challengeId) {
+        // The SDK opens its own PIN/creation window; its completion callback does not always fire, so
+        // fire the challenge and poll for the wallet instead of blocking on the callback (this was the
+        // "entered PIN, popup closed, but still not logged in" hang on first-time wallet creation).
+        circleExecute(sdk, login.userToken, login.encryptionKey, init.challengeId).catch(function () {});
+        walletsResp = await pollCircleWallet(login.userToken, 30);
+      }
     }
     var address = normalizeAddress(walletsResp.primary && walletsResp.primary.address);
-    if (!address) throw new Error("Wallet was not created. Please try again.");
+    if (!address) throw new Error("Wallet setup did not finish. Please try signing in again.");
     _circleSdk = sdk;
     _circleAuth = { userToken: login.userToken, encryptionKey: login.encryptionKey };
     _circleWalletId = (walletsResp.primary && walletsResp.primary.id) || "";
