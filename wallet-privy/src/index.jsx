@@ -69,6 +69,15 @@ async function readBalance(addr) {
 
 function shortAddr(a) { return a ? a.slice(0, 6) + "..." + a.slice(-4) : ""; }
 
+// Parse a decimal USDC string to 6-decimal base units (BigInt) or null if malformed.
+function parseUsdc6(str) {
+  const s = String(str || "").trim();
+  if (!/^\d+(\.\d{1,6})?$/.test(s)) return null;
+  const p = s.split(".");
+  const f = ((p[1] || "") + "000000").slice(0, 6);
+  try { return BigInt(p[0]) * 1000000n + BigInt(f); } catch (e) { return null; }
+}
+
 function Widget() {
   const { ready, authenticated, user, login, logout, exportWallet } = usePrivy();
   const { wallets } = useWallets();
@@ -80,8 +89,37 @@ function Widget() {
   const [mfaUri, setMfaUri] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [mfaMsg, setMfaMsg] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendTo, setSendTo] = useState("");
+  const [sendAmt, setSendAmt] = useState("");
+  const [sendMsg, setSendMsg] = useState("");
+  const [sending, setSending] = useState(false);
 
   const mfaEnrolled = Boolean(user && Array.isArray(user.mfaMethods) && user.mfaMethods.length > 0);
+
+  function copyAddr() {
+    try { navigator.clipboard.writeText(address); } catch (e) {}
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1200);
+  }
+
+  async function doSend() {
+    setSendMsg("");
+    const to = String(sendTo || "").trim().toLowerCase();
+    if (!/^0x[a-f0-9]{40}$/.test(to)) { setSendMsg("Enter a valid recipient address (0x...)."); return; }
+    const units = parseUsdc6(sendAmt);
+    if (units == null || units <= 0n) { setSendMsg("Enter a valid amount."); return; }
+    setSending(true);
+    try {
+      const data = "0xa9059cbb" + to.replace(/^0x/, "").padStart(64, "0") + units.toString(16).padStart(64, "0");
+      const txHash = await window.FundlineWallet.sendTransaction({ to: USDC, data: data, value: "0x0" });
+      setSendMsg("Sent. " + (txHash ? txHash.slice(0, 12) + "..." : ""));
+      setSendOpen(false); setSendTo(""); setSendAmt("");
+      readBalance(address).then(setBal);
+    } catch (e) { setSendMsg((e && e.message) || "Send failed."); }
+    setSending(false);
+  }
 
   async function startMfa() {
     setMfaMsg("");
@@ -129,12 +167,15 @@ function Widget() {
         <span className="ww-addr-text">{shortAddr(address)}</span>
       </button>
       {open ? (
-        <div className="ww-panel is-open" style={{ position: "fixed", left: 16, right: "auto", bottom: 16, zIndex: 90, width: "min(320px, calc(100vw - 32px))", maxHeight: "80vh", overflowY: "auto" }}>
+        <div className="ww-panel is-open" style={{ position: "fixed", left: 16, right: "auto", bottom: 16, zIndex: 90, width: "min(360px, calc(100vw - 24px))", boxSizing: "border-box", maxHeight: "85vh", overflowY: "auto" }}>
           <div className="ww-panel-head">
             <strong>Wallet</strong>
             <button className="ww-panel-close" onClick={() => setOpen(false)} aria-label="Close">x</button>
           </div>
-          <a className="ww-panel-addr" href={(CFG.explorerBase || FALLBACK_EXPLORER) + "/address/" + address} target="_blank" rel="noopener">{address}</a>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <a className="ww-panel-addr" href={(CFG.explorerBase || FALLBACK_EXPLORER) + "/address/" + address} target="_blank" rel="noopener" style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{address}</a>
+            <button className="ww-send" style={{ width: "auto", margin: 0, padding: "6px 10px", flexShrink: 0 }} onClick={copyAddr}>{copied ? "Copied" : "Copy"}</button>
+          </div>
           <div className="ww-panel-label">Balance</div>
           <div className="ww-balances">
             <div className="ww-bal-row">
@@ -142,6 +183,18 @@ function Widget() {
               <span className="ww-bal-amt">{bal == null ? "Checking..." : bal + " USDC"}</span>
             </div>
           </div>
+          {sendOpen ? (
+            <div>
+              <div className="ww-panel-label">Send / Withdraw</div>
+              <input placeholder="Recipient 0x..." value={sendTo} onChange={(e) => setSendTo(e.target.value.trim())} style={{ width: "100%", boxSizing: "border-box", padding: 10, borderRadius: 10, border: "1px solid rgba(212,175,55,0.3)", background: "rgba(18,16,10,0.5)", color: "#f6f1e6", margin: "6px 0" }} />
+              <input inputMode="decimal" placeholder="Amount USDC" value={sendAmt} onChange={(e) => setSendAmt(e.target.value.trim())} style={{ width: "100%", boxSizing: "border-box", padding: 10, borderRadius: 10, border: "1px solid rgba(212,175,55,0.3)", background: "rgba(18,16,10,0.5)", color: "#f6f1e6", margin: "6px 0" }} />
+              <button className="ww-send" disabled={sending} onClick={doSend}>{sending ? "Sending..." : "Send"}</button>
+              <button className="ww-link" onClick={() => { setSendOpen(false); setSendMsg(""); }}>Cancel</button>
+            </div>
+          ) : (
+            <button className="ww-send" onClick={() => { setSendOpen(true); setSendMsg(""); }}>Send / Withdraw</button>
+          )}
+          {sendMsg ? <div className="ww-panel-note">{sendMsg}</div> : null}
           {mfaEnrolled ? (
             <>
               <div className="ww-panel-note" style={{ color: "#6df7a0" }}>2FA is on. Export requires your authenticator code.</div>

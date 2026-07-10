@@ -11,7 +11,9 @@ await esbuild.build({
   jsx: "automatic",
   define: {
     "process.env.NODE_ENV": '"production"',
+    "global": "globalThis",
   },
+  inject: ["src/node-shims.js"],
   loader: { ".js": "jsx" },
   outfile: "../wallet-privy.bundle.js",
   logLevel: "info",
