@@ -341,32 +341,36 @@
     return json;
   }
 
-  // Drive the SDK OTP UI and resolve with { userToken, encryptionKey }.
-  function circleVerifyEmailOtp(sdk, appId, tokenResp) {
-    return new Promise(function (resolve, reject) {
-      try {
-        sdk.updateConfigs(
-          {
+  // Full email OTP login per Circle's current Web SDK docs: construct the SDK with the completion
+  // callback as the SECOND constructor argument, request the code, feed the session tokens via
+  // loginConfigs (NOT authentication), then open the SDK OTP window. Resolves { sdk, userToken,
+  // encryptionKey }.
+  async function circleEmailLogin(W3SSdk, appId, email) {
+    return await new Promise(function (resolve, reject) {
+      var sdk = new W3SSdk(
+        { appSettings: { appId: appId } },
+        function (error, result) {
+          if (error) { reject(new Error(error.message || "OTP verification failed.")); return; }
+          if (result && result.userToken && result.encryptionKey) resolve({ sdk: sdk, userToken: result.userToken, encryptionKey: result.encryptionKey });
+          else reject(new Error("Login did not return a session."));
+        },
+      );
+      (async function () {
+        try {
+          var deviceId = await sdk.getDeviceId();
+          var tokenResp = await circlePostJson("/api/wallet/circle/email/token", { deviceId: deviceId, email: email });
+          sdk.updateConfigs({
             appSettings: { appId: appId },
-            authentication: {
-              userToken: "",
-              encryptionKey: "",
-              otpToken: tokenResp.otpToken,
+            loginConfigs: {
               deviceToken: tokenResp.deviceToken,
               deviceEncryptionKey: tokenResp.deviceEncryptionKey,
+              otpToken: tokenResp.otpToken,
+              email: { email: email },
             },
-          },
-          function (error, result) {
-            if (error) { reject(new Error(error.message || "OTP verification failed.")); return; }
-            if (result && result.userToken && result.encryptionKey) {
-              resolve({ userToken: result.userToken, encryptionKey: result.encryptionKey });
-            } else {
-              reject(new Error("OTP verification did not return a session."));
-            }
-          },
-        );
-        sdk.verifyOtp();
-      } catch (err) { reject(err); }
+          });
+          sdk.verifyOtp();
+        } catch (e) { reject(e); }
+      })();
     });
   }
 
@@ -449,11 +453,8 @@
     if (submit) { submit.disabled = true; submit.textContent = "Sending code..."; }
     try {
       var W3SSdk = await loadCircleSdk();
-      var sdk = new W3SSdk({ configs: { appSettings: { appId: config.circleAppId } } });
-      var deviceId = await sdk.getDeviceId();
-      var tokenResp = await circlePostJson("/api/wallet/circle/email/token", { deviceId: deviceId, email: email });
-      var login = await circleVerifyEmailOtp(sdk, config.circleAppId, tokenResp);
-      await finishCircleLogin(sdk, login);
+      var login = await circleEmailLogin(W3SSdk, config.circleAppId, email);
+      await finishCircleLogin(login.sdk, { userToken: login.userToken, encryptionKey: login.encryptionKey });
     } catch (err) {
       renderCircleEmailStep(config, (err && err.message) || "Sign-in failed. Please try again.");
     }
@@ -468,14 +469,14 @@
     try {
       var W3SSdk = await loadCircleSdk();
       var login = await new Promise(function (resolve, reject) {
-        var sdk = new W3SSdk({
-          configs: { appSettings: { appId: config.circleAppId } },
-          socialLoginCompleteCallback: function (error, result) {
+        var sdk = new W3SSdk(
+          { appSettings: { appId: config.circleAppId } },
+          function (error, result) {
             if (error) { reject(new Error(error.message || "Social sign-in failed.")); return; }
             if (result && result.userToken && result.encryptionKey) resolve({ sdk: sdk, userToken: result.userToken, encryptionKey: result.encryptionKey });
             else reject(new Error("Social sign-in did not return a session."));
           },
-        });
+        );
         try { sdk.performLogin(providerName); } catch (e) { reject(e); }
       });
       await finishCircleLogin(login.sdk, { userToken: login.userToken, encryptionKey: login.encryptionKey });
