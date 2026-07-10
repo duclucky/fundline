@@ -348,6 +348,36 @@ const WALLET_CIRCLE_SOCIAL_ENABLED = String(process.env.WALLET_CIRCLE_SOCIAL_ENA
 // WALLET_PRIVY_ENABLED=true; when on, wallet-loader.js loads the Privy bundle instead of wallet.js.
 const PRIVY_APP_ID = String(process.env.PRIVY_APP_ID || "cmrf5askg00c50ck5zu5r4cju").trim();
 const WALLET_PRIVY_ENABLED = String(process.env.WALLET_PRIVY_ENABLED || "").toLowerCase() === "true" && Boolean(PRIVY_APP_ID);
+// Policy-based MFA co-signing: the server co-signs ONLY the workflow-run funding actions with a P-256
+// authorization key so those runs skip the user's MFA, while export + withdraw stay client-side (MFA).
+// Secrets (app secret + authorization private key) are server-only. Off unless WALLET_PRIVY_POLICY_ENABLED.
+const PRIVY_APP_SECRET = String(process.env.PRIVY_APP_SECRET || "").trim();
+const PRIVY_AUTHORIZATION_KEY_ID = String(process.env.PRIVY_AUTHORIZATION_KEY_ID || "t53hfhmx4yvn0iae8i33kzw2").trim();
+const PRIVY_AUTHORIZATION_PRIVATE_KEY = String(process.env.PRIVY_AUTHORIZATION_PRIVATE_KEY || "").trim();
+const WALLET_PRIVY_POLICY_ENABLED = String(process.env.WALLET_PRIVY_POLICY_ENABLED || "").toLowerCase() === "true";
+const privyServerClient = require("./privy-server-client").createPrivyServerClient({
+  appId: PRIVY_APP_ID,
+  appSecret: PRIVY_APP_SECRET,
+  authorizationKeyId: PRIVY_AUTHORIZATION_KEY_ID,
+  authorizationPrivateKey: PRIVY_AUTHORIZATION_PRIVATE_KEY,
+  caip2: "eip155:" + ARC_CHAIN_ID,
+});
+// Defense-in-depth allowlist: the server will co-sign ONLY these routine run-funding calls, never a
+// withdrawal or arbitrary transfer (those require the user's MFA on the client).
+function isPolicyRunTx(to, data) {
+  const t = String(to || "").toLowerCase();
+  const d = String(data || "").toLowerCase();
+  const usdc = String(ARC_USDC_TOKEN_ADDRESS || "").toLowerCase();
+  const escrow = String(ARC_RUN_ESCROW_ADDRESS || "").toLowerCase();
+  if (!escrow || !usdc) return false;
+  // USDC.approve(spender, amount) where spender == run escrow (selector 0x095ea7b3).
+  if (t === usdc && d.startsWith("0x095ea7b3") && d.length >= 74) {
+    return ("0x" + d.slice(34, 74)) === escrow;
+  }
+  // FundlineRunEscrow.fund(runId, amount) (selector 0xe46bbc9e).
+  if (t === escrow && d.startsWith("0xe46bbc9e")) return true;
+  return false;
+}
 const circleWalletClient = require("./circle-wallet-client").createCircleWalletClient({
   apiKey: String(process.env.CIRCLE_API_KEY || "").trim(),
   blockchain: process.env.CIRCLE_WALLET_BLOCKCHAIN || "ARC-TESTNET",
@@ -619,6 +649,10 @@ const server = http.createServer((req, res) => {
     handleCirclePinRestore(req, res);
     return;
   }
+  if (url.pathname === "/api/wallet/privy/run-tx") {
+    handlePrivyRunTx(req, res);
+    return;
+  }
 
   if (url.pathname === "/api/workflows") {
     handleWorkflowList(req, res, url);
@@ -808,6 +842,7 @@ function handlePublicConfig(req, res) {
     circleSocialEnabled: WALLET_CIRCLE_ENABLED && WALLET_CIRCLE_SOCIAL_ENABLED,
     privyAppId: PRIVY_APP_ID,
     walletPrivyEnabled: WALLET_PRIVY_ENABLED,
+    walletPrivyPolicyEnabled: WALLET_PRIVY_POLICY_ENABLED && privyServerClient.available(),
     workflowRunnerEnabled: WORKFLOW_RATE_LIMIT_ENABLED,
     workflowFreeRunsPerDay: WORKFLOW_RUNS_PER_IP_PER_DAY,
     workflowGenPromptsPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
@@ -4789,6 +4824,40 @@ async function handleCircleTransaction(req, res) {
   } catch (error) {
     console.error("[Circle] transaction error:", error.message);
     sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
+  }
+}
+
+// Policy-based MFA co-sign: server co-signs ONLY the allowlisted run-funding calls (USDC.approve to
+// the run escrow + escrow.fund) with the P-256 authorization key, so workflow runs skip the user's
+// MFA. Anything else is rejected and must be signed on the client (which prompts MFA).
+async function handlePrivyRunTx(req, res) {
+  if (!WALLET_PRIVY_POLICY_ENABLED || !privyServerClient.available()) {
+    sendJson(res, 404, { error: { code: "NOT_FOUND", message: "Policy co-signing is not enabled" } });
+    return;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  try {
+    const body = await readJsonBody(req);
+    const walletId = String(body.walletId || "").trim();
+    const to = String(body.to || "").trim();
+    const data = String(body.data || "").trim();
+    if (!walletId || !to || !data) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "walletId, to and data are required" } });
+      return;
+    }
+    if (!isPolicyRunTx(to, data)) {
+      sendJson(res, 403, { error: { code: "NOT_ALLOWED", message: "This action requires wallet confirmation." } });
+      return;
+    }
+    const out = await privyServerClient.sendTransaction({ walletId, to, data, value: body.value });
+    if (!out.hash) throw new Error("No transaction hash returned");
+    sendJson(res, 200, { hash: out.hash });
+  } catch (error) {
+    console.error("[Privy] run-tx error:", error.message);
+    sendJson(res, 502, { error: { code: "PRIVY_ERROR", message: error.message } });
   }
 }
 

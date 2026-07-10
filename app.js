@@ -3,7 +3,7 @@
 // the single-wallet case keeps working exactly as before.
 function getActiveProvider() {
   const s = window.FundlineWallet && window.FundlineWallet.getSession ? window.FundlineWallet.getSession() : null;
-  if (s && s.kind === "circle") return circleReadProvider();
+  if (s && (s.kind === "circle" || s.kind === "privy")) return circleReadProvider();
   return (window.FundlineWallet && window.FundlineWallet.getProvider && window.FundlineWallet.getProvider()) || window.ethereum || null;
 }
 
@@ -1329,9 +1329,9 @@ function getPaymentSourceOptions() {
     { key: "baseSepolia",     label: "USDC on Base Sepolia (CCTP bridge)", chain: CCTP_TESTNET_CHAINS.baseSepolia },
     { key: "ethereumSepolia", label: "USDC on ETH Sepolia (CCTP bridge)",  chain: CCTP_TESTNET_CHAINS.ethereumSepolia },
   ];
-  // Circle wallets pay on Arc only (no CCTP cross-chain bridging in v1).
+  // Embedded wallets pay on Arc only (no CCTP cross-chain bridging in v1).
   const s = window.FundlineWallet && window.FundlineWallet.getSession ? window.FundlineWallet.getSession() : null;
-  if (s && s.kind === "circle") return options.slice(0, 1);
+  if (s && (s.kind === "circle" || s.kind === "privy")) return options.slice(0, 1);
   return options;
 }
 
@@ -2029,9 +2029,9 @@ async function ensurePaymentNetwork(provider, config) {
 }
 
 async function ensureWalletNetwork(provider, chain) {
-  // Circle wallets cannot switch to CCTP source chains; cross-chain bridging is not a circle path.
+  // Embedded wallets cannot switch to CCTP source chains; cross-chain bridging is external-wallet only.
   const s = window.FundlineWallet && window.FundlineWallet.getSession ? window.FundlineWallet.getSession() : null;
-  if (s && s.kind === "circle") return;
+  if (s && (s.kind === "circle" || s.kind === "privy")) return;
   const expected = String(chain.chainIdHex || "").toLowerCase();
   const current = String(await provider.request({ method: "eth_chainId" })).toLowerCase();
   if (current === expected) return;

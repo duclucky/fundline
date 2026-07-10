@@ -922,7 +922,7 @@ function getEthProvider() {
   // Circle wallets have no injected provider; return an RPC-backed read shim (writes go through
   // FundlineWallet.sendTransaction, which routes circle wallets to the challenge flow).
   var s = (window.FundlineWallet && window.FundlineWallet.getSession) ? window.FundlineWallet.getSession() : null;
-  if (s && s.kind === "circle") return circleReadShim();
+  if (s && (s.kind === "circle" || s.kind === "privy")) return circleReadShim();
   // Prefer the shared dApp session's active provider so network-ensure and the send agree on the
   // same wallet (matches app.js). Falls back to the injected provider.
   return (window.FundlineWallet && window.FundlineWallet.getProvider && window.FundlineWallet.getProvider()) || window.ethereum || null;
@@ -953,9 +953,10 @@ async function readAllowance(provider, usdc, owner, spender) {
   const res = await provider.request({ method: "eth_call", params: [{ to: usdc, data }, "latest"] });
   return BigInt(res || "0x0");
 }
-async function sendWalletTx(provider, from, to, data) {
+async function sendWalletTx(provider, from, to, data, opts) {
   // Route through the shared wallet adapter so a future non-EOA wallet kind is handled in one place.
-  return window.FundlineWallet.sendTransaction({ from, to, data, value: "0x0" });
+  // opts.viaServer lets embedded (Privy) wallets co-sign routine run-funding server-side (no MFA).
+  return window.FundlineWallet.sendTransaction({ from, to, data, value: "0x0" }, opts);
 }
 async function waitWalletTx(provider, hash) {
   for (let i = 0; i < 60; i += 1) {
@@ -1002,14 +1003,14 @@ async function fundWorkflowRun(slug, statusFn, tier) {
   if (allowance < amount) {
     statusFn("Approve USDC (one time) in your wallet...");
     const approveData = ERC20_APPROVE_SELECTOR + encAddr(escrow) + encUint(MAX_UINT256);
-    const approveHash = await sendWalletTx(provider, from, usdc, approveData);
+    const approveHash = await sendWalletTx(provider, from, usdc, approveData, { viaServer: true });
     statusFn("Confirming approval...");
     await waitWalletTx(provider, approveHash);
   }
 
   statusFn("Confirm payment in your wallet...");
   const fundData = ESCROW_FUND_SELECTOR + encBytes32(quote.runId) + encUint(amount);
-  const fundHash = await sendWalletTx(provider, from, escrow, fundData);
+  const fundHash = await sendWalletTx(provider, from, escrow, fundData, { viaServer: true });
   statusFn("Confirming payment...");
   await waitWalletTx(provider, fundHash);
   return quote.runId;

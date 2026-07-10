@@ -40,7 +40,19 @@ window.FundlineWallet = {
   disconnect: () => { if (api.logout) api.logout(); },
   refreshBalance: () => readBalance(api.address),
   exportWallet: () => { if (api.exportWallet) api.exportWallet(); },
-  sendTransaction: async (tx) => {
+  sendTransaction: async (tx, opts) => {
+    // Routine workflow-run funding is co-signed server-side (policy) so it skips MFA; everything else
+    // (invoice pay, withdraw, batch) signs on the client, which prompts MFA when enrolled.
+    if (opts && opts.viaServer && api.walletId && CFG.walletPrivyPolicyEnabled) {
+      const r = await fetch("/api/wallet/privy/run-tx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletId: api.walletId, address: api.address, to: tx.to, data: tx.data || "0x", value: tx.value }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.hash) throw new Error((j.error && j.error.message) || "Transaction failed.");
+      return j.hash;
+    }
     if (!api.getProvider) throw new Error("Wallet is not ready.");
     const provider = await api.getProvider();
     if (!provider || !provider.request) throw new Error("Wallet provider unavailable.");
@@ -149,6 +161,7 @@ function Widget() {
     api.logout = logout;
     api.exportWallet = () => exportWallet();
     api.getProvider = embedded ? (() => embedded.getEthereumProvider()) : null;
+    api.walletId = (embedded && (embedded.id || embedded.walletId)) || "";
     const prev = api.address;
     api.address = address;
     if (address !== prev) { emitChange(); if (address) resolveConnect(address); }
