@@ -311,11 +311,25 @@
   var _circleWalletId = "";       // Circle wallet id (for contract-execution challenges)
   function loadCircleSdk() {
     if (!_circleSdkPromise) {
-      _circleSdkPromise = import("https://esm.sh/@circle-fin/w3s-pw-web-sdk").then(function (mod) {
-        var W3SSdk = mod.W3SSdk || (mod.default && mod.default.W3SSdk) || mod.default;
-        if (!W3SSdk) throw new Error("Circle Web SDK failed to load.");
-        return W3SSdk;
-      });
+      // The SDK bundles poorly as a raw ESM import, so try CDNs that inline dependencies. If all
+      // fail, reset so the next attempt can retry (a rejected cached promise would stick forever).
+      var urls = [
+        "https://esm.sh/@circle-fin/w3s-pw-web-sdk?bundle",
+        "https://cdn.jsdelivr.net/npm/@circle-fin/w3s-pw-web-sdk/+esm",
+        "https://esm.sh/@circle-fin/w3s-pw-web-sdk",
+      ];
+      _circleSdkPromise = (async function () {
+        var lastErr = null;
+        for (var i = 0; i < urls.length; i += 1) {
+          try {
+            var mod = await import(urls[i]);
+            var W3SSdk = mod.W3SSdk || (mod.default && mod.default.W3SSdk) || mod.default;
+            if (W3SSdk) return W3SSdk;
+            lastErr = new Error("W3SSdk export not found");
+          } catch (e) { lastErr = e; }
+        }
+        throw new Error("Circle Web SDK failed to load. " + ((lastErr && lastErr.message) || ""));
+      })().catch(function (e) { _circleSdkPromise = null; throw e; });
     }
     return _circleSdkPromise;
   }
@@ -394,8 +408,45 @@
   async function connectWithCircleEmail() {
     var config = await getPublicConfig();
     if (!config.walletCircleEnabled || !config.circleAppId) { alert("Email sign-in is not available right now."); return; }
-    var email = (window.prompt("Enter your email to create or open your wallet:") || "").trim();
-    if (!email) return;
+    renderCircleEmailStep(config, "");
+  }
+
+  // Professional in-dialog email step (replaces the browser prompt). The Web SDK then shows its own
+  // OTP entry UI after the code is sent.
+  function renderCircleEmailStep(config, errorMsg) {
+    var dialog = ensurePickerDialog();
+    var body = document.getElementById("wwPickerBody");
+    if (!body) return;
+    body.innerHTML =
+      "<div class=\"dialog-head\">" +
+        "<div><p class=\"eyebrow\">Connect</p><h2>Continue with email</h2></div>" +
+        "<button class=\"icon-button\" id=\"wwPickerClose\" type=\"button\" aria-label=\"Close\">" +
+          "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 6l12 12M18 6 6 18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/></svg>" +
+        "</button>" +
+      "</div>" +
+      "<p class=\"muted ww-hint\">We will email you a one-time code to create or open your wallet.</p>" +
+      "<form id=\"wwEmailForm\" class=\"ww-email-form\">" +
+        "<input id=\"wwEmailInput\" type=\"email\" inputmode=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\" required />" +
+        (errorMsg ? ("<p class=\"ww-error\">" + escapeHtml(errorMsg) + "</p>") : "") +
+        "<button class=\"primary-action ww-email-submit\" type=\"submit\">Send code</button>" +
+      "</form>";
+    var closeBtn = document.getElementById("wwPickerClose");
+    if (closeBtn) closeBtn.addEventListener("click", closePickerDialog);
+    var form = document.getElementById("wwEmailForm");
+    var input = document.getElementById("wwEmailInput");
+    if (input) { try { input.focus(); } catch (e) {} }
+    if (form) form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var email = ((input && input.value) || "").trim();
+      if (!email) return;
+      startCircleEmailLogin(config, email);
+    });
+    if (!dialog.open) dialog.showModal();
+  }
+
+  async function startCircleEmailLogin(config, email) {
+    var submit = document.querySelector("#wwEmailForm .ww-email-submit");
+    if (submit) { submit.disabled = true; submit.textContent = "Sending code..."; }
     try {
       var W3SSdk = await loadCircleSdk();
       var sdk = new W3SSdk({ configs: { appSettings: { appId: config.circleAppId } } });
@@ -404,8 +455,7 @@
       var login = await circleVerifyEmailOtp(sdk, config.circleAppId, tokenResp);
       await finishCircleLogin(sdk, login);
     } catch (err) {
-      closePickerDialog();
-      alert((err && err.message) || "Email sign-in failed. Please try again.");
+      renderCircleEmailStep(config, (err && err.message) || "Sign-in failed. Please try again.");
     }
   }
 
@@ -542,7 +592,9 @@
     body.querySelectorAll("[data-wallet-index]").forEach(function (btn) {
       btn.addEventListener("click", async function () {
         var chosen = options[Number(btn.dataset.walletIndex)];
-        if (chosen && chosen.kind !== "walletconnect") closePickerDialog();
+        // Injected wallets connect immediately; walletconnect and the Circle options render their
+        // own next step inside this dialog, so keep it open for them.
+        if (chosen && chosen.kind === "injected") closePickerDialog();
         await connectWithOption(chosen);
       });
     });

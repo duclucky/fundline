@@ -515,6 +515,16 @@ h3 {
   color: transparent;
 }
 
+/* Brand wordmark hero: "Fund" gold, "Line" white. */
+.hero-wordmark {
+  font-size: clamp(56px, 12vw, 128px);
+  letter-spacing: -0.05em;
+}
+
+.hero-wordmark-line {
+  color: #ffffff;
+}
+
 .hero-copy {
   max-width: 620px;
   margin-bottom: 36px;

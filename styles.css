@@ -1935,6 +1935,41 @@ select {
   justify-self: start;
 }
 
+.ww-hint {
+  margin: 0 0 14px;
+}
+
+.ww-email-form {
+  display: grid;
+  gap: 12px;
+}
+
+.ww-email-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  color: var(--ink);
+  background: rgba(18, 16, 10, 0.5);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+}
+
+.ww-email-form input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+.ww-email-submit {
+  width: 100%;
+  justify-content: center;
+}
+
+.ww-error {
+  margin: 0;
+  color: #ff6b6b;
+  font-size: 13px;
+}
+
 .pay-item,
 .summary-line {
   display: grid;
