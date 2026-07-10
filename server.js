@@ -609,6 +609,10 @@ const server = http.createServer((req, res) => {
     handleCircleTxStatus(req, res);
     return;
   }
+  if (url.pathname === "/api/wallet/circle/pin/restore") {
+    handleCirclePinRestore(req, res);
+    return;
+  }
 
   if (url.pathname === "/api/workflows") {
     handleWorkflowList(req, res, url);
@@ -4776,6 +4780,25 @@ async function handleCircleTransaction(req, res) {
     sendJson(res, 200, { challengeId: out.challengeId, refId });
   } catch (error) {
     console.error("[Circle] transaction error:", error.message);
+    sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
+  }
+}
+
+// Start PIN recovery (forgot PIN): returns a challengeId the Web SDK uses to walk the user through
+// their security questions and set a new PIN. Independent of email access.
+async function handleCirclePinRestore(req, res) {
+  if (!circleGuard(req, res)) return;
+  try {
+    const body = await readJsonBody(req);
+    const userToken = String(body.userToken || "").trim();
+    if (!userToken) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "userToken is required" } });
+      return;
+    }
+    const data = await circleWalletClient.restorePin({ userToken });
+    sendJson(res, 200, { challengeId: data.challengeId });
+  } catch (error) {
+    console.error("[Circle] pin restore error:", error.message);
     sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
   }
 }

@@ -189,6 +189,19 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
     eq(list[0].txHash, "0xhh", "listTransactions txHash");
   }
 
+  // restorePin: path, user token, idempotencyKey, returns challengeId
+  {
+    const fake = makeFake([{ status: 200, json: { data: { challengeId: "chal-restore" } } }]);
+    const c = createCircleWalletClient({ apiKey: "k", request: fake.request });
+    const out = await c.restorePin({ userToken: "u" });
+    eq(fake.calls[0].method, "POST", "restorePin POST");
+    eq(fake.calls[0].path, "/v1/w3s/user/pin/restore", "restorePin path");
+    eq(fake.calls[0].headers["X-User-Token"], "u", "restorePin user token");
+    ok(UUID_RE.test(fake.calls[0].body.idempotencyKey), "restorePin idempotencyKey uuid");
+    eq(out.challengeId, "chal-restore", "restorePin returns challengeId");
+  }
+  await throwsAsync(() => createCircleWalletClient({ apiKey: "k", request: makeFake([]).request }).restorePin({}), "restorePin needs userToken");
+
   // error mapping: non-2xx throws with Circle message
   {
     const fake = makeFake([{ status: 401, json: { message: "Malformed authorization" } }]);

@@ -680,10 +680,11 @@
   }
 
   // --- balance ---
-  async function fetchArcUsdcBalance() {
+  // Read the raw USDC balance (hex) for the connected wallet, or null on failure. Circle wallets have
+  // no injected provider, so they read over the public Arc RPC; external wallets use their provider.
+  async function readArcUsdcHex() {
     if (!session) return null;
     var data = ERC20_BALANCE_OF + encAddr(session.address);
-    // Circle wallets have no injected provider; read the balance over the public Arc RPC.
     if (session.kind === "circle") {
       try {
         var cfg = await getPublicConfig();
@@ -693,15 +694,118 @@
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: ARC_USDC, data: data }, "latest"] }),
         });
         var j = await r.json();
-        return formatUnits6(j && j.result);
+        return (j && j.result) || null;
       } catch (e) { return null; }
     }
     var p = getProvider();
     if (!p) return null;
+    try { return await p.request({ method: "eth_call", params: [{ to: ARC_USDC, data: data }, "latest"] }); } catch (e) { return null; }
+  }
+  async function fetchArcUsdcBalance() {
+    var hex = await readArcUsdcHex();
+    return hex == null ? null : formatUnits6(hex);
+  }
+  function hexToBigInt(h) { try { return BigInt(h || "0x0"); } catch (e) { return 0n; } }
+  function encUint256(big) { return big.toString(16).padStart(64, "0"); }
+  // Parse a decimal USDC string to 6-decimal base units (BigInt) or null if malformed.
+  function parseUsdc6(str) {
+    var s = String(str || "").trim();
+    if (!/^\d+(\.\d{1,6})?$/.test(s)) return null;
+    var parts = s.split(".");
+    var frac = ((parts[1] || "") + "000000").slice(0, 6);
+    try { return BigInt(parts[0]) * 1000000n + BigInt(frac); } catch (e) { return null; }
+  }
+
+  // --- Send / Withdraw ---
+  // Move USDC out of the connected wallet to any address (another wallet, an exchange, or an
+  // off-ramp). Uses the shared sendTransaction seam: Circle wallets go through the challenge flow
+  // (which prompts the user in the SDK), external wallets sign in their own extension.
+  function openSend() {
+    if (!session) return;
+    renderSendStep("", {});
+  }
+
+  function renderSendStep(errorMsg, prefill) {
+    var dialog = ensurePickerDialog();
+    var body = document.getElementById("wwPickerBody");
+    if (!body) return;
+    prefill = prefill || {};
+    body.innerHTML =
+      "<div class=\"dialog-head\">" +
+        "<div><p class=\"eyebrow\">Wallet</p><h2>Send / Withdraw USDC</h2></div>" +
+        "<button class=\"icon-button\" id=\"wwPickerClose\" type=\"button\" aria-label=\"Close\">" +
+          "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 6l12 12M18 6 6 18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/></svg>" +
+        "</button>" +
+      "</div>" +
+      "<p class=\"muted ww-hint\">Send USDC on Arc to any address (another wallet, an exchange, or an off-ramp).</p>" +
+      "<form id=\"wwSendForm\" class=\"ww-email-form\">" +
+        "<span class=\"ww-field-label\">Recipient address</span>" +
+        "<input id=\"wwSendTo\" type=\"text\" spellcheck=\"false\" placeholder=\"0x...\" value=\"" + escapeHtml(prefill.to || "") + "\" />" +
+        "<span class=\"ww-field-label\">Amount (USDC)</span>" +
+        "<input id=\"wwSendAmt\" type=\"text\" inputmode=\"decimal\" placeholder=\"0.00\" value=\"" + escapeHtml(prefill.amount || "") + "\" />" +
+        (errorMsg ? ("<p class=\"ww-error\">" + escapeHtml(errorMsg) + "</p>") : "") +
+        "<button class=\"primary-action ww-email-submit\" type=\"submit\">Send</button>" +
+      "</form>";
+    document.getElementById("wwPickerClose").addEventListener("click", closePickerDialog);
+    document.getElementById("wwSendForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      doSend((document.getElementById("wwSendTo").value || "").trim(), (document.getElementById("wwSendAmt").value || "").trim());
+    });
+    if (!dialog.open) dialog.showModal();
+  }
+
+  async function doSend(toRaw, amountStr) {
+    var to = normalizeAddress(toRaw);
+    var units = parseUsdc6(amountStr);
+    if (!to) { renderSendStep("Enter a valid recipient address (0x...).", { to: toRaw, amount: amountStr }); return; }
+    if (units === null || units <= 0n) { renderSendStep("Enter a valid amount.", { to: toRaw, amount: amountStr }); return; }
+    var balHex = await readArcUsdcHex();
+    if (balHex != null && hexToBigInt(balHex) < units) { renderSendStep("Amount is more than your balance.", { to: toRaw, amount: amountStr }); return; }
+    var submit = document.querySelector("#wwSendForm .ww-email-submit");
+    if (submit) { submit.disabled = true; submit.textContent = "Sending..."; }
     try {
-      var res = await p.request({ method: "eth_call", params: [{ to: ARC_USDC, data: data }, "latest"] });
-      return formatUnits6(res);
-    } catch (e) { return null; }
+      var data = "0xa9059cbb" + encAddr(to) + encUint256(units);
+      var txHash = await sendTransaction({ to: ARC_USDC, data: data, value: "0x0" });
+      renderSendSuccess(txHash);
+      fetchArcUsdcBalance().catch(function () {});
+    } catch (err) {
+      renderSendStep((err && err.message) || "Send failed. Please try again.", { to: toRaw, amount: amountStr });
+    }
+  }
+
+  function renderSendSuccess(txHash) {
+    var body = document.getElementById("wwPickerBody");
+    if (!body) return;
+    var url = txHash ? (ARC_EXPLORER + "/tx/" + txHash) : "";
+    body.innerHTML =
+      "<div class=\"dialog-head\">" +
+        "<div><p class=\"eyebrow\">Wallet</p><h2>Sent</h2></div>" +
+        "<button class=\"icon-button\" id=\"wwPickerClose\" type=\"button\" aria-label=\"Close\">" +
+          "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 6l12 12M18 6 6 18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/></svg>" +
+        "</button>" +
+      "</div>" +
+      "<p class=\"muted ww-hint\">Your USDC transfer was submitted.</p>" +
+      (url ? ("<a class=\"payment-received-detail\" href=\"" + escapeHtml(url) + "\" target=\"_blank\" rel=\"noreferrer\">View on Arcscan</a>") : "") +
+      "<button class=\"primary-action ww-email-submit\" id=\"wwSendDone\" type=\"button\">Done</button>";
+    document.getElementById("wwPickerClose").addEventListener("click", closePickerDialog);
+    document.getElementById("wwSendDone").addEventListener("click", closePickerDialog);
+  }
+
+  // Forgot PIN: start Circle's recovery challenge; the SDK asks the user's security questions and
+  // lets them set a new PIN. Independent of email access.
+  async function circleRestorePin() {
+    if (!session || session.kind !== "circle") return;
+    try {
+      if (!_circleSdk || !_circleAuth || !_circleAuth.userToken) {
+        await connectWithCircleEmail();
+        if (!_circleSdk || !_circleAuth || !_circleAuth.userToken) { alert("Please sign in with your email first, then try Forgot PIN again."); return; }
+      }
+      var resp = await circlePostJson("/api/wallet/circle/pin/restore", { userToken: _circleAuth.userToken });
+      if (!resp.challengeId) throw new Error("Could not start PIN recovery.");
+      await circleExecute(_circleSdk, _circleAuth.userToken, _circleAuth.encryptionKey, resp.challengeId);
+    } catch (err) {
+      alert((err && err.message) || "PIN recovery failed. Please try again.");
+    }
   }
 
   // --- UI: sidebar wallet widget ---
@@ -745,10 +849,14 @@
       "<div class=\"ww-panel-label\">Balances</div>" +
       "<div class=\"ww-balances\" id=\"wwBalances\"></div>" +
       "<p class=\"ww-panel-note\">More networks coming soon.</p>" +
+      "<button class=\"ww-send\" id=\"wwSend\" type=\"button\">Send / Withdraw</button>" +
+      "<button class=\"ww-link\" id=\"wwForgotPin\" type=\"button\" hidden>Forgot PIN?</button>" +
       "<button class=\"ww-logout\" id=\"wwLogout\" type=\"button\">Disconnect</button>";
     document.body.appendChild(panel);
     document.getElementById("wwClose").addEventListener("click", closePanel);
     document.getElementById("wwLogout").addEventListener("click", disconnect);
+    document.getElementById("wwSend").addEventListener("click", function () { closePanel(); openSend(); });
+    document.getElementById("wwForgotPin").addEventListener("click", function () { closePanel(); circleRestorePin(); });
     document.addEventListener("click", function (e) {
       if (panel.hidden) return;
       if (panel.contains(e.target)) return;
@@ -770,6 +878,8 @@
     addrLink.href = ARC_EXPLORER + "/address/" + session.address;
     var balances = document.getElementById("wwBalances");
     balances.innerHTML = "<div class=\"ww-bal-row\"><span class=\"ww-bal-net\"><span class=\"ww-bal-dot\"></span>Arc Testnet</span><span class=\"ww-bal-amt\" id=\"wwArcBal\">Checking...</span></div>";
+    var forgot = document.getElementById("wwForgotPin");
+    if (forgot) forgot.hidden = !(session && session.kind === "circle");
     var widget = document.getElementById("walletWidget");
     if (widget) {
       var rect = widget.getBoundingClientRect();

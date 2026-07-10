@@ -164,6 +164,14 @@ function createCircleWalletClient(config) {
     return call({ method: "POST", path: "/v1/w3s/user/transactions/contractExecution", userToken, body });
   }
 
+  // 8. Start the PIN recovery flow (forgot PIN). Circle returns a challengeId; the Web SDK then walks
+  //    the user through answering their security questions and setting a new PIN. Recovery is
+  //    independent of email, so a user who loses email access still keeps this path (and vice versa).
+  async function restorePin({ userToken }) {
+    if (!userToken) throw new Error("userToken is required");
+    return call({ method: "POST", path: "/v1/w3s/user/pin/restore", userToken, body: { idempotencyKey: newIdempotencyKey() } });
+  }
+
   // 7. (P2/P3) List the user's transactions, optionally filtered by refId, to resolve the on-chain
   //    txHash after a challenge is executed. Returns an array.
   async function listTransactions({ userToken, refId }) {
@@ -185,6 +193,7 @@ function createCircleWalletClient(config) {
     getTransaction,
     createContractExecution,
     listTransactions,
+    restorePin,
   };
 }
 
