@@ -369,6 +369,8 @@
             },
           });
           sdk.verifyOtp();
+          // Circle now shows its own hosted OTP window; close our dialog so they do not overlap.
+          closePickerDialog();
         } catch (e) { reject(e); }
       })();
     });
@@ -477,7 +479,7 @@
             else reject(new Error("Social sign-in did not return a session."));
           },
         );
-        try { sdk.performLogin(providerName); } catch (e) { reject(e); }
+        try { sdk.performLogin(providerName); closePickerDialog(); } catch (e) { reject(e); }
       });
       await finishCircleLogin(login.sdk, { userToken: login.userToken, encryptionKey: login.encryptionKey });
     } catch (err) {
