@@ -116,9 +116,12 @@
     if (config.walletConnectProjectId) {
       options.push({ kind: "walletconnect", name: "WalletConnect (scan with mobile)", icon: "" });
     }
-    // Mainstream option first: create or open a wallet with just an email (Circle, no extension).
+    // Mainstream options first: create or open a wallet with just an email (Circle, no extension),
+    // and Google when social login is configured.
     if (config.walletCircleEnabled && config.circleAppId) {
-      options.unshift({ kind: "circle", name: "Continue with email" });
+      var circleOpts = [{ kind: "circle", name: "Continue with email" }];
+      if (config.circleSocialEnabled) circleOpts.push({ kind: "circle-google", name: "Continue with Google" });
+      options = circleOpts.concat(options);
     }
     return options;
   }
@@ -150,6 +153,10 @@
     }
     if (option.kind === "circle") {
       await connectWithCircleEmail();
+      return session ? session.address : "";
+    }
+    if (option.kind === "circle-google") {
+      await connectWithCircleSocial("Google");
       return session ? session.address : "";
     }
     return await connectWithProvider(option.provider, option.name);
@@ -299,6 +306,9 @@
   // dormant until configured. NOTE: the Web SDK method sequence (updateConfigs + verifyOtp) follows
   // Circle's docs; re-verify it live against the installed SDK version when first enabling this.
   var _circleSdkPromise = null;
+  var _circleSdk = null;          // live W3SSdk instance after login
+  var _circleAuth = null;         // { userToken, encryptionKey } (memory only, ~60 min)
+  var _circleWalletId = "";       // Circle wallet id (for contract-execution challenges)
   function loadCircleSdk() {
     if (!_circleSdkPromise) {
       _circleSdkPromise = import("https://esm.sh/@circle-fin/w3s-pw-web-sdk").then(function (mod) {
@@ -359,6 +369,28 @@
     });
   }
 
+  // Shared post-login step (email + social): create the wallet if needed, read the address, and
+  // set the shared session. Keeps the live SDK + userToken in memory for signing (P2/P3); the
+  // userToken is short-lived and never persisted, so the signing path re-authenticates after reload.
+  async function finishCircleLogin(sdk, login) {
+    var walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
+    if (!walletsResp.primary || !walletsResp.primary.address) {
+      var init = await circlePostJson("/api/wallet/circle/initialize", { userToken: login.userToken });
+      if (init.challengeId) await circleExecute(sdk, login.userToken, login.encryptionKey, init.challengeId);
+      walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
+    }
+    var address = normalizeAddress(walletsResp.primary && walletsResp.primary.address);
+    if (!address) throw new Error("Wallet was not created. Please try again.");
+    _circleSdk = sdk;
+    _circleAuth = { userToken: login.userToken, encryptionKey: login.encryptionKey };
+    _circleWalletId = (walletsResp.primary && walletsResp.primary.id) || "";
+    session = { address: address, authAt: new Date().toISOString(), kind: "circle", circleWalletId: _circleWalletId };
+    saveSession(session);
+    closePickerDialog();
+    render();
+    emitChange();
+  }
+
   async function connectWithCircleEmail() {
     var config = await getPublicConfig();
     if (!config.walletCircleEnabled || !config.circleAppId) { alert("Email sign-in is not available right now."); return; }
@@ -370,23 +402,69 @@
       var deviceId = await sdk.getDeviceId();
       var tokenResp = await circlePostJson("/api/wallet/circle/email/token", { deviceId: deviceId, email: email });
       var login = await circleVerifyEmailOtp(sdk, config.circleAppId, tokenResp);
-      var walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
-      if (!walletsResp.primary || !walletsResp.primary.address) {
-        var init = await circlePostJson("/api/wallet/circle/initialize", { userToken: login.userToken });
-        if (init.challengeId) await circleExecute(sdk, login.userToken, login.encryptionKey, init.challengeId);
-        walletsResp = await circlePostJson("/api/wallet/circle/wallets", { userToken: login.userToken });
-      }
-      var address = normalizeAddress(walletsResp.primary && walletsResp.primary.address);
-      if (!address) throw new Error("Wallet was not created. Please try again.");
-      session = { address: address, authAt: new Date().toISOString(), kind: "circle" };
-      saveSession(session);
-      closePickerDialog();
-      render();
-      emitChange();
+      await finishCircleLogin(sdk, login);
     } catch (err) {
       closePickerDialog();
       alert((err && err.message) || "Email sign-in failed. Please try again.");
     }
+  }
+
+  // (P4) Social login (Google first). Requires the provider's OAuth client to be configured in the
+  // Circle Console. The SDK handles the OAuth exchange and returns the session in the callback.
+  // NOTE: the exact performLogin provider argument (enum vs string) needs a live verification pass.
+  async function connectWithCircleSocial(providerName) {
+    var config = await getPublicConfig();
+    if (!config.walletCircleEnabled || !config.circleAppId) { alert("Social sign-in is not available right now."); return; }
+    try {
+      var W3SSdk = await loadCircleSdk();
+      var login = await new Promise(function (resolve, reject) {
+        var sdk = new W3SSdk({
+          configs: { appSettings: { appId: config.circleAppId } },
+          socialLoginCompleteCallback: function (error, result) {
+            if (error) { reject(new Error(error.message || "Social sign-in failed.")); return; }
+            if (result && result.userToken && result.encryptionKey) resolve({ sdk: sdk, userToken: result.userToken, encryptionKey: result.encryptionKey });
+            else reject(new Error("Social sign-in did not return a session."));
+          },
+        });
+        try { sdk.performLogin(providerName); } catch (e) { reject(e); }
+      });
+      await finishCircleLogin(login.sdk, { userToken: login.userToken, encryptionKey: login.encryptionKey });
+    } catch (err) {
+      closePickerDialog();
+      alert((err && err.message) || "Social sign-in failed. Please try again.");
+    }
+  }
+
+  // (P2/P3) Sign + broadcast a transaction from a Circle wallet: build a contract-execution
+  // challenge on the backend from Fundline-encoded calldata, let the user approve it in the SDK,
+  // then poll for the on-chain hash. Returns the txHash so callers behave exactly like the EOA path.
+  // NOTE: the SDK execute + userToken lifecycle here need a live verification pass on first enable.
+  async function circleSendTransaction(tx) {
+    if (!_circleSdk || !_circleAuth || !_circleAuth.userToken) {
+      // Session expired or restored from storage without a live token: re-authenticate to sign.
+      await connectWithCircleEmail();
+      if (!_circleSdk || !_circleAuth || !_circleAuth.userToken) throw new Error("Sign in with your email to authorize this.");
+    }
+    var rid = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : (String(Date.now()) + Math.random().toString(16).slice(2));
+    var refId = "fl-" + rid;
+    var created = await circlePostJson("/api/wallet/circle/transaction", {
+      userToken: _circleAuth.userToken,
+      walletId: _circleWalletId || undefined,
+      walletAddress: _circleWalletId ? undefined : (session && session.address),
+      to: tx.to,
+      data: tx.data || "0x",
+      value: tx.value,
+      refId: refId,
+    });
+    if (!created.challengeId) throw new Error("Could not start the transaction.");
+    await circleExecute(_circleSdk, _circleAuth.userToken, _circleAuth.encryptionKey, created.challengeId);
+    for (var i = 0; i < 60; i += 1) {
+      await new Promise(function (r) { setTimeout(r, 3000); });
+      var st = await circlePostJson("/api/wallet/circle/tx-status", { userToken: _circleAuth.userToken, refId: refId }).catch(function () { return {}; });
+      if (st && st.txHash) return st.txHash;
+      if (st && String(st.state || "").toUpperCase() === "FAILED") throw new Error("Transaction failed on-chain.");
+    }
+    throw new Error("Transaction not confirmed in time.");
   }
 
   async function showWalletConnectQr(uri) {
@@ -494,7 +572,8 @@
     var stored = loadSession();
     if (!stored) return;
     // Circle wallets have no injected provider to check against; restore the address directly.
-    if (stored.kind === "circle") { session = stored; render(); emitChange(); return; }
+    // userToken is not persisted, so the signing path re-authenticates on demand.
+    if (stored.kind === "circle") { session = stored; _circleWalletId = stored.circleWalletId || ""; render(); emitChange(); return; }
     // Give EIP-6963 wallets a tick to announce themselves before reading ethereum.
     await new Promise(function (r) { setTimeout(r, 50); });
     var p = getProvider();
@@ -633,6 +712,9 @@
   // wallet on the correct network first (ensureArcChain / ensurePaymentNetwork), same as before.
   async function sendTransaction(tx) {
     tx = tx || {};
+    if (session && session.kind === "circle") {
+      return await circleSendTransaction(tx);
+    }
     var p = getProvider();
     if (!p || !p.request) throw new Error("No wallet provider available.");
     var params = { from: tx.from || (session && session.address) || "", to: tx.to, data: tx.data || "0x" };

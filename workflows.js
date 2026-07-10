@@ -908,9 +908,21 @@ const MAX_UINT256 = (2n ** 256n) - 1n; // one-time approval cap
 
 function getEthProvider() {
   if (typeof window === "undefined") return null;
+  // Circle wallets have no injected provider; return an RPC-backed read shim (writes go through
+  // FundlineWallet.sendTransaction, which routes circle wallets to the challenge flow).
+  var s = (window.FundlineWallet && window.FundlineWallet.getSession) ? window.FundlineWallet.getSession() : null;
+  if (s && s.kind === "circle") return circleReadShim();
   // Prefer the shared dApp session's active provider so network-ensure and the send agree on the
   // same wallet (matches app.js). Falls back to the injected provider.
   return (window.FundlineWallet && window.FundlineWallet.getProvider && window.FundlineWallet.getProvider()) || window.ethereum || null;
+}
+function circleReadShim() {
+  var rpc = "https://rpc.testnet.arc.network";
+  return { request: function (args) {
+    return fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: (args || {}).method, params: (args || {}).params || [] }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j && j.error) throw new Error((j.error && j.error.message) || "RPC error"); return j.result; });
+  } };
 }
 function encAddr(a) { return String(a).toLowerCase().replace(/^0x/, "").padStart(64, "0"); }
 function encUint(n) { return BigInt(n).toString(16).padStart(64, "0"); }

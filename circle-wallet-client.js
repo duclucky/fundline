@@ -75,7 +75,7 @@ function createCircleWalletClient(config) {
 
   async function call({ method, path, userToken, body }) {
     if (!apiKey) throw new Error("Circle API key is not configured");
-    const headers = { "Authorization": `Bearer ${apiKey}` };
+    const headers = { "Authorization": `Bearer ${apiKey}`, "X-Request-Id": crypto.randomUUID() };
     if (userToken) headers["X-User-Token"] = userToken;
     const result = await request({ baseUrl, method, path, headers, body });
     const status = result && result.status;
@@ -141,6 +141,38 @@ function createCircleWalletClient(config) {
     return data.transaction || null;
   }
 
+  // 6. (P2/P3) Create a contract-execution challenge from raw calldata. Fundline already encodes
+  //    calldata (USDC.approve, router.payInvoice, escrow.fund, batch.payBatch) with its own ABI
+  //    helpers, so we pass callData directly. Returns { challengeId }. The user then approves it in
+  //    the Web SDK, and Circle signs + broadcasts. Set refId so the tx can be found by listTransactions.
+  async function createContractExecution({ userToken, walletId, walletAddress, contractAddress, callData, amount, refId, feeLevel }) {
+    if (!userToken) throw new Error("userToken is required");
+    if (!contractAddress) throw new Error("contractAddress is required");
+    if (!callData) throw new Error("callData is required");
+    const body = {
+      idempotencyKey: newIdempotencyKey(),
+      contractAddress,
+      callData,
+      feeLevel: feeLevel || "MEDIUM",
+    };
+    if (walletId) body.walletId = walletId;
+    else if (walletAddress) { body.walletAddress = walletAddress; body.blockchain = blockchain; }
+    else throw new Error("walletId or walletAddress is required");
+    // Native value only for payable calls; our USDC contract calls are non-payable (value 0).
+    if (amount != null && amount !== "" && amount !== "0x0" && amount !== "0") body.amount = amount;
+    if (refId) body.refId = refId;
+    return call({ method: "POST", path: "/v1/w3s/user/transactions/contractExecution", userToken, body });
+  }
+
+  // 7. (P2/P3) List the user's transactions, optionally filtered by refId, to resolve the on-chain
+  //    txHash after a challenge is executed. Returns an array.
+  async function listTransactions({ userToken, refId }) {
+    if (!userToken) throw new Error("userToken is required");
+    const query = refId ? ("?refId=" + encodeURIComponent(refId)) : "";
+    const data = await call({ method: "GET", path: "/v1/w3s/transactions" + query, userToken });
+    return Array.isArray(data.transactions) ? data.transactions : [];
+  }
+
   return {
     available,
     blockchain,
@@ -151,6 +183,8 @@ function createCircleWalletClient(config) {
     listWallets,
     getPrimaryWallet,
     getTransaction,
+    createContractExecution,
+    listTransactions,
   };
 }
 

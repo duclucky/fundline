@@ -2,7 +2,18 @@
 // (via wallet.js EIP-6963 discovery), falling back to window.ethereum so that
 // the single-wallet case keeps working exactly as before.
 function getActiveProvider() {
+  const s = window.FundlineWallet && window.FundlineWallet.getSession ? window.FundlineWallet.getSession() : null;
+  if (s && s.kind === "circle") return circleReadProvider();
   return (window.FundlineWallet && window.FundlineWallet.getProvider && window.FundlineWallet.getProvider()) || window.ethereum || null;
+}
+
+// Circle wallets have no EIP-1193 provider. For READS (eth_call, receipt, chainId) we return a shim
+// backed by the public Arc RPC so the existing read/wait helpers work unchanged. WRITES never reach
+// here: they go through FundlineWallet.sendTransaction, which routes circle wallets to the challenge
+// flow and ignores the provider argument.
+function circleReadProvider() {
+  const rpcUrl = (state.publicConfig && state.publicConfig.rpcUrl) || DEFAULT_PUBLIC_CONFIG.rpcUrl || "https://rpc.testnet.arc.network";
+  return { request: (args) => rpcCall(rpcUrl, (args || {}).method, (args || {}).params || []) };
 }
 
 const STORAGE_KEY = "arc-invoice-usdc-invoices-v1";
@@ -1323,6 +1334,9 @@ function getPaymentSourceOptions() {
     { key: "baseSepolia",     label: "USDC on Base Sepolia (CCTP bridge)", chain: CCTP_TESTNET_CHAINS.baseSepolia },
     { key: "ethereumSepolia", label: "USDC on ETH Sepolia (CCTP bridge)",  chain: CCTP_TESTNET_CHAINS.ethereumSepolia },
   ];
+  // Circle wallets pay on Arc only (no CCTP cross-chain bridging in v1).
+  const s = window.FundlineWallet && window.FundlineWallet.getSession ? window.FundlineWallet.getSession() : null;
+  if (s && s.kind === "circle") return options.slice(0, 1);
   return options;
 }
 
@@ -2020,6 +2034,9 @@ async function ensurePaymentNetwork(provider, config) {
 }
 
 async function ensureWalletNetwork(provider, chain) {
+  // Circle wallets cannot switch to CCTP source chains; cross-chain bridging is not a circle path.
+  const s = window.FundlineWallet && window.FundlineWallet.getSession ? window.FundlineWallet.getSession() : null;
+  if (s && s.kind === "circle") return;
   const expected = String(chain.chainIdHex || "").toLowerCase();
   const current = String(await provider.request({ method: "eth_chainId" })).toLowerCase();
   if (current === expected) return;

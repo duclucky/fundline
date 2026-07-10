@@ -340,6 +340,8 @@ const CIRCLE_APP_ID = String(process.env.CIRCLE_APP_ID || "").trim();
 const WALLET_CIRCLE_ENABLED =
   String(process.env.WALLET_CIRCLE_ENABLED || "").toLowerCase() === "true" &&
   Boolean(String(process.env.CIRCLE_API_KEY || "").trim());
+// Social login (Google) is a further opt-in; needs the provider's OAuth client set in the Console.
+const WALLET_CIRCLE_SOCIAL_ENABLED = String(process.env.WALLET_CIRCLE_SOCIAL_ENABLED || "").toLowerCase() === "true";
 const circleWalletClient = require("./circle-wallet-client").createCircleWalletClient({
   apiKey: String(process.env.CIRCLE_API_KEY || "").trim(),
   blockchain: process.env.CIRCLE_WALLET_BLOCKCHAIN || "ARC-TESTNET",
@@ -599,6 +601,14 @@ const server = http.createServer((req, res) => {
     handleCircleUserToken(req, res);
     return;
   }
+  if (url.pathname === "/api/wallet/circle/transaction") {
+    handleCircleTransaction(req, res);
+    return;
+  }
+  if (url.pathname === "/api/wallet/circle/tx-status") {
+    handleCircleTxStatus(req, res);
+    return;
+  }
 
   if (url.pathname === "/api/workflows") {
     handleWorkflowList(req, res, url);
@@ -785,6 +795,7 @@ function handlePublicConfig(req, res) {
     walletConnectProjectId: WALLETCONNECT_PROJECT_ID,
     circleAppId: CIRCLE_APP_ID,
     walletCircleEnabled: WALLET_CIRCLE_ENABLED,
+    circleSocialEnabled: WALLET_CIRCLE_ENABLED && WALLET_CIRCLE_SOCIAL_ENABLED,
     workflowRunnerEnabled: WORKFLOW_RATE_LIMIT_ENABLED,
     workflowFreeRunsPerDay: WORKFLOW_RUNS_PER_IP_PER_DAY,
     workflowGenPromptsPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
@@ -4733,6 +4744,59 @@ async function handleCircleUserToken(req, res) {
     sendJson(res, 200, data);
   } catch (error) {
     console.error("[Circle] user token error:", error.message);
+    sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
+  }
+}
+
+// (P2/P3) Build a contract-execution challenge for a Circle wallet from Fundline-encoded calldata
+// (USDC.approve, router.payInvoice, escrow.fund, batch.payBatch). Returns the challengeId for the
+// Web SDK to execute; the frontend then polls tx-status by refId for the on-chain hash. The user
+// approves every challenge, so this never moves funds on its own.
+async function handleCircleTransaction(req, res) {
+  if (!circleGuard(req, res)) return;
+  try {
+    const body = await readJsonBody(req);
+    const userToken = String(body.userToken || "").trim();
+    const to = String(body.to || "").trim();
+    const data = String(body.data || "").trim();
+    const refId = String(body.refId || "").trim();
+    if (!userToken || !to || !data) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "userToken, to and data are required" } });
+      return;
+    }
+    const out = await circleWalletClient.createContractExecution({
+      userToken,
+      walletId: String(body.walletId || "").trim() || undefined,
+      walletAddress: String(body.walletAddress || "").trim() || undefined,
+      contractAddress: to,
+      callData: data,
+      amount: body.value,
+      refId: refId || undefined,
+    });
+    sendJson(res, 200, { challengeId: out.challengeId, refId });
+  } catch (error) {
+    console.error("[Circle] transaction error:", error.message);
+    sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
+  }
+}
+
+// (P2/P3) Resolve the on-chain hash of a Circle transaction by the refId set at creation.
+async function handleCircleTxStatus(req, res) {
+  if (!circleGuard(req, res)) return;
+  try {
+    const body = await readJsonBody(req);
+    const userToken = String(body.userToken || "").trim();
+    const refId = String(body.refId || "").trim();
+    if (!userToken || !refId) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "userToken and refId are required" } });
+      return;
+    }
+    const txs = await circleWalletClient.listTransactions({ userToken, refId });
+    const withHash = txs.find((t) => t && t.txHash);
+    const tx = withHash || txs[0] || null;
+    sendJson(res, 200, { state: tx ? tx.state || "" : "", txHash: tx ? tx.txHash || "" : "" });
+  } catch (error) {
+    console.error("[Circle] tx status error:", error.message);
     sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
   }
 }

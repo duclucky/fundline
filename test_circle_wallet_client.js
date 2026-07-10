@@ -138,6 +138,57 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
     eq(tx.txHash, "0xhash", "getTransaction returns transaction");
   }
 
+  // createContractExecution: path, headers, callData mode, defaults, returns challengeId
+  {
+    const fake = makeFake([{ status: 201, json: { data: { challengeId: "chal-tx" } } }]);
+    const c = createCircleWalletClient({ apiKey: "k", request: fake.request });
+    const out = await c.createContractExecution({ userToken: "u", walletId: "wal1", contractAddress: "0xrouter", callData: "0xabcdef", amount: "0x0", refId: "ref-1" });
+    const call = fake.calls[0];
+    eq(call.method, "POST", "contractExecution POST");
+    eq(call.path, "/v1/w3s/user/transactions/contractExecution", "contractExecution path");
+    eq(call.headers["X-User-Token"], "u", "contractExecution user token");
+    ok(UUID_RE.test(call.headers["X-Request-Id"]), "contractExecution has X-Request-Id uuid");
+    ok(UUID_RE.test(call.body.idempotencyKey), "contractExecution idempotencyKey uuid");
+    eq(call.body.contractAddress, "0xrouter", "contractExecution contractAddress");
+    eq(call.body.callData, "0xabcdef", "contractExecution callData");
+    eq(call.body.walletId, "wal1", "contractExecution walletId");
+    eq(call.body.feeLevel, "MEDIUM", "contractExecution default feeLevel MEDIUM");
+    eq(call.body.refId, "ref-1", "contractExecution refId");
+    ok(!("amount" in call.body), "contractExecution omits amount when 0x0");
+    eq(out.challengeId, "chal-tx", "contractExecution returns challengeId");
+  }
+
+  // createContractExecution with walletAddress falls back to address + blockchain
+  {
+    const fake = makeFake([{ status: 200, json: { data: { challengeId: "x" } } }]);
+    const c = createCircleWalletClient({ apiKey: "k", request: fake.request });
+    await c.createContractExecution({ userToken: "u", walletAddress: "0xabc", contractAddress: "0xr", callData: "0x01" });
+    eq(fake.calls[0].body.walletAddress, "0xabc", "contractExecution uses walletAddress");
+    eq(fake.calls[0].body.blockchain, DEFAULT_BLOCKCHAIN, "contractExecution sets blockchain with walletAddress");
+    ok(!("walletId" in fake.calls[0].body), "contractExecution no walletId when using address");
+  }
+
+  // createContractExecution validation
+  {
+    const c = createCircleWalletClient({ apiKey: "k", request: makeFake([]).request });
+    await throwsAsync(() => c.createContractExecution({ walletId: "w", contractAddress: "0xr", callData: "0x1" }), "contractExecution needs userToken");
+    await throwsAsync(() => c.createContractExecution({ userToken: "u", walletId: "w", callData: "0x1" }), "contractExecution needs contractAddress");
+    await throwsAsync(() => c.createContractExecution({ userToken: "u", walletId: "w", contractAddress: "0xr" }), "contractExecution needs callData");
+    await throwsAsync(() => c.createContractExecution({ userToken: "u", contractAddress: "0xr", callData: "0x1" }), "contractExecution needs wallet id or address");
+  }
+
+  // listTransactions: path with refId, returns array
+  {
+    const txs = [{ id: "t1", txHash: "0xhh", state: "CONFIRMED", refId: "ref-9" }];
+    const fake = makeFake([{ status: 200, json: { data: { transactions: txs } } }]);
+    const c = createCircleWalletClient({ apiKey: "k", request: fake.request });
+    const list = await c.listTransactions({ userToken: "u", refId: "ref-9" });
+    eq(fake.calls[0].method, "GET", "listTransactions GET");
+    eq(fake.calls[0].path, "/v1/w3s/transactions?refId=ref-9", "listTransactions path with refId");
+    eq(list.length, 1, "listTransactions returns array");
+    eq(list[0].txHash, "0xhh", "listTransactions txHash");
+  }
+
   // error mapping: non-2xx throws with Circle message
   {
     const fake = makeFake([{ status: 401, json: { message: "Malformed authorization" } }]);
