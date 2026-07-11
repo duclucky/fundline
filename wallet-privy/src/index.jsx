@@ -45,17 +45,21 @@ window.FundlineWallet = {
     // (invoice pay, withdraw, batch) signs on the client, which prompts MFA when enrolled.
     try { console.log("[privy] send", { viaServer: !!(opts && opts.viaServer), policy: CFG.walletPrivyPolicyEnabled, walletId: api.walletId }); } catch (e) {}
     if (opts && opts.viaServer && api.walletId && CFG.walletPrivyPolicyEnabled) {
-      const r = await fetch("/api/wallet/privy/run-tx", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ walletId: api.walletId, address: api.address, to: tx.to, data: tx.data || "0x", value: tx.value }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j.hash) {
-        try { console.error("[privy] run-tx failed", r.status, JSON.stringify(j)); } catch (e) {}
-        throw new Error((j.error && j.error.message) || "Transaction failed.");
+      // Try the server co-sign (no MFA). If it is not set up yet / fails, fall back to client
+      // signing (prompts MFA) so runs never break.
+      try {
+        const r = await fetch("/api/wallet/privy/run-tx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ walletId: api.walletId, address: api.address, to: tx.to, data: tx.data || "0x", value: tx.value }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok && j.hash) return j.hash;
+        try { console.error("[privy] run-tx failed, falling back to client signing", r.status, JSON.stringify(j)); } catch (e) {}
+      } catch (e) {
+        try { console.error("[privy] run-tx error, falling back to client signing", e && e.message); } catch (er) {}
       }
-      return j.hash;
+      // fall through to client signing below
     }
     if (!api.getProvider) throw new Error("Wallet is not ready.");
     const provider = await api.getProvider();
