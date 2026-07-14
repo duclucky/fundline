@@ -549,30 +549,111 @@
     }
   }
 
-  // (P4) Social login (Google first). Requires the provider's OAuth client to be configured in the
-  // Circle Console. The SDK handles the OAuth exchange and returns the session in the callback.
-  // NOTE: the exact performLogin provider argument (enum vs string) needs a live verification pass.
+  // (P4) Google social login. Uses a full-page OAuth redirect (Circle's SDK sends the browser to
+  // Google, then Google returns to redirectUri with the response in the URL hash). Flow: mint a
+  // social device token on the backend, save it (plus the page to return to) so the callback page can
+  // finish the login, configure the SDK with the Google client id + redirect URI, then performLogin
+  // redirects away. The return is handled on load by completeCircleGoogleReturn. The redirect URI
+  // /circle-google-callback serves the app (so this script loads there). Requires the Google client
+  // id in Circle Console + Google Cloud OAuth (authorized redirect URI = the same callback URL).
+  function circleGoogleRedirectUri() { return window.location.origin + "/circle-google-callback"; }
+
   async function connectWithCircleSocial(providerName) {
     var config = await getPublicConfig();
-    if (!config.walletCircleEnabled || !config.circleAppId) { alert("Social sign-in is not available right now."); return; }
+    if (!config.walletCircleEnabled || !config.circleAppId || !config.circleGoogleClientId) {
+      alert("Google sign-in is not available right now.");
+      return;
+    }
     try {
       var W3SSdk = await loadCircleSdk();
+      var sdk = new W3SSdk({ appSettings: { appId: config.circleAppId } }, function () {});
+      circleApplyTheme(sdk);
+      var deviceId = await sdk.getDeviceId();
+      var tok = await circlePostJson("/api/wallet/circle/social/token", { deviceId: deviceId });
+      if (!tok.deviceToken || !tok.deviceEncryptionKey) throw new Error("Could not start Google sign-in.");
+      // localStorage survives the full-page round trip to Google and back to the callback page.
+      try {
+        window.localStorage.setItem("fl_circle_g_dt", tok.deviceToken);
+        window.localStorage.setItem("fl_circle_g_dek", tok.deviceEncryptionKey);
+        window.localStorage.setItem("fl_circle_g_ret", window.location.pathname + window.location.search);
+        window.localStorage.setItem("fl_circle_g_pending", "1");
+      } catch (e) {}
+      sdk.updateConfigs({
+        appSettings: { appId: config.circleAppId },
+        loginConfigs: {
+          deviceToken: tok.deviceToken,
+          deviceEncryptionKey: tok.deviceEncryptionKey,
+          google: { clientId: config.circleGoogleClientId, redirectUri: circleGoogleRedirectUri(), selectAccountPrompt: true },
+        },
+      });
+      closePickerDialog();
+      sdk.performLogin(providerName); // redirects the whole page to Google
+    } catch (err) {
+      try { console.error("[circle] google login start failed:", err); } catch (e) {}
+      alert((err && err.message) || "Google sign-in failed. Please try again.");
+    }
+  }
+
+  // On returning from the Google OAuth redirect, re-create the SDK with the same login configs so its
+  // constructor auto-runs the social-login status check (reads the URL hash + the saved provider) and
+  // fires the completion callback with { userToken, encryptionKey }. Returns true if it handled a
+  // return, so restore() does not also run the normal (external-wallet) path.
+  async function completeCircleGoogleReturn() {
+    var pending = "";
+    try { pending = window.localStorage.getItem("fl_circle_g_pending") || ""; } catch (e) {}
+    if (!pending) return false;
+    var dt = "", dek = "", ret = "/app";
+    try {
+      dt = window.localStorage.getItem("fl_circle_g_dt") || "";
+      dek = window.localStorage.getItem("fl_circle_g_dek") || "";
+      ret = window.localStorage.getItem("fl_circle_g_ret") || "/app";
+    } catch (e) {}
+    function clearG() {
+      try {
+        window.localStorage.removeItem("fl_circle_g_pending");
+        window.localStorage.removeItem("fl_circle_g_dt");
+        window.localStorage.removeItem("fl_circle_g_dek");
+        window.localStorage.removeItem("fl_circle_g_ret");
+      } catch (e) {}
+    }
+    if (!dt || !dek) { clearG(); return false; }
+    try {
+      var config = await getPublicConfig();
+      var W3SSdk = await loadCircleSdk();
       var login = await new Promise(function (resolve, reject) {
+        var settled = false;
         var sdk = new W3SSdk(
-          { appSettings: { appId: config.circleAppId } },
+          {
+            appSettings: { appId: config.circleAppId },
+            loginConfigs: {
+              deviceToken: dt,
+              deviceEncryptionKey: dek,
+              google: { clientId: config.circleGoogleClientId, redirectUri: circleGoogleRedirectUri(), selectAccountPrompt: true },
+            },
+          },
           function (error, result) {
-            if (error) { reject(new Error(error.message || "Social sign-in failed.")); return; }
-            if (result && result.userToken && result.encryptionKey) resolve({ sdk: sdk, userToken: result.userToken, encryptionKey: result.encryptionKey });
-            else reject(new Error("Social sign-in did not return a session."));
+            if (settled) return;
+            settled = true;
+            if (error) { reject(new Error(error.message || "Google sign-in failed.")); return; }
+            var auth = circlePickAuth(result);
+            if (auth.userToken && auth.encryptionKey) resolve({ sdk: sdk, userToken: auth.userToken, encryptionKey: auth.encryptionKey });
+            else reject(new Error("Google sign-in did not return a session token."));
           },
         );
         circleApplyTheme(sdk);
-        try { sdk.performLogin(providerName); closePickerDialog(); } catch (e) { reject(e); }
+        // The constructor runs the social status check automatically; guard against a silent no-op.
+        setTimeout(function () { if (!settled) { settled = true; reject(new Error("Google sign-in timed out. Please try again.")); } }, 30000);
       });
+      clearG();
+      try { history.replaceState(null, "", ret || "/app"); } catch (e) {}
       await finishCircleLogin(login.sdk, { userToken: login.userToken, encryptionKey: login.encryptionKey });
+      return true;
     } catch (err) {
-      closePickerDialog();
-      alert((err && err.message) || "Social sign-in failed. Please try again.");
+      clearG();
+      try { console.error("[circle] google return failed:", err); } catch (e) {}
+      try { history.replaceState(null, "", ret || "/app"); } catch (e) {}
+      try { alert((err && err.message) || "Google sign-in failed. Please try again."); } catch (e) {}
+      return false;
     }
   }
 
@@ -712,6 +793,10 @@
   async function restore() {
     initWalletDiscovery();
     render();
+    // If we are returning from a Google OAuth redirect, finish that login and stop here.
+    try {
+      if (await completeCircleGoogleReturn()) return;
+    } catch (e) {}
     var stored = loadSession();
     if (!stored) return;
     // Circle wallets have no injected provider to check against; restore the address directly.

@@ -99,6 +99,18 @@ function createCircleWalletClient(config) {
     });
   }
 
+  // 1b. Social login (Google) device token. Same idea as the email token but for the OAuth flow:
+  //     the SDK redirects to Google, then completes the login on return using this deviceToken +
+  //     deviceEncryptionKey. Returns { deviceToken, deviceEncryptionKey }. deviceId from the SDK.
+  async function createSocialDeviceToken({ deviceId }) {
+    if (!deviceId) throw new Error("deviceId is required");
+    return call({
+      method: "POST",
+      path: "/v1/w3s/users/social/token",
+      body: { idempotencyKey: newIdempotencyKey(), deviceId },
+    });
+  }
+
   // 2. Returning user: mint a fresh userToken + encryptionKey from a known Circle userId.
   async function createUserToken({ userId }) {
     if (!userId) throw new Error("userId is required");
@@ -186,6 +198,7 @@ function createCircleWalletClient(config) {
     blockchain,
     accountType,
     createEmailDeviceToken,
+    createSocialDeviceToken,
     createUserToken,
     initializeWallet,
     listWallets,

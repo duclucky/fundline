@@ -340,8 +340,12 @@ const CIRCLE_APP_ID = String(process.env.CIRCLE_APP_ID || "").trim();
 const WALLET_CIRCLE_ENABLED =
   String(process.env.WALLET_CIRCLE_ENABLED || "").toLowerCase() === "true" &&
   Boolean(String(process.env.CIRCLE_API_KEY || "").trim());
-// Social login (Google) is a further opt-in; needs the provider's OAuth client set in the Console.
-const WALLET_CIRCLE_SOCIAL_ENABLED = String(process.env.WALLET_CIRCLE_SOCIAL_ENABLED || "").toLowerCase() === "true";
+// Social login (Google) is a further opt-in; needs the Google OAuth client id (public, from Google
+// Cloud) both here and configured in the Circle Console. The button only shows when the id is set.
+const CIRCLE_GOOGLE_CLIENT_ID = String(process.env.CIRCLE_GOOGLE_CLIENT_ID || "").trim();
+const WALLET_CIRCLE_SOCIAL_ENABLED =
+  String(process.env.WALLET_CIRCLE_SOCIAL_ENABLED || "").toLowerCase() === "true" &&
+  Boolean(CIRCLE_GOOGLE_CLIENT_ID);
 
 // Privy embedded wallet (React island, wallet-privy.bundle.js) - an alternative wallet layer that
 // supports private-key export (import into MetaMask). App ID is PUBLIC (client-side). Off unless
@@ -625,6 +629,10 @@ const server = http.createServer((req, res) => {
     handleCircleEmailToken(req, res);
     return;
   }
+  if (url.pathname === "/api/wallet/circle/social/token") {
+    handleCircleSocialToken(req, res);
+    return;
+  }
   if (url.pathname === "/api/wallet/circle/initialize") {
     handleCircleInitialize(req, res);
     return;
@@ -724,6 +732,7 @@ function resolveRequestPath(pathname) {
   if (pathname === "/ai-workflows" || pathname === "/ai-workflows/") return "/ai-workflows.html";
   if (pathname === "/cv-gigs" || pathname === "/cv-gigs/") return "/cv-gigs.html";
   if (pathname === "/") return "/index.html";
+  if (pathname === "/circle-google-callback" || pathname === "/circle-google-callback/") return "/app.html";
   if (pathname === "/app" || pathname === "/app/" || pathname.startsWith("/pay/")) return "/app.html";
   if (pathname.startsWith("/batch/")) return "/app.html";
   if (pathname === "/workflows" || pathname === "/workflows/" || pathname.startsWith("/workflows/")) return "/workflows.html";
@@ -840,6 +849,7 @@ function handlePublicConfig(req, res) {
     circleAppId: CIRCLE_APP_ID,
     walletCircleEnabled: WALLET_CIRCLE_ENABLED,
     circleSocialEnabled: WALLET_CIRCLE_ENABLED && WALLET_CIRCLE_SOCIAL_ENABLED,
+    circleGoogleClientId: WALLET_CIRCLE_ENABLED && WALLET_CIRCLE_SOCIAL_ENABLED ? CIRCLE_GOOGLE_CLIENT_ID : "",
     privyAppId: PRIVY_APP_ID,
     walletPrivyEnabled: WALLET_PRIVY_ENABLED,
     walletPrivyPolicyEnabled: WALLET_PRIVY_POLICY_ENABLED && privyServerClient.available(),
@@ -4739,6 +4749,23 @@ async function handleCircleEmailToken(req, res) {
     sendJson(res, 200, data);
   } catch (error) {
     console.error("[Circle] email token error:", error.message);
+    sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
+  }
+}
+
+async function handleCircleSocialToken(req, res) {
+  if (!circleGuard(req, res)) return;
+  try {
+    const body = await readJsonBody(req);
+    const deviceId = String(body.deviceId || "").trim();
+    if (!deviceId) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "deviceId is required" } });
+      return;
+    }
+    const data = await circleWalletClient.createSocialDeviceToken({ deviceId });
+    sendJson(res, 200, data);
+  } catch (error) {
+    console.error("[Circle] social token error:", error.message);
     sendJson(res, 502, { error: { code: "CIRCLE_ERROR", message: error.message } });
   }
 }
