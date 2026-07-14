@@ -357,6 +357,59 @@
     };
   }
 
+  // Fundline dark/gold theme for Circle's Web SDK modals (OTP entry, PIN, transaction confirm).
+  // The SDK renders these screens itself, so only colors/fonts can be themed (not the layout or the
+  // security prefix). Applied right after each new W3SSdk, before any SDK UI opens. Best-effort: a
+  // theming failure (e.g. a method rename in a future SDK version) must never block sign-in.
+  var CIRCLE_THEME = {
+    backdrop: "#000000",
+    backdropOpacity: 0.6,
+    bg: "#14141a",
+    divider: "#2a2a33",
+    success: "#22c55e",
+    error: "#ef4444",
+    textMain: "#f4f4f5",
+    textMain2: "#e5e5e7",
+    textAuxiliary: "#a1a1aa",
+    textAuxiliary2: "#a1a1aa",
+    textSummary: "#d4d4d8",
+    textSummaryHighlight: "#d4af37",
+    textPlaceholder: "#71717a",
+    textDetailToggle: "#d4af37",
+    textInteractive: "#d4af37",
+    tooltipText: "#f4f4f5",
+    tooltipBg: "#1c1c22",
+    pinDotBase: "#2a2a33",
+    pinDotBaseBorder: "#3f3f46",
+    pinDotActivated: "#d4af37",
+    enteredPinText: "#f4f4f5",
+    inputText: "#f4f4f5",
+    inputBg: "#1c1c22",
+    inputBgDisabled: "#18181b",
+    inputBorderFocused: "#d4af37",
+    inputBorderFocusedError: "#ef4444",
+    dropdownBg: "#1c1c22",
+    dropdownBorderIsOpen: "#d4af37",
+    dropdownBorderError: "#ef4444",
+    mainBtnText: "#0d0d0f",
+    mainBtnTextOnHover: "#0d0d0f",
+    mainBtnTextDisabled: "#71717a",
+    mainBtnBg: "#d4af37",
+    mainBtnBgOnHover: "#e0c24f",
+    mainBtnBgDisabled: "#2a2a33",
+    secondBtnText: "#f4f4f5",
+    secondBtnTextOnHover: "#f4f4f5",
+    secondBtnBorder: "#3f3f46",
+    secondBtnBorderOnHover: "#d4af37",
+    secondBtnBgOnHover: "#1c1c22",
+    plainBtnText: "#d4af37",
+    plainBtnTextOnHover: "#e0c24f",
+    titleGradients: ["#d4af37", "#f0d572"],
+  };
+  function circleApplyTheme(sdk) {
+    try { if (sdk && typeof sdk.setThemeColor === "function") sdk.setThemeColor(CIRCLE_THEME); } catch (e) {}
+  }
+
   async function circleEmailLogin(W3SSdk, appId, email) {
     return await new Promise(function (resolve, reject) {
       var sdk = new W3SSdk(
@@ -368,6 +421,7 @@
           else reject(new Error("Login did not return a session token."));
         },
       );
+      circleApplyTheme(sdk);
       (async function () {
         try {
           var deviceId = await sdk.getDeviceId();
@@ -510,6 +564,7 @@
             else reject(new Error("Social sign-in did not return a session."));
           },
         );
+        circleApplyTheme(sdk);
         try { sdk.performLogin(providerName); closePickerDialog(); } catch (e) { reject(e); }
       });
       await finishCircleLogin(login.sdk, { userToken: login.userToken, encryptionKey: login.encryptionKey });
