@@ -617,6 +617,9 @@
       } catch (e) {}
     }
     if (!dt || !dek) { clearG(); return false; }
+    // Show immediate feedback: verifying + creating the wallet can take several seconds, and without
+    // this the page looks logged-out the whole time.
+    renderCircleLoading("Finishing Google sign-in");
     try {
       var config = await getPublicConfig();
       var W3SSdk = await loadCircleSdk();
@@ -652,9 +655,22 @@
       clearG();
       try { console.error("[circle] google return failed:", err); } catch (e) {}
       try { history.replaceState(null, "", ret || "/app"); } catch (e) {}
+      closePickerDialog();
       try { alert((err && err.message) || "Google sign-in failed. Please try again."); } catch (e) {}
       return false;
     }
+  }
+
+  // Lightweight "please wait" state shown in the picker dialog during the multi-step Circle flows
+  // (Google return, wallet creation) so the page does not look logged-out while work is in flight.
+  function renderCircleLoading(message) {
+    var dialog = ensurePickerDialog();
+    var body = document.getElementById("wwPickerBody");
+    if (!body) return;
+    body.innerHTML =
+      "<div class=\"dialog-head\"><div><p class=\"eyebrow\">Connect</p><h2>" + escapeHtml(message || "Signing in") + "</h2></div></div>" +
+      "<p class=\"muted ww-hint\">This can take a few seconds. Please wait.</p>";
+    if (!dialog.open) dialog.showModal();
   }
 
   // (P2/P3) Sign + broadcast a transaction from a Circle wallet: build a contract-execution
