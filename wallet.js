@@ -1006,6 +1006,7 @@
       "<a class=\"ww-panel-addr\" id=\"wwPanelAddr\" target=\"_blank\" rel=\"noopener\"></a>" +
       "<div class=\"ww-panel-label\">Balances</div>" +
       "<div class=\"ww-balances\" id=\"wwBalances\"></div>" +
+      "<p class=\"ww-panel-note\" id=\"wwGasNote\" hidden></p>" +
       "<p class=\"ww-panel-note\">More networks coming soon.</p>" +
       "<button class=\"ww-send\" id=\"wwSend\" type=\"button\">Send / Withdraw</button>" +
       "<button class=\"ww-link\" id=\"wwForgotPin\" type=\"button\" hidden>Forgot PIN?</button>" +
@@ -1038,6 +1039,13 @@
     balances.innerHTML = "<div class=\"ww-bal-row\"><span class=\"ww-bal-net\"><span class=\"ww-bal-dot\"></span>Arc Testnet</span><span class=\"ww-bal-amt\" id=\"wwArcBal\">Checking...</span></div>";
     var forgot = document.getElementById("wwForgotPin");
     if (forgot) forgot.hidden = !(session && session.kind === "circle");
+    // Circle smart-contract accounts on Arc have network fees sponsored by Circle Gas Station.
+    var gasNote = document.getElementById("wwGasNote");
+    if (gasNote) {
+      var isCircle = !!(session && session.kind === "circle");
+      gasNote.hidden = !isCircle;
+      if (isCircle) gasNote.textContent = "Network fees sponsored on Arc (Circle Gas Station).";
+    }
     var widget = document.getElementById("walletWidget");
     if (widget) {
       var rect = widget.getBoundingClientRect();
