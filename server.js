@@ -843,7 +843,7 @@ function handlePublicConfig(req, res) {
     runEscrowAddress: ARC_RUN_ESCROW_ADDRESS,
     workflowBillingEnabled: WORKFLOW_BILLING_ENABLED,
     workflowGatewayEnabled: gatewayClient.available(),
-    workflowPrices: Object.fromEntries(Object.entries(WORKFLOW_RUN_DEFS).map(([slug, d]) => [slug, { units: String(d.priceUnits), usdc: (d.priceUnits / 1000000).toFixed(6) }])),
+    workflowPrices: Object.fromEntries(Object.entries(WORKFLOW_RUN_DEFS).map(([slug, d]) => [slug, Object.fromEntries(["normal", "plus", "pro"].filter((t) => d.tiers && d.tiers[t]).map((t) => [t, { units: String(d.tiers[t].priceUnits), usdc: (d.tiers[t].priceUnits / 1000000).toFixed(6) }]))])),
     gatewayWalletAddress: GATEWAY_WALLET_ADDRESS,
     gatewayMinterAddress: GATEWAY_MINTER_ADDRESS,
     gatewayEnabled: Boolean(CIRCLE_GATEWAY_API_KEY),
