@@ -581,6 +581,31 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
             it creates are billed to your wallet, and workflow runs it starts are attributed to it.
           </p>
 
+          <h3>Quick start for agents</h3>
+          <p>
+            An autonomous agent can discover and run any live workflow and pay from its own Arc wallet.
+            No account or API key is required for workflow runs (a key is optional, only for higher rate
+            limits or the Invoice API). The machine-readable guide is at <code>GET /llms.txt</code>.
+          </p>
+          <ol>
+            <li><strong>Discover</strong>: <code>GET /api/workflows</code> lists every workflow with its slug and per-tier price; add <code>?q=keyword</code> to search. <code>GET /api/config</code> returns <code>chainId</code>, <code>usdcTokenAddress</code>, <code>runEscrowAddress</code>, and which payment gates are enabled.</li>
+            <li><strong>Pick a payment method</strong> (all non-custodial, paid in USDC on Arc):
+              <ul>
+                <li><strong>x402</strong>: one USDC transfer per run. Simplest; good for occasional runs.</li>
+                <li><strong>Escrow</strong>: fund a per-run escrow; refund on failure is contract-guaranteed (trustless). Good when you want an on-chain refund guarantee.</li>
+                <li><strong>Circle Gateway (gasless)</strong>: pre-fund a Gateway balance once, then pay per run off-chain with no gas and sub-second settlement. Best for high-frequency, agent-to-agent use.</li>
+              </ul>
+            </li>
+            <li><strong>Run</strong>: send <code>Accept: application/json</code> to get one JSON response (steps, output, settlement tx) instead of the browser stream.</li>
+          </ol>
+          <div class="code-card">
+            <div class="code-head"><span>Discover workflows</span><button data-copy="#wf-discover" type="button">Copy</button></div>
+            <pre id="wf-discover"><code>curl "https://fundline.xyz/api/workflows?q=research"
+# -> { "workflows": [ { "slug": "client-research", "name": "Client Research",
+#      "tiers": { "normal": { "units": "30000", "usdc": "0.03" } } } ],
+#      "chainId": 5042002, "usdc": "0x3600...0000" }</code></pre>
+          </div>
+
           <h3>Run a workflow from an agent</h3>
           <p>
             An agent can run any live workflow over HTTP. Runs are billed per run in USDC through a
@@ -651,6 +676,42 @@ curl -X POST http://127.0.0.1:5190/api/workflows/client-research/run \
   -d '{ "tier": "normal", "prompt": "Research Acme Labs" }'
 # -> 200 { "output": "...", "releaseTx": "0xYourTransferTx", ... }</code></pre>
           </div>
+
+          <h3>Pay per call with Circle Gateway (gasless)</h3>
+          <p>
+            For high-frequency, agent-to-agent use, Fundline accepts Circle Gateway (Nanopayments). The
+            agent pre-funds a Gateway balance once (a single on-chain deposit), then pays per run with an
+            off-chain signed authorization that Circle verifies and settles in batches: no gas, sub-second
+            per call. Non-custodial: the balance stays in the agent's own Gateway account, and only the
+            exact run price settles to Fundline after a successful run. This gate is offered when
+            <code>workflowGatewayEnabled</code> is true in <code>GET /api/config</code>.
+          </p>
+          <p>
+            Use Circle's <code>@circle-fin/x402-batching</code> client: create a client for
+            <code>arcTestnet</code> with your wallet, <code>deposit()</code> once, then <code>pay()</code>
+            the run URL. The client handles the 402 challenge, signs the authorization, and retries.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>Gateway prefund and pay</span><button data-copy="#wf-gateway" type="button">Copy</button></div>
+            <pre id="wf-gateway"><code>import { GatewayClient } from "@circle-fin/x402-batching/client";
+
+const gateway = new GatewayClient({ chain: "arcTestnet", privateKey: process.env.AGENT_PRIVATE_KEY });
+
+// One-time on-chain deposit into the Gateway balance:
+await gateway.deposit("1");
+
+// Then pay and run gasless, per call, from that balance:
+const { data, amount } = await gateway.pay(
+  "https://fundline.xyz/api/workflows/swot-analysis/run",
+  { method: "POST", headers: { Accept: "application/json" },
+    body: { tier: "normal", prompt: "SWOT for a USDC invoicing tool" } }
+);
+console.log("Paid", amount, "USDC:", data.output);</code></pre>
+          </div>
+          <p>
+            A runnable example is <code>examples/gateway-agent-demo.js</code>; the escrow and x402 agent
+            demos are in <code>examples/circle-agent-demo.js</code>.
+          </p>
 
           <h3>Run history</h3>
           <p>
