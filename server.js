@@ -325,7 +325,9 @@ const WORKFLOW_BILLING_ENABLED = Boolean(ARC_RUN_ESCROW_ADDRESS && ARC_USDC_TOKE
 // prod is unchanged until the SDK is installed and this is switched on in cPanel.
 const gatewayClient = require("./gateway-client").createGatewayClient({
   enabled: String(process.env.WORKFLOW_GATEWAY_ENABLED || "").toLowerCase() === "true",
-  url: process.env.GATEWAY_API_URL || undefined,
+  // The batching facilitator defaults to MAINNET, which does not list Arc testnet. On the
+  // testnet chain, default to Circle's testnet facilitator so getSupported() returns Arc.
+  url: process.env.GATEWAY_API_URL || (String(ARC_CHAIN_ID) === "5042002" ? "https://gateway-api-testnet.circle.com" : undefined),
   sellerAddress: normalizeAddress(process.env.GATEWAY_SELLER_ADDRESS || ARC_TREASURY_ADDRESS || ""),
   network: "eip155:" + ARC_CHAIN_ID,
   asset: ARC_USDC_TOKEN_ADDRESS,
