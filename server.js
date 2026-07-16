@@ -1553,7 +1553,13 @@ async function handleWorkflowRun(req, res, slug) {
           console.error("[Gateway] challenge build error:", error.message);
         }
       }
-      sendJson(res, 402, { accepts: accepts });
+      // x402 header transport: batching clients (Circle Gateway SDK) read the requirements
+      // from the PAYMENT-REQUIRED response header (base64 JSON), not the body. Set both so
+      // body-reading and header-reading x402 clients both work.
+      try {
+        res.setHeader("PAYMENT-REQUIRED", Buffer.from(JSON.stringify({ x402Version: 1, accepts: accepts })).toString("base64"));
+      } catch (_) {}
+      sendJson(res, 402, { accepts: accepts, x402Version: 1 });
       return;
     }
   }
