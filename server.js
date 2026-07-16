@@ -685,6 +685,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/.well-known/mcp.json") {
+    handleWellKnownMcp(req, res);
+    return;
+  }
+
+  if (url.pathname === "/.well-known/ai-plugin.json") {
+    handleWellKnownAiPlugin(req, res);
+    return;
+  }
+
   const wfQuoteMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/quote$/i);
   if (wfQuoteMatch) {
     handleWorkflowQuote(req, res, wfQuoteMatch[1]);
@@ -1123,6 +1133,8 @@ function handleLlmsTxt(req, res) {
     "MCP endpoint (Streamable HTTP): POST " + base + "/mcp",
     "Tools: list_workflows({query}), run_workflow({slug,tier,prompt,payment}).",
     "Optional header: Authorization: Bearer <Fundline API key> (not required for x402).",
+    "Auto-discovery: " + base + "/.well-known/mcp.json declares this MCP server so an agent",
+    "given only the domain can connect without manual setup.",
     "",
     "## Pay per run with x402 (no account)",
     "1. POST " + base + "/api/workflows/<slug>/run  with JSON {tier, prompt} and header",
@@ -1151,6 +1163,64 @@ function handleLlmsTxt(req, res) {
   ];
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
   res.end(lines.join("\n"));
+}
+
+// GET /.well-known/mcp.json - discovery manifest so an agent told only "go to fundline.xyz"
+// can auto-find the MCP server and connect without a human wiring it up. Declaration only:
+// it points at the public /mcp endpoint and lists the tool names; no secrets.
+function handleWellKnownMcp(req, res) {
+  const base = getRequestBaseUrl(req);
+  const manifest = {
+    schema_version: "2025-03-26",
+    name: "fundline",
+    name_for_human: "Fundline",
+    description: "Run AI workflows and pay per run in USDC on the Arc blockchain. No sign-in or API key required.",
+    servers: [
+      {
+        name: "fundline",
+        url: base + "/mcp",
+        transport: "streamable-http",
+        authentication: { type: "none", note: "An optional Bearer API key only raises rate limits; it is not required." },
+      },
+    ],
+    // Also expose the map shape some clients import directly into their MCP config.
+    mcpServers: { fundline: { url: base + "/mcp", transport: "streamable-http" } },
+    tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description })),
+    documentation_url: base + "/docs",
+    llms_txt: base + "/llms.txt",
+  };
+  sendJson(res, 200, manifest);
+}
+
+// GET /.well-known/ai-plugin.json - legacy plugin-style discovery manifest for agents that
+// probe this path. Declaration only; the model-facing description is self-contained so an
+// agent can act from it alone. No secrets, no private endpoints.
+function handleWellKnownAiPlugin(req, res) {
+  const base = getRequestBaseUrl(req);
+  const manifest = {
+    schema_version: "v1",
+    name_for_human: "Fundline",
+    name_for_model: "fundline",
+    description_for_human: "Run AI workflows and pay per run in USDC on Arc. No account needed.",
+    description_for_model: [
+      "Discover and run Fundline AI workflows, paying per run in USDC on the Arc blockchain",
+      "from the caller's own wallet. There is no sign-in, account, or API key for runs.",
+      "Prefer the Model Context Protocol server at " + base + "/mcp (tools: list_workflows,",
+      "run_workflow, list_runs). Over plain HTTP: GET " + base + "/api/workflows to list",
+      "workflows and per-tier prices (tiers are normal, plus, pro; default normal; there is",
+      "no 'standard' tier). POST " + base + "/api/workflows/{slug}/run with {tier, prompt};",
+      "an unpaid call returns HTTP 402 with a howToPay field and a price quote. If a request",
+      "errors, read the error body: it states the valid tiers, valid slugs, or exact payment",
+      "header to send. The machine-readable guide is " + base + "/llms.txt.",
+    ].join(" "),
+    auth: { type: "none" },
+    api: { type: "mcp", url: base + "/mcp", is_user_authenticated: false },
+    documentation_url: base + "/docs",
+    llms_txt: base + "/llms.txt",
+    logo_url: base + "/favicon.png",
+    legal_info_url: base + "/docs",
+  };
+  sendJson(res, 200, manifest);
 }
 
 async function handleMcp(req, res) {
