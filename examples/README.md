@@ -3,7 +3,9 @@
 Standalone examples for integrating an AI agent with Fundline. Not part of the app.
 
 - `fundline-agent-core.js` - shared logic (discover + pay + run) used by both examples.
-- `circle-agent-demo.js` - a CLI agent (below).
+- `circle-agent-demo.js` - a CLI agent (below); escrow + x402 pay modes.
+- `gateway-agent-demo.js` - a CLI agent using Circle Gateway (Nanopayments): pre-fund once,
+  then pay gas-free, sub-cent, per call (the agent-to-agent / service-payment path).
 - `mcp-server/fundline-mcp.js` - an MCP server so MCP clients (Claude, Cursor, Hermes
   Agent, OpenClaw) can discover and run Fundline workflows as tools (see the MCP section).
 
@@ -81,9 +83,49 @@ prices, then runs the ones you chose, paying for each by itself.
   Refund on failure is contract-guaranteed (trustless).
 - `x402`: run -> HTTP 402 quote -> transfer USDC to the treasury -> run with an
   `X-PAYMENT` proof. Lighter (one transfer); refund on failure is a treasury transfer.
+- `gateway` (Nanopayments, agent-to-agent): pre-fund a Gateway balance ONCE (one on-chain
+  deposit), then each run is paid by an off-chain signed authorization that Circle verifies
+  and settles in batches. No gas, sub-500ms per call. Best for high-frequency agents. See
+  `gateway-agent-demo.js` below.
 
 The Fundline server needs workflow billing configured (escrow + treasury + provider
-key) for either mode to settle.
+key) for escrow/x402 to settle. The gateway mode additionally needs the Gateway gate on
+(next section).
+
+## gateway-agent-demo.js (Nanopayments)
+
+Pay for runs gas-free, sub-cent, per call via Circle Gateway. The agent pre-funds a Gateway
+balance once, then signs off-chain authorizations per run (no gas, batched settlement).
+Non-custodial: the pre-funded balance stays in the agent's own Gateway account; a run only
+settles the exact price to Fundline's seller balance after the run succeeds.
+
+Server side (one-time, on the Fundline Node app):
+```
+npm install @circle-fin/x402-batching     # on the cPanel Node app
+# cPanel env:
+WORKFLOW_GATEWAY_ENABLED=true
+GATEWAY_SELLER_ADDRESS=<Fundline seller Gateway address>   # defaults to the treasury
+# then restart the Node app
+```
+When on, `GET /api/config` returns `workflowGatewayEnabled: true` and `/api/workflows/:slug/run`
+offers the Gateway option in its 402 challenge.
+
+Agent side:
+```
+cd examples
+npm install @circle-fin/x402-batching
+export AGENT_PRIVATE_KEY=0x...            # EOA holding USDC on Arc testnet
+export FUNDLINE_BASE=https://fundline.xyz
+export WF_SLUG=client-research
+export WF_TIER=normal
+export WF_PROMPT="Research Acme Labs."
+export GATEWAY_DEPOSIT=1                  # one-time: deposit 1 USDC into the Gateway balance
+node gateway-agent-demo.js
+```
+After the first deposit, drop `GATEWAY_DEPOSIT` and each run is paid off-chain from the same
+balance until it is spent. Verify the client method names (`deposit`, `pay`) against the
+installed `@circle-fin/x402-batching` version; Circle's arc-nanopayments repo is the
+reference agent.
 
 ## mcp-server/fundline-mcp.js
 
