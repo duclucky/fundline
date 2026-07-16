@@ -1419,6 +1419,7 @@ async function handleWorkflowRun(req, res, slug) {
   const billing = WORKFLOW_BILLING_ENABLED;
   const priceUnits = BigInt(tierDef.priceUnits);
   const xPaymentHeader = String(req.headers["x-payment"] || "").trim();
+  const paymentSigHeader = String(req.headers["payment-signature"] || "").trim();
   let runId = "";
   let x402 = false;
   let x402Payer = "";
@@ -1429,7 +1430,39 @@ async function handleWorkflowRun(req, res, slug) {
   let gatewayPayload = null;
   let gatewayRequirements = null;
   if (billing) {
-    if (xPaymentHeader) {
+    if (paymentSigHeader && gatewayClient.available()) {
+      // Circle Gateway batching payment: the agent's off-chain signed authorization arrives in
+      // the Payment-Signature header (base64 JSON). Verify it against OUR requirements (the
+      // server-set price), then run and settle only after the run succeeds.
+      let gwPayload;
+      try { gwPayload = JSON.parse(Buffer.from(paymentSigHeader, "base64").toString("utf8")); }
+      catch (_) { sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid Payment-Signature header" } }); return; }
+      gateway = true;
+      gatewayPayload = gwPayload;
+      try {
+        gatewayRequirements = await gatewayClient.buildRequirements({ amount: String(priceUnits), slug: slug, tier: tier });
+      } catch (error) {
+        console.error("[Gateway] buildRequirements error:", error.message);
+        gatewayRequirements = null;
+      }
+      if (!gatewayRequirements) {
+        sendJson(res, 402, { error: "gateway_unsupported", message: "Gateway payment is not available for this network." });
+        return;
+      }
+      let gvr;
+      try {
+        gvr = await gatewayClient.verify(gatewayPayload, gatewayRequirements);
+      } catch (error) {
+        console.error("[Gateway] verify error:", error.message);
+        sendJson(res, 502, { error: "verify_error", message: "Could not verify the Gateway payment." });
+        return;
+      }
+      if (!gvr || !gvr.isValid) {
+        sendJson(res, 402, { error: "payment_invalid", message: (gvr && gvr.invalidReason) || "Gateway payment authorization is not valid." });
+        return;
+      }
+      gatewayPayer = normalizeAddress(gvr.payer || "");
+    } else if (xPaymentHeader) {
       let payment;
       try { payment = JSON.parse(Buffer.from(xPaymentHeader, "base64").toString("utf8")); }
       catch (_) { sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid X-PAYMENT header" } }); return; }
