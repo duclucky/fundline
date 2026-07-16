@@ -588,7 +588,7 @@ x-api-key: $FUNDLINE_API_KEY</code></pre>
             limits or the Invoice API). The machine-readable guide is at <code>GET /llms.txt</code>.
           </p>
           <ol>
-            <li><strong>Discover</strong>: <code>GET /api/workflows</code> lists every workflow with its slug and per-tier price; add <code>?q=keyword</code> to search. <code>GET /api/config</code> returns <code>chainId</code>, <code>usdcTokenAddress</code>, <code>runEscrowAddress</code>, and which payment gates are enabled.</li>
+            <li><strong>Discover</strong>: <code>GET /api/workflows</code> lists every workflow with its slug and per-tier price; add <code>?q=keyword</code> to search. <code>GET /api/config</code> returns <code>chainId</code>, <code>usdcTokenAddress</code>, <code>runEscrowAddress</code>, and which payment gates are enabled. Tiers are <code>normal</code>, <code>plus</code>, and <code>pro</code> (default <code>normal</code>); there is no <code>standard</code> tier.</li>
             <li><strong>Pick a payment method</strong> (all non-custodial, paid in USDC on Arc):
               <ul>
                 <li><strong>x402</strong>: one USDC transfer per run. Simplest; good for occasional runs.</li>

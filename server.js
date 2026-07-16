@@ -3,6 +3,7 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const dns = require("dns");
 const { ethers } = require("ethers");
 const v98Client = require("./v98-client");
 const v98Models = require("./v98-models");
@@ -792,6 +793,9 @@ module.exports = {
   optionalAgentApiKey,
   requireAgentApiKey,
   unitsToUsdcString,
+  ipIsBlocked,
+  hostnameIsBlocked,
+  normalizeWebhookUrl,
   TELEGRAM_LINK_DB_PATH,
   TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
@@ -1094,8 +1098,22 @@ function handleLlmsTxt(req, res) {
     "",
     "Fundline runs AI workflows on demand and settles payment in USDC on the Arc",
     "blockchain. An AI agent can discover workflows and run them, paying per run from",
-    "its own wallet. No account or API key is required to pay via x402 (a funded Arc",
-    "USDC wallet is enough). An optional API key gives per-key rate limits.",
+    "its own wallet.",
+    "",
+    "There is NO sign-in, NO account, and NO API key required. Identity is simply the",
+    "wallet you pay from. A funded Arc USDC wallet is all you need. (An optional API key",
+    "only raises per-key rate limits; it is not for auth.)",
+    "",
+    "## The whole flow in 3 calls",
+    "1. GET  " + base + "/api/workflows            -> pick a slug and a tier.",
+    "2. POST " + base + "/api/workflows/<slug>/run  {tier, prompt} -> HTTP 402 + a price quote.",
+    "3. Pay, then repeat step 2 with the payment header -> HTTP 200 + the workflow output.",
+    "The 402 body includes a howToPay field spelling out the exact header to send back.",
+    "",
+    "## Tiers",
+    "Every workflow has tiers: normal, plus, pro (higher tier = stronger model, higher",
+    "price). Default is normal. There is no \"standard\" tier. Exact per-tier prices are in",
+    "each workflow's tiers object from GET /api/workflows.",
     "",
     "## Discover workflows",
     "GET " + base + "/api/workflows            (all runnable workflows + USDC price)",
@@ -1251,6 +1269,14 @@ async function handleMcp(req, res) {
   }
 }
 
+// The tiers a workflow actually offers, with price, for self-documenting errors so an
+// agent that guessed a wrong tier (e.g. "standard") is told the valid ones inline.
+function tierListForDef(def) {
+  return ["normal", "plus", "pro"]
+    .filter((t) => def && def.tiers && def.tiers[t])
+    .map((t) => ({ tier: t, usdc: (def.tiers[t].priceUnits / 1000000).toFixed(6), units: String(def.tiers[t].priceUnits) }));
+}
+
 // GET /api/workflows[?q=keyword] - public discovery menu for agents: the runnable
 // workflows and their per-tier USDC price, so an agent can search, choose which to
 // run, and know the cost before quoting. No auth (discovery). `q` matches the slug
@@ -1318,7 +1344,7 @@ async function handleWorkflowQuote(req, res, slug) {
   }
   const def = WORKFLOW_RUN_DEFS[slug];
   if (!def) {
-    sendJson(res, 501, { error: "not_implemented", message: "This workflow is not available for live runs yet." });
+    sendJson(res, 501, { error: "not_implemented", message: "Unknown or unavailable workflow \"" + slug + "\". See GET /api/workflows for runnable slugs." });
     return;
   }
   if (!WORKFLOW_BILLING_ENABLED) {
@@ -1337,7 +1363,8 @@ async function handleWorkflowQuote(req, res, slug) {
   const quoteTier = String(quoteInput.tier || "normal");
   const tierDef = def.tiers && def.tiers[quoteTier];
   if (!tierDef) {
-    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid tier" } });
+    const validTiers = tierListForDef(def);
+    sendJson(res, 400, { error: { code: "INVALID_TIER", message: "Unknown tier \"" + quoteTier + "\". Valid tiers: " + validTiers.map((t) => t.tier).join(", ") + ".", validTiers } });
     return;
   }
   const runId = `0x${crypto.randomBytes(32).toString("hex")}`;
@@ -1374,7 +1401,7 @@ async function handleWorkflowRun(req, res, slug) {
   // cvgig and cryptodd have custom executors and no node graph; every other slug needs one.
   const customType = def && (def.type === "cvgig" || def.type === "cryptodd");
   if (!def || (!customType && !graph)) {
-    sendJson(res, 501, { error: "not_implemented", message: "This workflow is not available for live runs yet." });
+    sendJson(res, 501, { error: "not_implemented", message: "Unknown or unavailable workflow \"" + slug + "\". See GET /api/workflows for runnable slugs." });
     return;
   }
 
@@ -1407,7 +1434,8 @@ async function handleWorkflowRun(req, res, slug) {
   const tier = String(input.tier || "normal");
   const tierDef = def.tiers && def.tiers[tier];
   if (!tierDef) {
-    sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "Invalid tier" } });
+    const validTiers = tierListForDef(def);
+    sendJson(res, 400, { error: { code: "INVALID_TIER", message: "Unknown tier \"" + tier + "\". Valid tiers: " + validTiers.map((t) => t.tier).join(", ") + ".", validTiers } });
     return;
   }
 
@@ -1593,13 +1621,31 @@ async function handleWorkflowRun(req, res, slug) {
       // x402Version 2 and a resource OBJECT (url/description/mimeType). Set both header and body so
       // header-reading (batching) and body-reading x402 clients both work.
       const resourceUrl = getRequestBaseUrl(req) + req.url;
+      // Agent-readable next step so a caller does not have to guess how to pay. This is
+      // metadata on the 402 body only (the base64 PAYMENT-REQUIRED header stays strict
+      // x402). No account or sign-in is ever required; identity is the paying wallet.
+      const howToPay = {
+        noAccountRequired: true,
+        priceUsdc: (tierDef.priceUnits / 1000000).toFixed(6),
+        x402: "Transfer exactly maxAmountRequired USDC (6 decimals) to payTo on Arc (chainId " +
+          ARC_CHAIN_ID + "), then retry this POST with header X-PAYMENT set to base64 of " +
+          "{\"payerWallet\":\"0xYourWallet\",\"txHash\":\"0xYourTransfer\"}.",
+      };
+      if (gatewayClient.available()) {
+        howToPay.gatewayGasless = "Prefund once, then pay per call with the Circle Gateway " +
+          "batching client (@circle-fin/x402-batching/client): client.pay(thisUrl, {method:\"POST\", " +
+          "body:{tier,prompt}}). It signs off-chain and sets the Payment-Signature header for you.";
+      }
       const paymentRequired = {
         x402Version: 2,
         resource: { url: resourceUrl, description: "Fundline workflow run: " + def.name + " (" + tier + ")", mimeType: "application/json" },
         accepts: accepts,
+        howToPay: howToPay,
       };
       try {
-        res.setHeader("PAYMENT-REQUIRED", Buffer.from(JSON.stringify(paymentRequired)).toString("base64"));
+        // Header carries only the strict x402 fields (no howToPay) for batching clients.
+        const headerPayload = { x402Version: paymentRequired.x402Version, resource: paymentRequired.resource, accepts: accepts };
+        res.setHeader("PAYMENT-REQUIRED", Buffer.from(JSON.stringify(headerPayload)).toString("base64"));
       } catch (_) {}
       sendJson(res, 402, paymentRequired);
       return;
@@ -3080,6 +3126,70 @@ function redactWebhookLog(log) {
   };
 }
 
+// SSRF guard. Agents register their own webhook URLs, so an unchecked URL could point
+// the server at loopback, private-LAN, link-local, or cloud-metadata endpoints. These
+// helpers reject any address in a non-public range. ipIsBlocked is used both at
+// registration (for literal-IP hosts) and at send time (against the resolved IP, which
+// also defeats DNS rebinding where a public hostname resolves to a private address).
+function ipIsBlocked(ip) {
+  const addr = String(ip || "").trim().toLowerCase();
+  if (!addr) return true;
+  // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) -> validate the embedded IPv4.
+  const mapped = addr.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  const v4 = mapped ? mapped[1] : (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(addr) ? addr : "");
+  if (v4) {
+    const p = v4.split(".").map((n) => Number(n));
+    if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+    const [a, b, c] = p;
+    if (a === 0) return true;                            // 0.0.0.0/8 "this host"
+    if (a === 10) return true;                           // private
+    if (a === 127) return true;                          // loopback
+    if (a === 169 && b === 254) return true;             // link-local incl. 169.254.169.254 metadata
+    if (a === 172 && b >= 16 && b <= 31) return true;    // private
+    if (a === 192 && b === 168) return true;             // private
+    if (a === 100 && b >= 64 && b <= 127) return true;   // CGNAT 100.64.0.0/10
+    if (a === 192 && b === 0 && c === 0) return true;    // 192.0.0.0/24 (IETF)
+    if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking 198.18.0.0/15
+    if (a >= 224) return true;                           // multicast + reserved (incl. 255.255.255.255)
+    return false;
+  }
+  // IPv6
+  if (addr === "::" || addr === "::1") return true;                     // unspecified / loopback
+  if (addr.startsWith("fe80") || addr.startsWith("fe9") ||
+      addr.startsWith("fea") || addr.startsWith("feb")) return true;    // link-local fe80::/10
+  if (addr.startsWith("fc") || addr.startsWith("fd")) return true;      // unique-local fc00::/7
+  if (addr.startsWith("ff")) return true;                              // multicast
+  return false;
+}
+
+function hostnameIsBlocked(hostname) {
+  const h = String(hostname || "").trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (!h) return true;
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  if (h.endsWith(".local") || h.endsWith(".internal")) return true;
+  // Literal IP host -> validate its range now; DNS names are validated at send time.
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) || h.includes(":")) return ipIsBlocked(h);
+  return false;
+}
+
+// Custom dns.lookup for outbound webhook requests: resolve as usual, then reject if any
+// resolved address is in a blocked range. Passed as the request `lookup` option so the
+// socket connects only to a validated address (no separate resolve-then-connect gap).
+function ssrfSafeLookup(hostname, options, callback) {
+  if (typeof options === "function") { callback = options; options = {}; }
+  dns.lookup(hostname, options || {}, (err, address, family) => {
+    if (err) { callback(err); return; }
+    const entries = Array.isArray(address) ? address : [{ address, family }];
+    for (const entry of entries) {
+      if (ipIsBlocked(entry.address)) {
+        callback(new Error("Webhook target resolves to a blocked address"));
+        return;
+      }
+    }
+    callback(null, address, family);
+  });
+}
+
 function normalizeWebhookUrl(value) {
   const text = String(value || "").trim();
   let parsed;
@@ -3090,6 +3200,7 @@ function normalizeWebhookUrl(value) {
   }
   if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Webhook URL must use http or https");
   if (!parsed.hostname) throw new Error("Webhook URL must include a host");
+  if (hostnameIsBlocked(parsed.hostname)) throw new Error("Webhook URL host is not allowed");
   return parsed.toString();
 }
 
@@ -3219,6 +3330,9 @@ function sendWebhook(webhook, payload, deliveryId = makeId(10), idempotencyKey =
       {
         method: "POST",
         headers,
+        // SSRF guard: resolve the host and refuse to connect to a non-public address,
+        // even if a public DNS name rebinds to a private IP after registration.
+        lookup: ssrfSafeLookup,
       },
       (response) => {
         let responseBody = "";
