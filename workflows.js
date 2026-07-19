@@ -1698,9 +1698,28 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   const dependedOn = new Set();
   stepNodes.forEach((sn) => stepDeps(sn.key).forEach((d) => dependedOn.add(d)));
 
+  // Transitive reduction for display: hide a dependency edge d->s when another path
+  // from d already reaches s, so only the essential flow is drawn (no redundant
+  // shortcut edges cluttering the canvas).
+  const succ = {};
+  stepNodes.forEach((sn) => { succ[sn.key] = []; });
+  stepNodes.forEach((sn) => stepDeps(sn.key).forEach((d) => { if (succ[d]) succ[d].push(sn.key); }));
+  const reachMemo = {};
+  function reaches(a, b) {
+    const mk = a + ">" + b;
+    if (reachMemo[mk] != null) return reachMemo[mk];
+    reachMemo[mk] = false;
+    for (const w of (succ[a] || [])) { if (w === b || reaches(w, b)) { reachMemo[mk] = true; break; } }
+    return reachMemo[mk];
+  }
+  function redundant(d, s) {
+    for (const w of (succ[d] || [])) { if (w !== s && reaches(w, s)) return true; }
+    return false;
+  }
+
   let lines = "";
   stepNodes.forEach((sn) => {
-    const ds = stepDeps(sn.key);
+    const ds = stepDeps(sn.key).filter((d) => !redundant(d, sn.key));
     if (!ds.length) lines += edgePath(inputNode, sn);
     else ds.forEach((d) => { lines += edgePath(byKey[d], sn); });
   });
