@@ -134,7 +134,6 @@ const els = {
   addLineItem: document.querySelector("#addLineItem"),
   invoiceTotal: document.querySelector("#invoiceTotal"),
   settingsForm: document.querySelector("#settingsForm"),
-  connectWalletSettings: document.querySelector("#connectWalletSettings"),
   sendTelegramTest: document.querySelector("#sendTelegramTest"),
   walletSettingsNote: document.querySelector("#walletSettingsNote"),
   exportCsv: document.querySelector("#exportCsv"),
@@ -209,7 +208,6 @@ function bindEvents() {
   els.walletRefreshBalance?.addEventListener("click", refreshWalletBalance);
   els.walletDisconnect?.addEventListener("click", disconnectWallet);
   els.walletGateConnect?.addEventListener("click", connectWallet);
-  els.connectWalletSettings?.addEventListener("click", handleWalletButton);
   els.sendTelegramTest?.addEventListener("click", sendTelegramTestAlert);
   els.exportCsv?.addEventListener("click", exportInvoicesXls);
   document.getElementById("newApiKeyBtn")?.addEventListener("click", () => {
@@ -329,7 +327,6 @@ function renderWalletState() {
 
   if (els.settingsForm) {
     els.settingsForm.elements.merchantWallet.value = connected ? address : "";
-    if (els.connectWalletSettings) els.connectWalletSettings.textContent = connected ? "Wallet details" : "Connect wallet";
   }
 
   if (els.walletSettingsNote) {
