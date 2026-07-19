@@ -1595,7 +1595,12 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   stepNodes.forEach((sn) => { byKey[sn.key] = sn; });
   const stepDeps = (key) => ((flow[key] || []).filter((d) => byKey[d]));
 
-  // Depth = longest dependency path from the input (steps reading only input are depth 1).
+  // Dependents of each step (used for layering and transitive reduction).
+  const succ = {};
+  stepNodes.forEach((sn) => { succ[sn.key] = []; });
+  stepNodes.forEach((sn) => stepDeps(sn.key).forEach((d) => { if (succ[d]) succ[d].push(sn.key); }));
+
+  // ASAP depth = longest dependency path from the input (steps reading only input are depth 1).
   function depth(key) {
     const sn = byKey[key];
     if (!sn) return 0;
@@ -1607,12 +1612,22 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   }
   stepNodes.forEach((sn) => depth(sn.key));
   const maxD = stepNodes.length ? Math.max(1, ...stepNodes.map((sn) => sn._d)) : 1;
-  const totalCols = maxD + 2; // input col 0, steps 1..maxD, output col maxD+1
+
+  // Pull each node right toward its earliest consumer (ALAP-style), which keeps
+  // dependent steps in adjacent columns and avoids most skip edges. Sinks keep their
+  // ASAP depth so the final model / output stay on the right.
+  stepNodes.slice().sort((a, b) => b._d - a._d).forEach((sn) => {
+    const cs = succ[sn.key];
+    sn._col = cs.length ? Math.min.apply(null, cs.map((c) => byKey[c]._col)) - 1 : sn._d;
+    if (sn._col < sn._d) sn._col = sn._d;
+  });
+  const maxCol = stepNodes.length ? Math.max(1, ...stepNodes.map((sn) => sn._col)) : 1;
+  const totalCols = maxCol + 2; // input col 0, steps 1..maxCol, output col maxCol+1
 
   const COLW = 100, ROWH = 142, CH = 88; // CH reserves vertical margin (card half + routing channel)
   const cols = {};
-  for (let c = 1; c <= maxD; c++) cols[c] = [];
-  stepNodes.forEach((sn) => cols[sn._d].push(sn));
+  for (let c = 1; c <= maxCol; c++) cols[c] = [];
+  stepNodes.forEach((sn) => cols[sn._col].push(sn));
   const maxRows = Math.max(1, ...Object.keys(cols).map((c) => cols[c].length));
   const VBW = totalCols * COLW;
   const VBH = (maxRows - 1) * ROWH + 2 * CH;
@@ -1621,8 +1636,8 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   // Assign y: input/output centred; each column ordered by the average y of its deps
   // (barycenter) to reduce edge crossings, then spread evenly down the column.
   inputNode.vx = colX(0); inputNode.vy = VBH / 2;
-  outputNode.vx = colX(maxD + 1); outputNode.vy = VBH / 2;
-  for (let c = 1; c <= maxD; c++) {
+  outputNode.vx = colX(maxCol + 1); outputNode.vy = VBH / 2;
+  for (let c = 1; c <= maxCol; c++) {
     const arr = cols[c];
     arr.forEach((sn) => {
       const ds = stepDeps(sn.key);
@@ -1657,42 +1672,56 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   if (!isFinite(nTop)) { nTop = VBH / 2; nBot = VBH / 2; }
   const topChBase = Math.max(6, nTop - 18);
   const botChBase = Math.min(VBH - 6, nBot + 18);
-  let topN = 0, botN = 0;
+  let topLane = 0, botLane = 0;
+  const GAP = 7; // clearance kept between a line end and a card, so arrows never touch
   const halfW = (nd) => (((nd.wPct || 40) / 100) * VBW) / 2;
-  // Liang-Barsky: does the segment (x0,y0)-(x1,y1) cross node nd's padded box?
-  function hits(x0, y0, x1, y1, nd) {
-    const pad = 4;
+  // Liang-Barsky clip of segment (ax,ay)-(bx,by) to node nd's box padded by pad.
+  // Returns the [t0,t1] sub-interval inside the box, or null if it never enters.
+  function clip(ax, ay, bx, by, nd, pad) {
     const rx0 = nd.vx - halfW(nd) - pad, rx1 = nd.vx + halfW(nd) + pad;
     const ry0 = nd.vy - cardHalfH - pad, ry1 = nd.vy + cardHalfH + pad;
-    let t0 = 0, t1 = 1; const dx = x1 - x0, dy = y1 - y0;
-    const p = [-dx, dx, -dy, dy], q = [x0 - rx0, rx1 - x0, y0 - ry0, ry1 - y0];
+    let t0 = 0, t1 = 1; const dx = bx - ax, dy = by - ay;
+    const p = [-dx, dx, -dy, dy], q = [ax - rx0, rx1 - ax, ay - ry0, ry1 - ay];
     for (let i = 0; i < 4; i++) {
-      if (p[i] === 0) { if (q[i] < 0) return false; }
-      else { const t = q[i] / p[i]; if (p[i] < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; } }
+      if (p[i] === 0) { if (q[i] < 0) return null; }
+      else { const t = q[i] / p[i]; if (p[i] < 0) { if (t > t1) return null; if (t > t0) t0 = t; } else { if (t < t0) return null; if (t < t1) t1 = t; } }
     }
-    return t1 > t0;
+    return t0 <= t1 ? [t0, t1] : null;
   }
   function edgePath(a, b) {
-    const dx = b.vx - a.vx, dy = b.vy - a.vy, len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len;
-    const ax = a.vx + ux * (halfW(a) + 5), ay = a.vy + uy * (halfW(a) + 5);
-    const bx = b.vx - ux * (halfW(b) + 7), by = b.vy - uy * (halfW(b) + 7);
+    const dx = b.vx - a.vx, dy = b.vy - a.vy;
+    // Endpoints clipped to just outside each card (correct at any angle).
+    const ca = clip(a.vx, a.vy, b.vx, b.vy, a, GAP);
+    const cb = clip(a.vx, a.vy, b.vx, b.vy, b, GAP);
+    const tA = ca ? ca[1] : 0;
+    const tB = cb ? cb[0] : 1;
+    // Occluded if the visible span crosses any other node's box.
     let blocked = false;
-    for (const nd of nodes) { if (nd === a || nd === b) continue; if (hits(ax, ay, bx, by, nd)) { blocked = true; break; } }
+    for (const nd of nodes) {
+      if (nd === a || nd === b) continue;
+      const c = clip(a.vx, a.vy, b.vx, b.vy, nd, 3);
+      if (c && c[1] > tA + 0.02 && c[0] < tB - 0.02) { blocked = true; break; }
+    }
     if (!blocked) {
+      const ax = a.vx + dx * tA, ay = a.vy + dy * tA;
+      const bx = a.vx + dx * tB, by = a.vy + dy * tB;
       return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)}L${bx.toFixed(1)} ${by.toFixed(1)}" />`;
     }
-    // Occluded: route with right angles out to the nearer free channel and into the target.
-    const useTop = a.vy < VBH / 2;
-    const chY = useTop ? (topChBase + (topN++ % 6) * 6) : (botChBase - (botN++ % 6) * 6);
-    const axr = a.vx + halfW(a) + 5;
-    const mA = a.vx + COLW * 0.5;
-    const mB = b.vx - COLW * 0.5;
-    const bEnter = b.vx - halfW(b) - 7;
+    // Occluded: right-angle detour out to a free channel and into the target. Route via the
+    // channel on the source's side of the target, and give each edge its own lane so detours
+    // never coincide.
+    const useTop = (a.vy + b.vy) / 2 < VBH / 2;
+    const lane = useTop ? topLane++ : botLane++;
+    const chY = useTop ? (topChBase - lane * 8) : (botChBase + lane * 8);
+    const axr = a.vx + halfW(a) + GAP;
+    const riserA = axr + 4 + lane * 5;
+    const bxl = b.vx - halfW(b) - GAP;
+    const riserB = bxl - 4 - lane * 5;
+    const enterY = b.vy + (useTop ? -1 : 1) * lane * 5; // stagger the entry so final legs do not overlap
     return `<path d="M${axr.toFixed(1)} ${a.vy.toFixed(1)}`
-      + `L${mA.toFixed(1)} ${a.vy.toFixed(1)}L${mA.toFixed(1)} ${chY.toFixed(1)}`
-      + `L${mB.toFixed(1)} ${chY.toFixed(1)}L${mB.toFixed(1)} ${b.vy.toFixed(1)}`
-      + `L${bEnter.toFixed(1)} ${b.vy.toFixed(1)}" />`;
+      + `L${riserA.toFixed(1)} ${a.vy.toFixed(1)}L${riserA.toFixed(1)} ${chY.toFixed(1)}`
+      + `L${riserB.toFixed(1)} ${chY.toFixed(1)}L${riserB.toFixed(1)} ${enterY.toFixed(1)}`
+      + `L${bxl.toFixed(1)} ${enterY.toFixed(1)}" />`;
   }
 
   const dependedOn = new Set();
@@ -1700,10 +1729,7 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
 
   // Transitive reduction for display: hide a dependency edge d->s when another path
   // from d already reaches s, so only the essential flow is drawn (no redundant
-  // shortcut edges cluttering the canvas).
-  const succ = {};
-  stepNodes.forEach((sn) => { succ[sn.key] = []; });
-  stepNodes.forEach((sn) => stepDeps(sn.key).forEach((d) => { if (succ[d]) succ[d].push(sn.key); }));
+  // shortcut edges cluttering the canvas). Reuses the succ map built above.
   const reachMemo = {};
   function reaches(a, b) {
     const mk = a + ">" + b;
@@ -1727,7 +1753,7 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   stepNodes.forEach((sn) => { if (!dependedOn.has(sn.key)) lines += edgePath(sn, outputNode); });
   if (!stepNodes.length) lines += edgePath(inputNode, outputNode);
 
-  const arrowSize = (COLW * 0.13).toFixed(1);
+  const arrowSize = (COLW * 0.09).toFixed(1);
   const svg = `<svg class="wfg-solar-links" viewBox="0 0 ${VBW} ${VBH}" preserveAspectRatio="none" aria-hidden="true">`
     + `<defs><marker id="wfSpokeArrow" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="${arrowSize}" markerHeight="${arrowSize}" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(242,210,122,0.8)" /></marker></defs>`
     + `<g class="wfg-solar-flow" stroke="rgba(242,210,122,0.5)" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#wfSpokeArrow)">${lines}</g>`
