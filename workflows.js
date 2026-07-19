@@ -948,6 +948,24 @@ async function ensureArcChain(provider) {
     throw new Error("Switch your wallet to Arc Testnet to pay.");
   }
 }
+
+// Best-effort: if a wallet is already connected but sitting on another network, move it
+// to Arc up front (workflow runs always pay on Arc), so the switch does not surprise the
+// user only when they click Run. Silent on decline; the fund step will prompt again.
+async function maybeSwitchToArc() {
+  try {
+    const addr = window.FundlineWallet && window.FundlineWallet.getAddress ? window.FundlineWallet.getAddress() : "";
+    if (!addr) return;
+    const s = (window.FundlineWallet && window.FundlineWallet.getSession) ? window.FundlineWallet.getSession() : null;
+    if (s && (s.kind === "circle" || s.kind === "privy")) return; // embedded wallets are Arc-only
+    const provider = getEthProvider();
+    if (!provider || !provider.request) return;
+    const current = String(await provider.request({ method: "eth_chainId" })).toLowerCase();
+    if (current !== ARC_CHAIN_ID_HEX) await ensureArcChain(provider);
+  } catch (_) {
+    // Ignore: user may decline, or the read-shim cannot switch.
+  }
+}
 async function readAllowance(provider, usdc, owner, spender) {
   const data = ERC20_ALLOWANCE_SELECTOR + encAddr(owner) + encAddr(spender);
   const res = await provider.request({ method: "eth_call", params: [{ to: usdc, data }, "latest"] });
@@ -1275,6 +1293,7 @@ function render() {
 if (typeof document !== "undefined") {
   document.addEventListener("fundline:walletchange", function () {
     try { if (getRoute().page === "runs") render(); } catch (_) {}
+    maybeSwitchToArc();
   });
 }
 
@@ -2294,6 +2313,9 @@ window.addEventListener("DOMContentLoaded", () => {
     .then((c) => { WF_CONFIG = c || {}; WF_RUNNER_ENABLED = Boolean(c && c.workflowRunnerEnabled); })
     .catch(() => {})
     .finally(() => render());
+
+  // If a wallet is already connected on a different network, move it to Arc up front.
+  maybeSwitchToArc();
 
   // Delegate all data-nav clicks (including dynamically rendered content)
   document.addEventListener("click", (e) => {

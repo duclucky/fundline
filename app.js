@@ -1373,6 +1373,26 @@ async function refreshPaymentSourceStatus(id, options = {}) {
     return;
   }
 
+  // Direct Arc pay: move the wallet to Arc up front so a wallet sitting on another
+  // network is switched now, not only when the payer clicks Pay. Best-effort and only
+  // for the Arc source (a bridge source must stay on its own chain); embedded wallets
+  // are Arc-only and cannot switch, so they are skipped.
+  if (source.key === "arcTestnet") {
+    const sess = window.FundlineWallet && window.FundlineWallet.getSession ? window.FundlineWallet.getSession() : null;
+    const embedded = sess && (sess.kind === "circle" || sess.kind === "privy");
+    const provider = getActiveProvider();
+    if (!embedded && provider?.request) {
+      try {
+        const current = String(await provider.request({ method: "eth_chainId" })).toLowerCase();
+        if (current !== String(config.chainIdHex || "").toLowerCase()) {
+          await ensurePaymentNetwork(provider, config);
+        }
+      } catch (_) {
+        // Payer may decline; the pay step will prompt to switch again.
+      }
+    }
+  }
+
   button.disabled = true;
   button.dataset.action = "checking";
   button.innerHTML = paymentButtonHtml("Checking balance...");
