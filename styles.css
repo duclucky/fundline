@@ -3585,12 +3585,16 @@ a.nav-item {
   align-items: stretch;
 }
 
-/* Hub-and-spoke ("solar") workflow canvas: the premium final model sits at the
-   centre, every other step orbits it, and all spokes converge on the centre. */
-.wfg2-board { overflow: visible; }
+/* Layered L-R workflow DAG: nodes are absolute cards; edges are an SVG layer. */
+.wfg2-board {
+  overflow: visible;
+  max-width: 1600px;
+  margin: 0 auto;
+}
 .wfg-solar {
   position: relative;
   width: 100%;
+  max-width: 100%;
   margin: 0 auto;
 }
 .wfg-solar-links {
@@ -3602,20 +3606,24 @@ a.nav-item {
   pointer-events: none;
   z-index: 0;
 }
-.wfg-solar-flow path { stroke-linecap: round; }
+.wfg-solar-flow path {
+  stroke-linecap: round;
+  transition: stroke 0.2s ease, stroke-opacity 0.2s ease;
+}
 
 .wfg-solar .wfg2-node {
   position: absolute;
   transform: translate(-50%, -50%);
   z-index: 1;
-  gap: 4px;
-  padding: 8px 10px;
-  min-width: 90px;
-  background: #14151a; /* opaque so dependency edges pass cleanly behind the cards */
+  gap: 5px;
+  padding: 10px 12px;
+  min-width: 100px;
+  box-sizing: border-box;
+  background: #14151a; /* opaque so edges never show through cards */
   cursor: default;
 }
-.wfg-solar .wfg2-model { font-size: 8.4px; letter-spacing: 0; }
-.wfg-solar .wfg2-name { font-size: 11.5px; }
+.wfg-solar .wfg2-model { font-size: 8.6px; letter-spacing: 0; }
+.wfg-solar .wfg2-name { font-size: 12px; }
 .wfg-solar .wfg2-step { font-size: 8.5px; }
 
 /* Hover tooltip: the node's Purpose (replaces the old Execution Summary table) */
@@ -3655,12 +3663,14 @@ a.nav-item {
 .wfg-solar .wfg2-node:hover .wfg2-tip { opacity: 1; visibility: visible; }
 
 .wfg-solar .wfg2-node--hub {
-  width: clamp(124px, 23%, 168px);
   z-index: 3;
-  padding: 12px 13px;
-  background: linear-gradient(135deg, #f2d27a, #d4af37);
-  border-color: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 0 0 6px rgba(212, 175, 55, 0.1), 0 0 40px rgba(212, 175, 55, 0.28), 0 10px 30px rgba(0, 0, 0, 0.4);
+  padding: 13px 14px;
+  background: linear-gradient(145deg, #f5d98a 0%, #f2d27a 40%, #d4af37 100%);
+  border-color: rgba(255, 255, 255, 0.55);
+  box-shadow:
+    0 0 0 5px rgba(212, 175, 55, 0.12),
+    0 0 36px rgba(212, 175, 55, 0.3),
+    0 12px 28px rgba(0, 0, 0, 0.42);
 }
 .wfg-solar .wfg2-node--hub .wfg2-step,
 .wfg-solar .wfg2-node--hub .wfg2-name { color: #100c05; }

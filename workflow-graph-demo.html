@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Workflow Steps graph demo - Fundline</title>
+  <style>
+    :root {
+      --ink: #f4f1ea;
+      --muted: #9a958a;
+      --muted-2: #6f6a60;
+      --gold: #f2d27a;
+      --green: #6df7a0;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(255, 255, 255, 0.14);
+      --bg-soft: #14151a;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0e0f13;
+      color: var(--ink);
+      font-family: "Plus Jakarta Sans", system-ui, -apple-system, Segoe UI, sans-serif;
+      padding: 28px 20px 60px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 800;
+    }
+    .lede {
+      margin: 0 0 28px;
+      color: var(--muted);
+      max-width: 720px;
+      line-height: 1.5;
+      font-size: 14px;
+    }
+    .demo-section {
+      margin: 0 auto 36px;
+      max-width: 1600px;
+    }
+    .demo-section h2 {
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--gold);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .demo-section .sub {
+      margin: 0 0 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .wfg2-board {
+      position: relative;
+      padding: 28px 24px;
+      background-color: rgba(7, 13, 10, 0.5);
+      background-image: radial-gradient(circle, rgba(242, 210, 122, 0.07) 1px, transparent 1px);
+      background-size: 22px 22px;
+      background-position: -1px -1px;
+      border: 1px solid var(--line-strong);
+      border-radius: 16px;
+      overflow: visible;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+    .wfg-solar {
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    .wfg-solar-links {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .wfg-solar-flow path { stroke-linecap: round; }
+
+    .wfg2-node {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      min-width: 0;
+      padding: 12px 13px;
+      background: var(--bg-soft);
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+      transition: border-color 0.2s, box-shadow 0.2s, opacity 0.2s;
+    }
+    .wfg-solar .wfg2-node {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      z-index: 1;
+      gap: 5px;
+      padding: 10px 12px;
+      min-width: 100px;
+      box-sizing: border-box;
+      background: #14151a;
+      cursor: default;
+    }
+    .wfg2-node:hover { border-color: rgba(242, 210, 122, 0.36); }
+    .wfg2-node--input { background: rgba(242, 210, 122, 0.045); border-color: rgba(242, 210, 122, 0.26); }
+    .wfg2-node--output { background: rgba(109, 247, 160, 0.045); border-color: rgba(109, 247, 160, 0.22); }
+    .wfg2-node--output .wfg2-ico { background: rgba(109, 247, 160, 0.09); border-color: rgba(109, 247, 160, 0.16); color: var(--green); }
+
+    .wfg2-node-top { display: flex; align-items: center; gap: 8px; }
+    .wfg2-ico {
+      width: 28px; height: 28px; flex-shrink: 0; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(242, 210, 122, 0.09);
+      border: 1px solid rgba(242, 210, 122, 0.16);
+      color: var(--gold);
+    }
+    .wfg2-ico svg { width: 16px; height: 16px; }
+    .wfg2-step {
+      font-size: 9px; font-family: var(--mono); font-weight: 800;
+      text-transform: uppercase; letter-spacing: 0.1em; color: var(--gold);
+    }
+    .wfg2-node--io .wfg2-step { color: var(--muted-2); }
+    .wfg2-name {
+      font-size: 13px; font-weight: 800; color: var(--ink);
+      line-height: 1.25; overflow-wrap: anywhere;
+    }
+    .wfg-solar .wfg2-name { font-size: 12px; }
+    .wfg2-model {
+      align-self: flex-start; max-width: 100%;
+      padding: 2px 7px;
+      background: rgba(242, 210, 122, 0.07);
+      border: 1px solid rgba(242, 210, 122, 0.18);
+      border-radius: 5px;
+      font-size: 9.5px; font-family: var(--mono); font-weight: 700;
+      color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .wfg-solar .wfg2-model { font-size: 8.6px; }
+    .wfg-solar .wfg2-step { font-size: 8.5px; }
+
+    .wfg2-state { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; }
+    .wfg2-state-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2);
+    }
+    .wfg2-check { display: none; line-height: 0; color: var(--green); }
+    .wfg2-check svg { width: 16px; height: 16px; }
+
+    .wfg2-tip {
+      position: absolute; left: 50%; top: calc(100% + 8px);
+      transform: translateX(-50%);
+      width: max-content; max-width: 220px;
+      padding: 8px 11px;
+      background: #0d0e12;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      font-size: 11.5px; line-height: 1.45; font-weight: 500;
+      color: var(--muted); text-align: left; white-space: normal;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+      opacity: 0; visibility: hidden;
+      transition: opacity 0.15s ease;
+      pointer-events: none; z-index: 50;
+    }
+    .wfg2-tip-model {
+      display: block; margin-bottom: 5px;
+      font-family: var(--mono); font-size: 10.5px; font-weight: 700; color: var(--gold);
+    }
+    .wfg-solar .wfg2-node:hover { z-index: 40; }
+    .wfg-solar .wfg2-node:hover .wfg2-tip { opacity: 1; visibility: visible; }
+
+    .wfg-solar .wfg2-node--hub {
+      z-index: 3;
+      padding: 13px 14px;
+      background: linear-gradient(145deg, #f5d98a 0%, #f2d27a 40%, #d4af37 100%);
+      border-color: rgba(255, 255, 255, 0.55);
+      box-shadow:
+        0 0 0 5px rgba(212, 175, 55, 0.12),
+        0 0 36px rgba(212, 175, 55, 0.3),
+        0 12px 28px rgba(0, 0, 0, 0.42);
+    }
+    .wfg-solar .wfg2-node--hub .wfg2-step,
+    .wfg-solar .wfg2-node--hub .wfg2-name { color: #100c05; }
+    .wfg-solar .wfg2-node--hub .wfg2-ico {
+      background: rgba(16, 12, 5, 0.14);
+      border-color: rgba(16, 12, 5, 0.18);
+      color: #100c05;
+    }
+    .wfg-solar .wfg2-node--hub .wfg2-model {
+      background: rgba(16, 12, 5, 0.16);
+      border-color: rgba(16, 12, 5, 0.22);
+      color: #1a1206;
+    }
+    .wfg-solar .wfg2-node--hub .wfg2-state-dot { background: rgba(16, 12, 5, 0.45); }
+
+    @keyframes wfg2-heartbeat {
+      0%, 100% { border-color: rgba(242, 210, 122, 0.28); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28), inset 0 0 0 0 rgba(242, 210, 122, 0); }
+      28%      { border-color: rgba(242, 210, 122, 0.9);  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28), inset 0 0 18px rgba(242, 210, 122, 0.24); }
+      55%      { border-color: rgba(242, 210, 122, 0.32); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28), inset 0 0 0 0 rgba(242, 210, 122, 0); }
+      80%      { border-color: rgba(242, 210, 122, 0.65); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28), inset 0 0 12px rgba(242, 210, 122, 0.16); }
+    }
+    .wfg2-node--pending { opacity: 0.45; }
+    .wfg2-node--running {
+      opacity: 1 !important;
+      animation: wfg2-heartbeat 1.5s ease-in-out infinite;
+    }
+    .wfg2-node--completed { opacity: 1; border-color: rgba(109, 247, 160, 0.5) !important; }
+    .wfg2-node--completed .wfg2-state-dot { display: none; }
+    .wfg2-node--completed .wfg2-check { display: block; }
+    .wfg2-node--failed { opacity: 1; border-color: rgba(255, 90, 90, 0.5) !important; }
+    .wfg2-node--failed .wfg2-state-dot { background: #ff6060; box-shadow: 0 0 8px rgba(255, 90, 90, 0.6); }
+    .wfg2-node--running .wfg2-state-dot { background: var(--gold); box-shadow: 0 0 8px rgba(242, 210, 122, 0.7); }
+
+    .state-demo {
+      display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 0;
+    }
+    .state-demo button {
+      background: rgba(242, 210, 122, 0.08);
+      border: 1px solid rgba(242, 210, 122, 0.28);
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .state-demo button:hover { border-color: var(--gold); }
+    .meta {
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted-2);
+    }
+  </style>
+</head>
+<body>
+  <h1>Workflow Steps - layout demo</h1>
+  <p class="lede">
+    Three graphs exercise the layered DAG layout: a pure linear chain, a diamond with a post-hub verifier,
+    and the fan-in worst case (code review). Hover a node for purpose. Use the buttons on the fan-in board
+    to toggle live-run state classes via <code>data-node-idx</code>.
+  </p>
+
+  <div class="demo-section" id="sec-linear">
+    <h2>1. Linear</h2>
+    <p class="sub">flow: a -&gt; b -&gt; c -&gt; d</p>
+    <div class="wfg2-board"><div class="wfg-solar" id="board-linear"></div></div>
+    <div class="meta" id="meta-linear"></div>
+  </div>
+
+  <div class="demo-section" id="sec-diamond">
+    <h2>2. Diamond (crypto-dd style)</h2>
+    <p class="sub">intake fans to fetch + news, writer is FINAL MODEL, verifier runs after</p>
+    <div class="wfg2-board"><div class="wfg-solar" id="board-diamond"></div></div>
+    <div class="meta" id="meta-diamond"></div>
+  </div>
+
+  <div class="demo-section" id="sec-fanin">
+    <h2>3. Fan-in worst case (code-review)</h2>
+    <p class="sub">Three parallel reviews into fix_suggestions into formatter - no crossings, no lines under cards</p>
+    <div class="wfg2-board"><div class="wfg-solar" id="board-fanin"></div></div>
+    <div class="meta" id="meta-fanin"></div>
+    <div class="state-demo">
+      <button type="button" id="btn-run">Simulate run states</button>
+      <button type="button" id="btn-reset">Reset states</button>
+    </div>
+  </div>
+
+  <script src="workflow-graph.js"></script>
+  <script>
+    (function () {
+      // Also works when opened as a file if the script tag path fails: inline fallback note.
+      if (typeof buildLayout !== "function") {
+        document.body.insertAdjacentHTML("afterbegin",
+          '<p style="color:#ff8080">Could not load /workflow-graph.js. Serve this folder over HTTP (e.g. the Fundline server) or open via the app origin.</p>');
+        return;
+      }
+
+      var linearSteps = [
+        { serverKey: "a", name: "Step A", model: "gpt-4.1-mini", purpose: "First transform of the input." },
+        { serverKey: "b", name: "Step B", model: "gpt-4.1-mini", purpose: "Builds on step A." },
+        { serverKey: "c", name: "Step C", model: "gpt-4.1-mini", purpose: "Builds on step B." },
+        { serverKey: "d", name: "Step D", model: "gpt-5.6-terra", purpose: "Premium synthesis of the chain." }
+      ];
+      var linearFlow = { a: [], b: ["a"], c: ["b"], d: ["c"] };
+
+      var diamondSteps = [
+        { serverKey: "intake", name: "Intake normalizer", model: "gpt-4.1-mini", purpose: "Clean and structure the raw input." },
+        { serverKey: "fetch", name: "Data fetch", model: "gpt-4.1-mini", purpose: "Pull on-chain market + security data." },
+        { serverKey: "news", name: "News scan", model: "gpt-4.1-mini", purpose: "Summarize recent news and sentiment." },
+        { serverKey: "writer", name: "Report writer", model: "gpt-5.6-terra", purpose: "Write the due-diligence narrative." },
+        { serverKey: "verifier", name: "Fact verifier", model: "gpt-5.6-terra", purpose: "Adversarially check claims vs data." }
+      ];
+      var diamondFlow = {
+        intake: [],
+        fetch: ["intake"],
+        news: ["intake"],
+        writer: ["fetch", "news"],
+        verifier: ["writer", "fetch"]
+      };
+
+      var fanSteps = [
+        { serverKey: "code_normalizer", name: "Code Normalizer", model: "gpt-4.1-mini", purpose: "Normalize formatting and structure." },
+        { serverKey: "logic_review", name: "Logic Review", model: "gpt-4.1-mini", purpose: "Find bugs, edge cases, and correctness issues." },
+        { serverKey: "security_review", name: "Security Review", model: "gpt-4.1-mini", purpose: "Scan for injection, secrets, and unsafe APIs." },
+        { serverKey: "perf_review", name: "Perf Review", model: "gpt-4.1-mini", purpose: "Flag complexity and hot-path costs." },
+        { serverKey: "fix_suggestions", name: "Fix Suggestions", model: "gpt-5.6-terra", purpose: "Propose concrete patches from all reviews." },
+        { serverKey: "formatter", name: "Formatter", model: "gpt-5.6-terra", purpose: "Assemble the scored severity report." }
+      ];
+      var fanFlow = {
+        code_normalizer: [],
+        logic_review: ["code_normalizer"],
+        security_review: [],
+        perf_review: [],
+        fix_suggestions: ["logic_review", "security_review", "perf_review"],
+        formatter: ["logic_review", "security_review", "perf_review", "fix_suggestions"]
+      };
+
+      function mount(id, steps, hintIn, hintOut, flow, metaId) {
+        var layout = buildLayout(steps, hintIn, hintOut, flow);
+        var el = document.getElementById(id);
+        el.style.aspectRatio = layout.aspect.toFixed(3);
+        el.innerHTML = layout.boardHtml;
+        var meta = document.getElementById(metaId);
+        if (meta) {
+          meta.textContent = layout.total + " nodes · " + layout.edges + " edges · aspect "
+            + layout.aspect.toFixed(3);
+        }
+        return layout;
+      }
+
+      mount("board-linear", linearSteps, "Your prompt or instructions", "Ready to use result", linearFlow, "meta-linear");
+      mount("board-diamond", diamondSteps, "Your prompt or instructions", "Ready to use result", diamondFlow, "meta-diamond");
+      mount("board-fanin", fanSteps, "Paste code to review", "Scored review report", fanFlow, "meta-fanin");
+
+      var states = ["pending", "running", "completed", "failed"];
+      document.getElementById("btn-run").addEventListener("click", function () {
+        var board = document.getElementById("board-fanin");
+        var nodes = board.querySelectorAll(".wfg2-node");
+        nodes.forEach(function (node, i) {
+          states.forEach(function (s) { node.classList.remove("wfg2-node--" + s); });
+          var st = i === 0 ? "completed"
+            : i === nodes.length - 1 ? "pending"
+            : i === 2 ? "running"
+            : i === 4 ? "failed"
+            : "completed";
+          node.classList.add("wfg2-node--" + st);
+        });
+      });
+      document.getElementById("btn-reset").addEventListener("click", function () {
+        var board = document.getElementById("board-fanin");
+        board.querySelectorAll(".wfg2-node").forEach(function (node) {
+          states.forEach(function (s) { node.classList.remove("wfg2-node--" + s); });
+        });
+      });
+    })();
+  </script>
+</body>
+</html>
