@@ -1609,13 +1609,13 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   const maxD = stepNodes.length ? Math.max(1, ...stepNodes.map((sn) => sn._d)) : 1;
   const totalCols = maxD + 2; // input col 0, steps 1..maxD, output col maxD+1
 
-  const COLW = 100, ROWH = 142;
+  const COLW = 100, ROWH = 142, CH = 52; // CH reserves a top/bottom channel to route skip edges around nodes
   const cols = {};
   for (let c = 1; c <= maxD; c++) cols[c] = [];
   stepNodes.forEach((sn) => cols[sn._d].push(sn));
   const maxRows = Math.max(1, ...Object.keys(cols).map((c) => cols[c].length));
   const VBW = totalCols * COLW;
-  const VBH = maxRows * ROWH + 24;
+  const VBH = maxRows * ROWH + 2 * CH;
   const colX = (c) => (c + 0.5) * COLW;
 
   // Assign y: input/output centred; each column ordered by the average y of its deps
@@ -1632,7 +1632,7 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
     const k = arr.length;
     arr.forEach((sn, i) => {
       sn.vx = colX(c);
-      sn.vy = VBH * (i + 1) / (k + 1);
+      sn.vy = CH + (VBH - 2 * CH) * (i + 1) / (k + 1);
     });
   }
 
@@ -1645,14 +1645,27 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
     nd.wPct = nd.hub ? hubWpct : (nd.type === "ai" ? workerWpct : ioWpct);
   });
 
-  // A line a->b, trimmed at both ends so the arrowhead lands in the gap between cards.
-  function seg(a, b) {
-    const dx = b.vx - a.vx, dy = b.vy - a.vy;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len, uy = dy / len;
-    const x1 = a.vx + ux * (COLW * 0.40), y1 = a.vy + uy * (COLW * 0.40);
-    const x2 = b.vx - ux * (COLW * 0.44), y2 = b.vy - uy * (COLW * 0.44);
-    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" />`;
+  // Edge routing. Adjacent-column edges are a straight diagonal (the inter-column gap
+  // is empty). Skip edges (spanning 2+ columns) are routed orthogonally out to a free
+  // top/bottom channel and back, so a connector never runs underneath another node.
+  const topChBase = CH * 0.5;
+  const botChBase = VBH - CH * 0.5;
+  let topN = 0, botN = 0;
+  function edgePath(a, b) {
+    const ax = a.vx + COLW * 0.40;
+    const bx = b.vx - COLW * 0.44;
+    const span = Math.round((b.vx - a.vx) / COLW);
+    if (span <= 1) {
+      return `<path d="M${ax.toFixed(1)} ${a.vy.toFixed(1)}L${bx.toFixed(1)} ${b.vy.toFixed(1)}" />`;
+    }
+    const useTop = a.vy < VBH / 2;
+    const chY = useTop ? (topChBase + (topN++ % 6) * 6) : (botChBase - (botN++ % 6) * 6);
+    const mA = a.vx + COLW * 0.5;
+    const mB = b.vx - COLW * 0.5;
+    return `<path d="M${ax.toFixed(1)} ${a.vy.toFixed(1)}`
+      + `L${mA.toFixed(1)} ${a.vy.toFixed(1)}L${mA.toFixed(1)} ${chY.toFixed(1)}`
+      + `L${mB.toFixed(1)} ${chY.toFixed(1)}L${mB.toFixed(1)} ${b.vy.toFixed(1)}`
+      + `L${bx.toFixed(1)} ${b.vy.toFixed(1)}" />`;
   }
 
   const dependedOn = new Set();
@@ -1661,17 +1674,17 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   let lines = "";
   stepNodes.forEach((sn) => {
     const ds = stepDeps(sn.key);
-    if (!ds.length) lines += seg(inputNode, sn);
-    else ds.forEach((d) => { lines += seg(byKey[d], sn); });
+    if (!ds.length) lines += edgePath(inputNode, sn);
+    else ds.forEach((d) => { lines += edgePath(byKey[d], sn); });
   });
   // Sinks (steps nothing else depends on) feed the output.
-  stepNodes.forEach((sn) => { if (!dependedOn.has(sn.key)) lines += seg(sn, outputNode); });
-  if (!stepNodes.length) lines += seg(inputNode, outputNode);
+  stepNodes.forEach((sn) => { if (!dependedOn.has(sn.key)) lines += edgePath(sn, outputNode); });
+  if (!stepNodes.length) lines += edgePath(inputNode, outputNode);
 
-  const arrowSize = (COLW * 0.32).toFixed(1);
+  const arrowSize = (COLW * 0.13).toFixed(1);
   const svg = `<svg class="wfg-solar-links" viewBox="0 0 ${VBW} ${VBH}" preserveAspectRatio="none" aria-hidden="true">`
-    + `<defs><marker id="wfSpokeArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="${arrowSize}" markerHeight="${arrowSize}" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(242,210,122,0.75)" /></marker></defs>`
-    + `<g class="wfg-solar-flow" stroke="rgba(242,210,122,0.5)" stroke-width="1.7" fill="none" marker-end="url(#wfSpokeArrow)">${lines}</g>`
+    + `<defs><marker id="wfSpokeArrow" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="${arrowSize}" markerHeight="${arrowSize}" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(242,210,122,0.8)" /></marker></defs>`
+    + `<g class="wfg-solar-flow" stroke="rgba(242,210,122,0.5)" stroke-width="1.3" fill="none" stroke-linejoin="round" marker-end="url(#wfSpokeArrow)">${lines}</g>`
     + `</svg>`;
 
   const cardsHtml = nodes.map((node) => renderCanvasNode(node)).join("");
