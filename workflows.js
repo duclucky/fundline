@@ -1366,7 +1366,6 @@ function renderWorkflowCard(slug, wf) {
         <span class="wf-meta-pill">${esc(wf.version)}</span>
         <span class="wf-meta-pill">${esc(wf.runtime)}</span>
         <span class="wf-meta-pill">${wf.modelCount} models</span>
-        <span class="wf-meta-pill">${wf.calls.toLocaleString()} runs</span>
       </div>
       <button class="wf-card-btn" data-slug="${esc(slug)}" type="button">View workflow</button>
     </article>`;
@@ -1432,7 +1431,6 @@ function renderDetail(slug, wf) {
           <div class="wf-stat"><span class="wf-stat-val">${esc(wf.version)}</span><span class="wf-stat-lbl">version</span></div>
           <div class="wf-stat"><span class="wf-stat-val">${esc(wf.runtime)}</span><span class="wf-stat-lbl">est. runtime</span></div>
           <div class="wf-stat"><span class="wf-stat-val">${wf.modelCount}</span><span class="wf-stat-lbl">models</span></div>
-          <div class="wf-stat"><span class="wf-stat-val">${wf.calls.toLocaleString()}</span><span class="wf-stat-lbl">total runs</span></div>
         </div>
       </div>
 
