@@ -141,7 +141,7 @@
 
         <figure class="vision-graph-wrap reveal" aria-labelledby="wf-graph-cap">
           <div class="vision-graph-scroll">
-            <svg class="vision-graph" viewBox="0 0 1180 380" role="img" aria-label="A node graph of the CV and Freelance Gig Match workflow: your details flow through profile analysis, a CV writer, a live gig search, then a ranking step writes tailored proposals and produces a styled CV plus ranked gigs.">
+            <svg class="vision-graph" viewBox="0 0 1180 520" role="img" aria-label="A hub-and-spoke workflow: small models run in parallel around a central GPT 5.6 model. Your details, a Profile analysis then CV writer chain, and live gig sources (Freelancer, Hacker News, Job boards) all feed into GPT 5.6, which produces the final result.">
               <defs>
                 <pattern id="vgDots" width="22" height="22" patternUnits="userSpaceOnUse">
                   <circle cx="1.5" cy="1.5" r="1.2" fill="rgba(212,175,55,0.14)" />
@@ -150,61 +150,81 @@
                   <stop offset="0" stop-color="#f2d27a" />
                   <stop offset="1" stop-color="#d4af37" />
                 </linearGradient>
+                <radialGradient id="vgHubGlow" cx="0.5" cy="0.5" r="0.5">
+                  <stop offset="0" stop-color="rgba(212,175,55,0.22)" />
+                  <stop offset="1" stop-color="rgba(212,175,55,0)" />
+                </radialGradient>
                 <marker id="vgArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0 0L10 5L0 10z" fill="rgba(212,175,55,0.55)" />
                 </marker>
-                <clipPath id="cvClip"><rect x="1031" y="30" width="120" height="114" rx="9" /></clipPath>
+                <clipPath id="cvClip"><rect x="1040" y="30" width="116" height="110" rx="9" /></clipPath>
               </defs>
 
-              <rect x="6" y="6" width="1168" height="368" rx="20" fill="url(#vgDots)" stroke="rgba(212,175,55,0.16)" />
+              <rect x="6" y="6" width="1168" height="508" rx="20" fill="url(#vgDots)" stroke="rgba(212,175,55,0.16)" />
 
-              <!-- connectors: linear flow -->
+              <!-- soft glow behind the central model -->
+              <circle cx="590" cy="262" r="180" fill="url(#vgHubGlow)" />
+
+              <!-- spokes: every parallel step flows into the central model -->
               <g class="vn-links" fill="none" stroke="rgba(212,175,55,0.45)" stroke-width="2" marker-end="url(#vgArrow)">
-                <path d="M166 190 H216" />
-                <path d="M366 190 H416" />
-                <path d="M566 190 H616" />
-                <path d="M766 190 H816" />
-                <path d="M966 190 H1016" />
+                <path class="vn-flow" d="M165 100 L503 222" />
+                <path class="vn-flow" d="M140 320 L485 286" />
+                <path class="vn-flow" d="M470 470 L565 310" />
+                <path class="vn-flow" d="M940 400 L690 300" />
+                <path class="vn-flow" d="M760 92 L868 150" />
+                <path class="vn-flow" d="M955 165 L697 224" />
+                <path d="M958 139 L1080 143" />
               </g>
 
+              <!-- input -->
               <g class="vnode vnode-io">
-                <rect x="16" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="91" y="187">Your details</text>
-                <text class="vn-sub" x="91" y="203">skills and history</text>
+                <rect x="86" y="73" width="158" height="54" rx="14" />
+                <text class="vn-label" x="165" y="97">Your details</text>
+                <text class="vn-sub" x="165" y="114">skills and history</text>
+              </g>
+
+              <!-- CV branch: a short sequential chain -->
+              <g class="vnode">
+                <rect x="681" y="65" width="158" height="54" rx="14" />
+                <text class="vn-label" x="760" y="89">Profile analysis</text>
+                <text class="vn-sub" x="760" y="106">gpt-4o-mini</text>
               </g>
               <g class="vnode">
-                <rect x="216" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="291" y="187">Profile analysis</text>
-                <text class="vn-sub" x="291" y="203">gpt-4o-mini</text>
+                <rect x="876" y="138" width="158" height="54" rx="14" />
+                <text class="vn-label" x="955" y="162">CV writer</text>
+                <text class="vn-sub" x="955" y="179">deepseek-v3.2</text>
               </g>
-              <g class="vnode">
-                <rect x="416" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="491" y="187">CV writer</text>
-                <text class="vn-sub" x="491" y="203">deepseek-v3.2</text>
+
+              <!-- parallel live gig sources -->
+              <g class="vnode vnode-settle">
+                <rect x="61" y="293" width="158" height="54" rx="14" />
+                <text class="vn-label" x="140" y="317">Freelancer</text>
+                <text class="vn-sub" x="140" y="334">live gigs</text>
               </g>
               <g class="vnode vnode-settle">
-                <rect x="616" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="691" y="187">Gig search</text>
-                <text class="vn-sub" x="691" y="203">Freelancer + HN</text>
+                <rect x="391" y="443" width="158" height="54" rx="14" />
+                <text class="vn-label" x="470" y="467">Hacker News</text>
+                <text class="vn-sub" x="470" y="484">live gigs</text>
               </g>
-              <g class="vnode vnode-worker">
-                <rect x="816" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="891" y="187">Rank and proposals</text>
-                <text class="vn-sub" x="891" y="203">gpt-5.6-luna</text>
-              </g>
-              <g class="vnode vnode-io">
-                <rect x="1016" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="1091" y="187">CV and gigs</text>
-                <text class="vn-sub" x="1091" y="203">result</text>
+              <g class="vnode vnode-settle">
+                <rect x="861" y="373" width="158" height="54" rx="14" />
+                <text class="vn-label" x="940" y="397">Job boards</text>
+                <text class="vn-sub" x="940" y="414">JSearch</text>
               </g>
 
-              <!-- small preview of the rendered CV sitting above the final result node -->
-              <path d="M1091 144 V163" fill="none" stroke="rgba(212,175,55,0.45)" stroke-width="2" marker-end="url(#vgArrow)" />
-              <image href="/assets/cv-example.png" x="1031" y="30" width="120" height="114" preserveAspectRatio="xMidYMin slice" clip-path="url(#cvClip)" />
-              <rect x="1031" y="30" width="120" height="114" rx="9" fill="none" stroke="rgba(212,175,55,0.45)" />
+              <!-- the sun: the premium final model that synthesizes everything -->
+              <g class="vnode vnode-worker">
+                <rect x="485" y="214" width="210" height="96" rx="18" />
+                <text class="vn-label" x="590" y="258" style="font-size:24px">GPT 5.6</text>
+                <text class="vn-sub" x="590" y="282" style="font-size:11px">final synthesis</text>
+              </g>
+
+              <!-- small preview of the rendered CV, produced by the CV writer -->
+              <image href="/assets/cv-example.png" x="1040" y="30" width="116" height="110" preserveAspectRatio="xMidYMin slice" clip-path="url(#cvClip)" />
+              <rect x="1040" y="30" width="116" height="110" rx="9" fill="none" stroke="rgba(212,175,55,0.45)" />
             </svg>
           </div>
-          <figcaption class="vision-graph-cap" id="wf-graph-cap">A live workflow: CV and Freelance Gig Match turns your details into a styled CV, searches real gig boards, and ranks the best matches with tailored proposals. Every node, model, and cost is shown before you run.</figcaption>
+          <figcaption class="vision-graph-cap" id="wf-graph-cap">CV and Freelance Gig Match: cheap models run in parallel, each doing one job (write the CV, pull live gigs from Freelancer, Hacker News, and job boards), then a single premium GPT 5.6 model synthesizes the styled CV and the best-matched gigs. Every node, model, and cost is shown before you run.</figcaption>
         </figure>
 
         <div class="wf-intro-actions reveal">
