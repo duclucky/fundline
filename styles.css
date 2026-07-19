@@ -1427,12 +1427,40 @@ select {
   padding: 28px;
 }
 
+/* The pay/batch pages have their own hero, so the shared topbar (which defaults to
+   "USDC invoice dashboard") is hidden in payment-mode. This also removes the dashboard
+   heading flash before the pay page renders, since payment-mode is set at page load. */
 .payment-mode .topbar {
-  padding-bottom: 18px;
+  display: none;
 }
 
 .payment-mode .topbar .primary-action[data-view="create"] {
   display: none;
+}
+
+.pay-wallet-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  word-break: break-all;
+}
+
+.pay-copy-btn {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(242, 210, 122, 0.4);
+  background: transparent;
+  color: var(--gold);
+  cursor: pointer;
+}
+
+.pay-copy-btn:hover {
+  border-color: var(--gold);
+  background: rgba(242, 210, 122, 0.08);
 }
 
 .checkout-card {

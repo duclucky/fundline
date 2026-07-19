@@ -1203,7 +1203,7 @@ function renderPayPage(invoiceId) {
           <div class="reference-grid">
             <article><span>Client</span><strong>${escapeHtml(invoice.clientName)}</strong></article>
             <article><span>Due date</span><strong>${escapeHtml(formatDate(invoice.dueDate))}</strong></article>
-            <article><span>Receiving wallet</span><strong>${escapeHtml(invoice.merchantWallet)}</strong></article>
+            <article><span>Receiving wallet</span><strong class="pay-wallet-value">${escapeHtml(invoice.merchantWallet)}<button class="pay-copy-btn" id="copyReceivingWallet" type="button" aria-label="Copy receiving wallet">Copy</button></strong></article>
           </div>
         </section>
 
@@ -1231,6 +1231,7 @@ function renderPayPage(invoiceId) {
   document.querySelector("#refreshPaymentSource")?.addEventListener("click", () => refreshPaymentSourceStatus(invoice.id));
   document.querySelector("#paymentVerifyForm")?.addEventListener("submit", (event) => verifyPaymentAndMarkPaid(invoice.id, event));
   document.querySelector("#downloadReceipt")?.addEventListener("click", () => downloadReceiptPdf(invoice));
+  document.querySelector("#copyReceivingWallet")?.addEventListener("click", () => copyText(invoice.merchantWallet));
   if (hasConnectedWallet() && invoice.status !== "paid") {
     window.setTimeout(() => refreshPaymentSourceStatus(invoice.id, { silent: true }), 0);
   }
