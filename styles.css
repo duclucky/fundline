@@ -1410,6 +1410,12 @@ select {
   grid-template-columns: 1fr;
 }
 
+/* Payment routes never show the dashboard content, so it cannot flash before the
+   pay page renders (payment-mode is set synchronously at page load). */
+.payment-mode #appPage {
+  display: none !important;
+}
+
 .payment-mode .side {
   display: none;
 }

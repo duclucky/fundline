@@ -11,6 +11,17 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <script>
+      // Payment routes must open straight to the pay page, never flash the dashboard.
+      // Set payment-mode synchronously (before first paint) so the app shell is hidden
+      // from the start; init() then renders the pay page into #payPage.
+      (function () {
+        var p = location.pathname;
+        if (/^\/(pay|batch)\//.test(p) || new URLSearchParams(location.search).has("pay")) {
+          document.body.classList.add("payment-mode");
+        }
+      })();
+    </script>
     <div class="shell">
       <aside class="side">
         <a class="brand" href="/" aria-label="Fundline home">
