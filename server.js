@@ -707,6 +707,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  const wfPreflightMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/preflight$/i);
+  if (wfPreflightMatch) {
+    handleWorkflowPreflight(req, res, wfPreflightMatch[1], url);
+    return;
+  }
+
   const wfRunMatch = url.pathname.match(/^\/api\/workflows\/([a-z0-9-]{1,64})\/run$/i);
   if (wfRunMatch) {
     handleWorkflowRun(req, res, wfRunMatch[1]);
@@ -806,6 +812,7 @@ module.exports = {
   ipIsBlocked,
   hostnameIsBlocked,
   normalizeWebhookUrl,
+  requiredModelsForRun,
   TELEGRAM_LINK_DB_PATH,
   TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
@@ -1361,6 +1368,128 @@ function tierListForDef(def) {
   return ["normal", "plus", "pro"]
     .filter((t) => def && def.tiers && def.tiers[t])
     .map((t) => ({ tier: t, usdc: (def.tiers[t].priceUnits / 1000000).toFixed(6), units: String(def.tiers[t].priceUnits) }));
+}
+
+// The distinct real model ids a run of this workflow/tier will call, so preflight can
+// confirm they still exist on the provider before a user commits payment.
+function requiredModelsForRun(def, tier) {
+  const t = def && def.tiers && def.tiers[tier];
+  if (!t || !t.models) return [];
+  return Array.from(new Set(Object.values(t.models).map((x) => String(x || "")).filter(Boolean)));
+}
+
+// Free provider health caches (no token cost). Shared across all callers/IPs so a burst of
+// preflights makes at most one upstream call per window (bounds cost and abuse).
+const PREFLIGHT_CACHE_MS = 60000;
+let _v98ModelsCache = { ids: null, at: 0, ok: false, error: "" };
+let _v98BillingCache = { data: null, at: 0 };
+const _preflightCache = new Map(); // key `${slug}|${tier}` -> { at, result }
+
+async function getV98ModelSet() {
+  const now = Date.now();
+  if (_v98ModelsCache.ids && now - _v98ModelsCache.at < PREFLIGHT_CACHE_MS) return _v98ModelsCache;
+  try {
+    const ids = await v98Client.listV98Models({ apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL });
+    _v98ModelsCache = { ids: new Set(ids), at: now, ok: true, error: "" };
+  } catch (error) {
+    _v98ModelsCache = { ids: null, at: now, ok: false, error: error.message || "unreachable" };
+  }
+  return _v98ModelsCache;
+}
+
+async function getV98BillingCached() {
+  const now = Date.now();
+  if (_v98BillingCache.data && now - _v98BillingCache.at < PREFLIGHT_CACHE_MS) return _v98BillingCache.data;
+  try {
+    const data = await v98Client.getV98Billing({ apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL });
+    _v98BillingCache = { data, at: now };
+    return data;
+  } catch (_) {
+    return null; // billing is a soft signal; do not hard-block if it is unreachable
+  }
+}
+
+// GET /api/workflows/:slug/preflight[?tier=] - free health check run BEFORE the user
+// commits payment, so we can block a doomed run up front instead of charging then
+// refunding. Uses only free provider endpoints (model list + billing) plus local budget
+// headroom; it never calls a paid completion and never reserves a run unit. Cached.
+async function handleWorkflowPreflight(req, res, slug, url) {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED) { sendJson(res, 404, { error: "Not found" }); return; }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const def = WORKFLOW_RUN_DEFS[slug];
+  const graph = workflowDefs.getGraph(slug);
+  const customType = def && (def.type === "cvgig" || def.type === "cryptodd");
+  if (!def || (!customType && !graph)) {
+    sendJson(res, 501, { error: "not_implemented", message: "Unknown or unavailable workflow \"" + slug + "\". See GET /api/workflows for runnable slugs." });
+    return;
+  }
+  const tier = String((url && url.searchParams.get("tier")) || "normal");
+  const tierDef = def.tiers && def.tiers[tier];
+  if (!tierDef) {
+    const validTiers = tierListForDef(def);
+    sendJson(res, 400, { error: { code: "INVALID_TIER", message: "Unknown tier \"" + tier + "\". Valid tiers: " + validTiers.map((t) => t.tier).join(", ") + ".", validTiers } });
+    return;
+  }
+
+  const cacheKey = slug + "|" + tier;
+  const cached = _preflightCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < PREFLIGHT_CACHE_MS) {
+    sendJson(res, 200, cached.result);
+    return;
+  }
+
+  const checks = [];
+
+  // 1. Provider configured.
+  if (!V98STORE_API_KEY) {
+    checks.push({ name: "provider", ok: false, detail: "Workflow provider is not configured." });
+  }
+
+  // 2. Provider reachable + every model this run needs still exists.
+  let modelsOk = true;
+  if (V98STORE_API_KEY) {
+    const ms = await getV98ModelSet();
+    if (!ms.ok) {
+      modelsOk = false;
+      checks.push({ name: "provider", ok: false, detail: "Model provider is unreachable right now." });
+    } else {
+      const required = requiredModelsForRun(def, tier);
+      const missing = required.filter((id) => !ms.ids.has(id));
+      modelsOk = missing.length === 0;
+      checks.push({ name: "models", ok: modelsOk, detail: modelsOk ? (required.length + " model(s) available") : ("Model(s) unavailable: " + missing.join(", ")) });
+    }
+  }
+
+  // 3. Provider credit (soft: only fails when we can positively read that it is empty).
+  if (V98STORE_API_KEY) {
+    const bill = await getV98BillingCached();
+    if (bill && Number.isFinite(bill.remainingUsd)) {
+      const creditOk = bill.remainingUsd > 0.05;
+      checks.push({ name: "credit", ok: creditOk, detail: creditOk ? "Provider credit available" : "Provider credit is exhausted." });
+    }
+  }
+
+  // 4. Local budget + rate headroom (no reservation).
+  const peek = workflowLimiter.peek({ ...workflowLimiterPaths(), ipKey: workflowClientIpKey(req), kind: "run", limits: WORKFLOW_LIMITS });
+  checks.push({ name: "budget", ok: peek.ok, detail: peek.ok ? "Within daily limits" : (peek.error === "service_budget_reached" ? "Daily service budget reached. Try again tomorrow." : "Daily run limit reached for your network.") });
+
+  const failed = checks.find((c) => !c.ok);
+  const ok = !failed;
+  const result = {
+    ok,
+    slug,
+    tier,
+    priceUsdc: (tierDef.priceUnits / 1000000).toFixed(6),
+    checks,
+    reason: ok ? "" : (failed.detail || "This workflow is temporarily unavailable."),
+    resetsAt: peek.resetsAt,
+  };
+  // Cache only healthy results; a failure may clear quickly and should be re-checked.
+  if (ok) _preflightCache.set(cacheKey, { at: Date.now(), result });
+  sendJson(res, 200, result);
 }
 
 // GET /api/workflows[?q=keyword] - public discovery menu for agents: the runnable
@@ -4450,7 +4579,6 @@ function mainMenuKeyboard(step) {
     inline_keyboard: [
       [{ text: "Create invoice", callback_data: `act:create:${step}` }],
       [{ text: "My invoices", callback_data: `act:mine:${step}` }],
-      [{ text: "Show chat ID", callback_data: `act:chatid:${step}` }],
     ],
   };
 }
@@ -4665,10 +4793,6 @@ async function handleTelegramCallback(cq) {
   }
   if (ns === "act" && value === "mine") {
     await showMyInvoices(session);
-    return;
-  }
-  if (ns === "act" && value === "chatid") {
-    await showChatId(session);
     return;
   }
   if (ns === "due" && session.state === TG_STATE.ASK_DUE) {

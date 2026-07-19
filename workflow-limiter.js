@@ -156,6 +156,40 @@ function checkAndReserve(opts) {
   return { ok: true, remaining: Math.max(0, limits.gensPerDay - entry.genCount), resetsAt };
 }
 
+// Read-only headroom check: same gates as checkAndReserve but does NOT increment any
+// counter. Used by preflight so we can tell a user "budget/rate is fine" before they pay,
+// without consuming a unit.
+function peek(opts) {
+  const nowMs = opts.nowMs != null ? opts.nowMs : Date.now();
+  const dayKey = utcDayKey(nowMs);
+  const resetsAt = nextUtcMidnightIso(nowMs);
+  const kind = opts.kind === "gen" ? "gen" : "run";
+  const limits = opts.limits;
+
+  const budget = budgetForToday(loadBudget(opts.budgetPath), dayKey);
+  if (budget.spentMicros >= limits.dailyBudgetMicros) {
+    return { ok: false, status: 503, error: "service_budget_reached", resetsAt };
+  }
+
+  const usage = loadUsage(opts.usagePath);
+  pruneUsage(usage, dayKey);
+  const entry = ipEntryForToday(usage, opts.ipKey, dayKey);
+
+  if (entry.spentMicros >= limits.spendCapMicros) {
+    return { ok: false, status: 429, error: "spend_limit", remaining: 0, resetsAt };
+  }
+  if (kind === "run") {
+    if (entry.runCount >= limits.runsPerDay) {
+      return { ok: false, status: 429, error: "daily_limit", remaining: 0, resetsAt };
+    }
+    return { ok: true, remaining: Math.max(0, limits.runsPerDay - entry.runCount), resetsAt };
+  }
+  if (entry.genCount >= limits.gensPerDay) {
+    return { ok: false, status: 429, error: "gen_limit", remaining: 0, resetsAt };
+  }
+  return { ok: true, remaining: Math.max(0, limits.gensPerDay - entry.genCount), resetsAt };
+}
+
 // Undo a reservation when the downstream API call failed (do not burn a free unit).
 function rollbackReserve(opts) {
   const nowMs = opts.nowMs != null ? opts.nowMs : Date.now();
@@ -195,6 +229,7 @@ module.exports = {
   loadUsage,
   loadBudget,
   checkAndReserve,
+  peek,
   rollbackReserve,
   recordCost,
 };

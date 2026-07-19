@@ -991,6 +991,23 @@ async function waitWalletTx(provider, hash) {
 // Quote -> approve (if needed) -> fund the escrow from the user's wallet.
 // statusFn(text) updates the run button label during the wallet steps.
 async function fundWorkflowRun(slug, statusFn, tier) {
+  // Preflight BEFORE touching the wallet: confirm the provider, models, credit and budget
+  // are healthy so we never ask the user to sign/pay for a run that would fail. Free check.
+  statusFn("Checking availability...");
+  try {
+    const pfRes = await fetch(`/api/workflows/${slug}/preflight?tier=${encodeURIComponent(tier || "normal")}`, {
+      headers: { "Accept": "application/json" },
+    });
+    const pf = await pfRes.json().catch(() => null);
+    if (pf && pf.ok === false) {
+      throw new Error((pf.reason || "This workflow is temporarily unavailable.") + " You have not been charged.");
+    }
+  } catch (err) {
+    // A failed preflight fetch itself should not hard-block (server may be old); only the
+    // explicit ok:false above blocks. Re-throw our own block message.
+    if (err && /not been charged/.test(String(err.message))) throw err;
+  }
+
   const provider = getEthProvider();
   if (!provider) throw new Error("No wallet found. Install a wallet to pay and run.");
   // Single dApp-wide wallet session (sidebar). Connect via it if not connected yet.

@@ -115,4 +115,66 @@ async function callV98Chat(config, params) {
   throw lastError || new Error("v98store request failed");
 }
 
-module.exports = { callV98Chat, parseBaseUrl };
+// Free GET helper (no token cost) for health/preflight endpoints.
+function getV98(config, pathSuffix) {
+  return new Promise((resolve, reject) => {
+    const { hostname, port, basePath } = parseBaseUrl(config.baseUrl);
+    const request = https.request(
+      {
+        hostname,
+        port,
+        path: `${basePath}${pathSuffix}`,
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "Authorization": `Bearer ${config.apiKey}`,
+        },
+      },
+      (response) => {
+        let body = "";
+        response.on("data", (chunk) => { body += chunk; });
+        response.on("end", () => resolve({ status: response.statusCode, body }));
+      },
+    );
+    request.setTimeout(15000, () => { request.destroy(new Error("v98store request timed out")); });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+// List available model ids (GET /models). Free, no token cost. Used by preflight to
+// confirm the provider is up and the models a run needs still exist.
+async function listV98Models(config) {
+  if (!config || !config.apiKey) throw new Error("v98store API key is not configured");
+  const res = await getV98(config, "/models");
+  if (res.status < 200 || res.status >= 300) throw new Error(`v98store /models ${res.status}`);
+  let parsed;
+  try { parsed = JSON.parse(res.body || "{}"); } catch { throw new Error("v98store /models returned invalid JSON"); }
+  const data = Array.isArray(parsed.data) ? parsed.data : [];
+  return data.map((m) => String(m && m.id)).filter(Boolean);
+}
+
+// Read remaining credit (GET billing subscription + usage). Free, no token cost.
+// remainingUsd = hard_limit - total_usage (usage is reported in cents).
+async function getV98Billing(config) {
+  if (!config || !config.apiKey) throw new Error("v98store API key is not configured");
+  const sub = await getV98(config, "/dashboard/billing/subscription");
+  let subJson = {};
+  try { subJson = JSON.parse(sub.body || "{}"); } catch { subJson = {}; }
+  const hardLimitUsd = Number(subJson.hard_limit_usd || 0);
+  let usageUsd = 0;
+  try {
+    const usage = await getV98(config, "/dashboard/billing/usage");
+    const uJson = JSON.parse(usage.body || "{}");
+    usageUsd = Number(uJson.total_usage || 0) / 100;
+  } catch (_) { usageUsd = 0; }
+  return {
+    status: sub.status,
+    hardLimitUsd,
+    usageUsd,
+    remainingUsd: Math.max(0, hardLimitUsd - usageUsd),
+    hasPaymentMethod: Boolean(subJson.has_payment_method),
+  };
+}
+
+module.exports = { callV98Chat, parseBaseUrl, listV98Models, getV98Billing };
