@@ -3580,6 +3580,69 @@ a.nav-item {
   align-items: stretch;
 }
 
+/* Hub-and-spoke ("solar") workflow canvas: the premium final model sits at the
+   centre, every other step orbits it, and all spokes converge on the centre. */
+.wfg2-board { overflow-x: auto; }
+.wfg-solar {
+  position: relative;
+  width: 100%;
+  min-width: 640px;
+  aspect-ratio: 1.6;
+  margin: 0 auto;
+}
+.wfg-solar-links {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+.wfg-solar-flow line {
+  stroke-dasharray: 1.5 2.1;
+  animation: wfSolarFlow 1.1s linear infinite;
+}
+@keyframes wfSolarFlow { to { stroke-dashoffset: -3.6; } }
+
+.wfg-solar .wfg2-node {
+  position: absolute;
+  width: clamp(104px, 15.5%, 150px);
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  gap: 5px;
+  padding: 9px 11px;
+}
+.wfg-solar .wfg2-node--output { width: clamp(96px, 13.5%, 138px); }
+.wfg-solar .wfg2-node:not(.wfg2-node--hub) .wfg2-model { font-size: 8.8px; letter-spacing: 0; }
+.wfg-solar .wfg2-name { font-size: 12px; }
+
+.wfg-solar .wfg2-node--hub {
+  width: clamp(142px, 20%, 190px);
+  z-index: 3;
+  padding: 13px 15px;
+  background: linear-gradient(135deg, #f2d27a, #d4af37);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 0 6px rgba(212, 175, 55, 0.1), 0 0 40px rgba(212, 175, 55, 0.28), 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+.wfg-solar .wfg2-node--hub .wfg2-step,
+.wfg-solar .wfg2-node--hub .wfg2-name { color: #100c05; }
+.wfg-solar .wfg2-node--hub .wfg2-ico {
+  background: rgba(16, 12, 5, 0.14);
+  border-color: rgba(16, 12, 5, 0.18);
+  color: #100c05;
+}
+.wfg-solar .wfg2-node--hub .wfg2-model {
+  background: rgba(16, 12, 5, 0.16);
+  border-color: rgba(16, 12, 5, 0.22);
+  color: #1a1206;
+}
+.wfg-solar .wfg2-node--hub .wfg2-state-dot { background: rgba(16, 12, 5, 0.45); }
+.wfg-solar .wfg2-node--hub.wfg2-node--running .wfg2-state-dot {
+  background: #100c05;
+  box-shadow: 0 0 8px rgba(16, 12, 5, 0.5);
+}
+
 /* Node */
 
 .wfg2-node {

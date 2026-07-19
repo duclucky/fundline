@@ -1480,6 +1480,9 @@ function renderTabOverview(wf) {
 }
 
 function wfgNodeIcon(type) {
+  if (type === "hub") {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.4 5.6L20 10l-5.6 2.4L12 18l-2.4-5.6L4 10l5.6-2.4z" fill="currentColor"/><circle cx="18.5" cy="18.5" r="2" fill="currentColor"/></svg>';
+  }
   if (type === "input") {
     return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c0-3.87 3.13-7 7-7s7 3.13 7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
   }
@@ -1489,21 +1492,24 @@ function wfgNodeIcon(type) {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 8V6a4 4 0 0 1 8 0v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="13.5" r="1" fill="currentColor"/><circle cx="15" cy="13.5" r="1" fill="currentColor"/></svg>';
 }
 
-function renderCanvasNode(node, gCol, gRow) {
-  const cls = node.type === "input" ? "wfg2-node--input wfg2-node--io"
+function renderCanvasNode(node) {
+  const cls = node.hub ? "wfg2-node--hub"
+    : node.type === "input" ? "wfg2-node--input wfg2-node--io"
     : node.type === "output" ? "wfg2-node--output wfg2-node--io"
     : "wfg2-node--ai";
-  const step = node.type === "input" ? "INPUT"
+  const step = node.hub ? "FINAL MODEL"
+    : node.type === "input" ? "INPUT"
     : node.type === "output" ? "OUTPUT"
     : "STEP " + String(node.stepNum).padStart(2, "0");
   const model = node.model ? `<span class="wfg2-model">${esc(node.model)}</span>` : "";
+  const iconType = node.hub ? "hub" : node.type;
   const state = `<span class="wfg2-state">`
     + `<span class="wfg2-state-dot"></span>`
     + `<span class="wfg2-check"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
     + `</span>`;
-  return `<div class="wfg2-node ${cls}" data-node-idx="${node.idx}" style="grid-column:${gCol};grid-row:${gRow}">
+  return `<div class="wfg2-node ${cls}" data-node-idx="${node.idx}" style="left:${node.xPct.toFixed(2)}%;top:${node.yPct.toFixed(2)}%">
     <div class="wfg2-node-top">
-      <span class="wfg2-ico">${wfgNodeIcon(node.type)}</span>
+      <span class="wfg2-ico">${wfgNodeIcon(iconType)}</span>
       <span class="wfg2-step">${step}</span>
       ${state}
     </div>
@@ -1512,55 +1518,73 @@ function renderCanvasNode(node, gCol, gRow) {
   </div>`;
 }
 
-// Build the canvas node list and grid HTML for a given set of steps.
-// Returns { nodes, total, colParts, rowTpl, cellsHtml, summaryHtml }.
-// Called by renderTabSteps (initial render) and by the tier-switch handler (redraw).
+// Hub-and-spoke ("solar") layout: the final synthesis step (upgraded to the premium
+// GPT 5.6 model) sits at the centre; every other step plus the user input orbits it
+// as a planet, and all spokes converge on the centre, which produces the output.
+// This mirrors the hybrid engine: cheap models run in parallel, then one premium
+// model synthesizes. Returns { nodes, total, boardHtml, summaryHtml }.
+// boardHtml is the spokes SVG + absolutely-positioned node cards, dropped into the
+// #wfCanvasGrid container by renderTabSteps and by the tier-switch redraw.
+// Coordinates use a 160x100 viewBox (matching the board's 16:10 aspect) so the SVG
+// spokes and the percentage-positioned cards line up without distortion.
 function buildCanvasLayout(steps, inputHint, outputHint) {
+  const n = steps.length;
+  // The premium/final step is the last one, unless the last is a "verifier" that
+  // runs after the writer (crypto-dd), in which case the writer before it is final.
+  let hubStep = n;
+  if (n > 1 && steps[n - 1] && steps[n - 1].serverKey === "verifier") hubStep = n - 1;
+
   const nodes = [
     { type: "input", idx: 0, name: "User Input", purpose: inputHint || "Your prompt or instructions" },
-    ...steps.map((s, i) => ({ type: "ai", idx: i + 1, stepNum: i + 1, name: s.name, model: s.model, purpose: s.purpose })),
+    ...steps.map((s, i) => ({
+      type: "ai", idx: i + 1, stepNum: i + 1, name: s.name, model: s.model, purpose: s.purpose,
+      hub: (i + 1) === hubStep,
+    })),
     { type: "output", idx: steps.length + 1, name: "Final Output", purpose: outputHint || "Ready to use result" },
   ];
 
   const total = nodes.length;
-  const nodeCols = total <= 3 ? total : Math.ceil(total / 2);
-  const twoRows = total > 3;
+  const HUB = { x: 80, y: 43 };
+  const OUT = { x: 80, y: 92 };
+  const RX = 48, RY = 33;
 
-  const colParts = [];
-  for (let c = 0; c < nodeCols; c++) {
-    if (c > 0) colParts.push("44px");
-    colParts.push("minmax(0, 1fr)");
-  }
-  const rowTpl = twoRows ? "auto 42px auto" : "auto";
-
-  function colIndexOf(n) {
-    const row = Math.floor(n / nodeCols);
-    const pos = n % nodeCols;
-    return row % 2 === 0 ? pos : (nodeCols - 1 - pos);
-  }
-
-  const cells = [];
-  nodes.forEach((node, n) => {
-    const row = Math.floor(n / nodeCols);
-    const colIdx = colIndexOf(n);
-    const gCol = colIdx * 2 + 1;
-    const gRow = row * 2 + 1;
-    cells.push(renderCanvasNode(node, gCol, gRow));
-    if (n < nodes.length - 1) {
-      const nextRow = Math.floor((n + 1) / nodeCols);
-      if (nextRow === row) {
-        const nextColIdx = colIndexOf(n + 1);
-        const connCol = Math.min(colIdx, nextColIdx) * 2 + 2;
-        const dir = row % 2 === 0 ? "right" : "left";
-        cells.push(`<div class="wfg2-conn wfg2-conn--h wfg2-conn--${dir}" style="grid-column:${connCol};grid-row:${gRow}" aria-hidden="true"></div>`);
-      } else {
-        cells.push(`<div class="wfg2-conn wfg2-conn--v" style="grid-column:${gCol};grid-row:${gRow + 1}" aria-hidden="true"></div>`);
-      }
-    }
+  // Planets = input + every non-hub ai step, in order. The hub and output get fixed
+  // positions; planets fan across the top ~300 degrees, leaving the bottom for the output.
+  const planets = nodes.filter((nd) => nd.type === "input" || (nd.type === "ai" && !nd.hub));
+  const P = planets.length;
+  planets.forEach((nd, i) => {
+    const deg = P <= 1 ? 0 : 210 + (i * (300 / (P - 1)));
+    const r = (deg * Math.PI) / 180;
+    nd.vx = HUB.x + RX * Math.sin(r);
+    nd.vy = HUB.y - RY * Math.cos(r);
+  });
+  nodes.forEach((nd) => {
+    if (nd.hub) { nd.vx = HUB.x; nd.vy = HUB.y; }
+    else if (nd.type === "output") { nd.vx = OUT.x; nd.vy = OUT.y; }
+    // viewBox 160x100 -> percentages of the board (width 100%, height = 62.5% of width).
+    nd.xPct = nd.vx / 1.6;
+    nd.yPct = nd.vy;
   });
 
+  // Spokes: each planet -> hub (trimmed to stop just outside the hub card), plus hub -> output.
+  const spokeLines = planets.map((nd) => {
+    const dx = HUB.x - nd.vx, dy = HUB.y - nd.vy;
+    const len = Math.hypot(dx, dy) || 1;
+    const ex = HUB.x - (dx / len) * 22;
+    const ey = HUB.y - (dy / len) * 20;
+    return `<line x1="${nd.vx.toFixed(1)}" y1="${nd.vy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" />`;
+  }).join("");
+  const outLine = `<line x1="${HUB.x}" y1="${(HUB.y + 17).toFixed(1)}" x2="${OUT.x}" y2="${(OUT.y - 8).toFixed(1)}" />`;
+  const svg = `<svg class="wfg-solar-links" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">`
+    + `<defs><marker id="wfSpokeArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="3.4" markerHeight="3.4" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(242,210,122,0.6)" /></marker></defs>`
+    + `<g class="wfg-solar-flow" stroke="rgba(242,210,122,0.45)" stroke-width="0.4" fill="none" marker-end="url(#wfSpokeArrow)">${spokeLines}${outLine}</g>`
+    + `</svg>`;
+
+  const cardsHtml = nodes.map((node) => renderCanvasNode(node)).join("");
+  const boardHtml = svg + cardsHtml;
+
   const summaryHtml = nodes.map((node, i) => {
-    const label = node.type === "input" ? "Input" : node.type === "output" ? "Output" : "Step " + String(node.stepNum).padStart(2, "0");
+    const label = node.hub ? "Final" : node.type === "input" ? "Input" : node.type === "output" ? "Output" : "Step " + String(node.stepNum).padStart(2, "0");
     return `
     <tr data-step-row="${i}">
       <td><span class="wfg-row-label">${esc(label)}</span><span class="wfg-row-name">${esc(node.name)}</span></td>
@@ -1570,7 +1594,7 @@ function buildCanvasLayout(steps, inputHint, outputHint) {
     </tr>`;
   }).join("");
 
-  return { nodes, total, colParts, rowTpl, cellsHtml: cells.join(""), summaryHtml };
+  return { nodes, total, boardHtml, summaryHtml };
 }
 
 function renderTabSteps(wf) {
@@ -1580,7 +1604,7 @@ function renderTabSteps(wf) {
       <div class="wfg-canvas-head">
         <div>
           <div class="wfg-canvas-title">Workflow Structure</div>
-          <div class="wfg-canvas-sub">Transparent execution steps and models.</div>
+          <div class="wfg-canvas-sub">Cheap models run in parallel, then one premium model synthesizes the result.</div>
         </div>
         <div class="wfg-chips">
           <span class="wfg-chip">${layout.total} nodes</span>
@@ -1589,8 +1613,8 @@ function renderTabSteps(wf) {
         </div>
       </div>
       <div class="wfg2-board">
-        <div class="wfg2-grid" id="wfCanvasGrid" style="grid-template-columns:${layout.colParts.join(" ")};grid-template-rows:${layout.rowTpl}">
-          ${layout.cellsHtml}
+        <div class="wfg-solar" id="wfCanvasGrid">
+          ${layout.boardHtml}
         </div>
       </div>
       <div class="wfg-summary">
@@ -1810,9 +1834,7 @@ function bindDetail(slug, wf) {
         const layout = buildCanvasLayout(tierDef.steps, wf.inputHint, wf.outputHint);
         const canvasGrid = document.getElementById("wfCanvasGrid");
         if (canvasGrid) {
-          canvasGrid.style.gridTemplateColumns = layout.colParts.join(" ");
-          canvasGrid.style.gridTemplateRows = layout.rowTpl;
-          canvasGrid.innerHTML = layout.cellsHtml;
+          canvasGrid.innerHTML = layout.boardHtml;
         }
         const summaryTbody = document.getElementById("wfSummaryTbody");
         if (summaryTbody) summaryTbody.innerHTML = layout.summaryHtml;
