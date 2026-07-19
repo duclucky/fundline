@@ -1609,13 +1609,13 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   const maxD = stepNodes.length ? Math.max(1, ...stepNodes.map((sn) => sn._d)) : 1;
   const totalCols = maxD + 2; // input col 0, steps 1..maxD, output col maxD+1
 
-  const COLW = 100, ROWH = 142, CH = 52; // CH reserves a top/bottom channel to route skip edges around nodes
+  const COLW = 100, ROWH = 142, CH = 88; // CH reserves vertical margin (card half + routing channel)
   const cols = {};
   for (let c = 1; c <= maxD; c++) cols[c] = [];
   stepNodes.forEach((sn) => cols[sn._d].push(sn));
   const maxRows = Math.max(1, ...Object.keys(cols).map((c) => cols[c].length));
   const VBW = totalCols * COLW;
-  const VBH = maxRows * ROWH + 2 * CH;
+  const VBH = (maxRows - 1) * ROWH + 2 * CH;
   const colX = (c) => (c + 0.5) * COLW;
 
   // Assign y: input/output centred; each column ordered by the average y of its deps
@@ -1630,9 +1630,10 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
     });
     arr.sort((a, b) => a._bc - b._bc);
     const k = arr.length;
+    const first = (VBH - (k - 1) * ROWH) / 2; // centre the column vertically, fixed ROWH spacing
     arr.forEach((sn, i) => {
       sn.vx = colX(c);
-      sn.vy = CH + (VBH - 2 * CH) * (i + 1) / (k + 1);
+      sn.vy = first + i * ROWH;
     });
   }
 
@@ -1645,27 +1646,53 @@ function buildCanvasLayout(steps, inputHint, outputHint, flow) {
     nd.wPct = nd.hub ? hubWpct : (nd.type === "ai" ? workerWpct : ioWpct);
   });
 
-  // Edge routing. Adjacent-column edges are a straight diagonal (the inter-column gap
-  // is empty). Skip edges (spanning 2+ columns) are routed orthogonally out to a free
-  // top/bottom channel and back, so a connector never runs underneath another node.
-  const topChBase = CH * 0.5;
-  const botChBase = VBH - CH * 0.5;
+  // Edge routing. Draw a direct straight line by default. Only when that straight line
+  // would cross under another node (occlusion) do we reroute it with right angles, out
+  // to a free top/bottom channel and into the target, so it goes around the obstacles.
+  const cardHalfH = ROWH * 0.32;
+  // Channels sit just outside the actual node band, so a rerouted edge only dips a
+  // little around the obstacles instead of running to the board edge.
+  let nTop = Infinity, nBot = -Infinity;
+  nodes.forEach((nd) => { nTop = Math.min(nTop, nd.vy - cardHalfH); nBot = Math.max(nBot, nd.vy + cardHalfH); });
+  if (!isFinite(nTop)) { nTop = VBH / 2; nBot = VBH / 2; }
+  const topChBase = Math.max(6, nTop - 18);
+  const botChBase = Math.min(VBH - 6, nBot + 18);
   let topN = 0, botN = 0;
-  function edgePath(a, b) {
-    const ax = a.vx + COLW * 0.40;
-    const bx = b.vx - COLW * 0.44;
-    const span = Math.round((b.vx - a.vx) / COLW);
-    if (span <= 1) {
-      return `<path d="M${ax.toFixed(1)} ${a.vy.toFixed(1)}L${bx.toFixed(1)} ${b.vy.toFixed(1)}" />`;
+  const halfW = (nd) => (((nd.wPct || 40) / 100) * VBW) / 2;
+  // Liang-Barsky: does the segment (x0,y0)-(x1,y1) cross node nd's padded box?
+  function hits(x0, y0, x1, y1, nd) {
+    const pad = 4;
+    const rx0 = nd.vx - halfW(nd) - pad, rx1 = nd.vx + halfW(nd) + pad;
+    const ry0 = nd.vy - cardHalfH - pad, ry1 = nd.vy + cardHalfH + pad;
+    let t0 = 0, t1 = 1; const dx = x1 - x0, dy = y1 - y0;
+    const p = [-dx, dx, -dy, dy], q = [x0 - rx0, rx1 - x0, y0 - ry0, ry1 - y0];
+    for (let i = 0; i < 4; i++) {
+      if (p[i] === 0) { if (q[i] < 0) return false; }
+      else { const t = q[i] / p[i]; if (p[i] < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; } }
     }
+    return t1 > t0;
+  }
+  function edgePath(a, b) {
+    const dx = b.vx - a.vx, dy = b.vy - a.vy, len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const ax = a.vx + ux * (halfW(a) + 5), ay = a.vy + uy * (halfW(a) + 5);
+    const bx = b.vx - ux * (halfW(b) + 7), by = b.vy - uy * (halfW(b) + 7);
+    let blocked = false;
+    for (const nd of nodes) { if (nd === a || nd === b) continue; if (hits(ax, ay, bx, by, nd)) { blocked = true; break; } }
+    if (!blocked) {
+      return `<path d="M${ax.toFixed(1)} ${ay.toFixed(1)}L${bx.toFixed(1)} ${by.toFixed(1)}" />`;
+    }
+    // Occluded: route with right angles out to the nearer free channel and into the target.
     const useTop = a.vy < VBH / 2;
     const chY = useTop ? (topChBase + (topN++ % 6) * 6) : (botChBase - (botN++ % 6) * 6);
+    const axr = a.vx + halfW(a) + 5;
     const mA = a.vx + COLW * 0.5;
     const mB = b.vx - COLW * 0.5;
-    return `<path d="M${ax.toFixed(1)} ${a.vy.toFixed(1)}`
+    const bEnter = b.vx - halfW(b) - 7;
+    return `<path d="M${axr.toFixed(1)} ${a.vy.toFixed(1)}`
       + `L${mA.toFixed(1)} ${a.vy.toFixed(1)}L${mA.toFixed(1)} ${chY.toFixed(1)}`
       + `L${mB.toFixed(1)} ${chY.toFixed(1)}L${mB.toFixed(1)} ${b.vy.toFixed(1)}`
-      + `L${bx.toFixed(1)} ${b.vy.toFixed(1)}" />`;
+      + `L${bEnter.toFixed(1)} ${b.vy.toFixed(1)}" />`;
   }
 
   const dependedOn = new Set();

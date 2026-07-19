@@ -3602,11 +3602,7 @@ a.nav-item {
   pointer-events: none;
   z-index: 0;
 }
-.wfg-solar-flow path {
-  stroke-dasharray: 6 5;
-  animation: wfSolarFlow 0.9s linear infinite;
-}
-@keyframes wfSolarFlow { to { stroke-dashoffset: -11; } }
+.wfg-solar-flow path { stroke-linecap: round; }
 
 .wfg-solar .wfg2-node {
   position: absolute;
