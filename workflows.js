@@ -2319,13 +2319,34 @@ function bindSidebarToggles() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
+// When the server has a premium final-node provider configured, show its per-tier model
+// on the final content node (the last step, or the step before a trailing verifier) so the
+// graph matches what actually runs. No-op when the provider is not configured.
+function applyFinalModels() {
+  const fm = WF_CONFIG && WF_CONFIG.workflowFinalModels;
+  if (!fm) return;
+  function upgrade(steps, model) {
+    if (!steps || !steps.length || !model) return;
+    let i = steps.length - 1;
+    if (steps[i] && steps[i].serverKey === "verifier" && i > 0) i -= 1;
+    if (steps[i]) steps[i].model = model;
+  }
+  Object.keys(WORKFLOWS).forEach((slug) => {
+    const wf = WORKFLOWS[slug];
+    if (wf.tiers) {
+      ["normal", "plus", "pro"].forEach((t) => { if (wf.tiers[t]) upgrade(wf.tiers[t].steps, fm[t]); });
+    }
+    upgrade(wf.steps, fm.normal);
+  });
+}
+
 window.addEventListener("popstate", () => render());
 
 window.addEventListener("DOMContentLoaded", () => {
   bindSidebarToggles();
   fetch("/api/config")
     .then((r) => r.json())
-    .then((c) => { WF_CONFIG = c || {}; WF_RUNNER_ENABLED = Boolean(c && c.workflowRunnerEnabled); })
+    .then((c) => { WF_CONFIG = c || {}; WF_RUNNER_ENABLED = Boolean(c && c.workflowRunnerEnabled); applyFinalModels(); })
     .catch(() => {})
     .finally(() => render());
 

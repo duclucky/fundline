@@ -99,10 +99,13 @@ async function runWorkflowGraph(opts) {
       steps.push({ name: node.name, model: "tavily", costMicros: cost });
     } else {
       // Model node (incl. retrieval in search mode): resolve the alias to a real
-      // model id for the active tier, then call the injected model.
+      // model id for the active tier, then call the injected model. The final node
+      // (the one whose output becomes the deliverable) uses the premium model id when
+      // one is provided; callModel routes that id to the premium endpoint.
+      const useFinal = node.isFinal && opts.finalModelId;
       const label = tierModels[node.alias];
-      if (!label) throw new Error("No model configured for alias " + node.alias);
-      const modelId = v98Models.resolveModelId(label);
+      if (!label && !useFinal) throw new Error("No model configured for alias " + node.alias);
+      const modelId = useFinal ? opts.finalModelId : v98Models.resolveModelId(label);
       const messages = node.build(ctx);
       const res = await callModel(modelId, messages, node.maxTokens || 1024);
       account(node.name, modelId, res.usage);
