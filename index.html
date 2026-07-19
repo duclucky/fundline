@@ -141,7 +141,7 @@
 
         <figure class="vision-graph-wrap reveal" aria-labelledby="wf-graph-cap">
           <div class="vision-graph-scroll">
-            <svg class="vision-graph" viewBox="0 0 1180 380" role="img" aria-label="A node graph of the Client Research workflow: your prompt flows through role analysis and research planning, fans out to parallel web searches, merges into a dedupe step, then a report writer produces a cited report.">
+            <svg class="vision-graph" viewBox="0 0 1180 380" role="img" aria-label="A node graph of the CV and Freelance Gig Match workflow: your details flow through profile analysis, a CV writer, a live gig search, then a ranking step writes tailored proposals and produces a styled CV plus ranked gigs.">
               <defs>
                 <pattern id="vgDots" width="22" height="22" patternUnits="userSpaceOnUse">
                   <circle cx="1.5" cy="1.5" r="1.2" fill="rgba(212,175,55,0.14)" />
@@ -157,71 +157,53 @@
 
               <rect x="6" y="6" width="1168" height="368" rx="20" fill="url(#vgDots)" stroke="rgba(212,175,55,0.16)" />
 
-              <!-- connectors -->
+              <!-- connectors: linear flow -->
               <g class="vn-links" fill="none" stroke="rgba(212,175,55,0.45)" stroke-width="2" marker-end="url(#vgArrow)">
-                <path d="M166 190 H182" />
-                <path d="M332 190 H348" />
-                <!-- fan out from research plan to 3 searches -->
-                <path class="vn-flow" d="M498 190 C528 150, 500 92, 514 67" />
-                <path class="vn-flow" d="M498 190 H514" />
-                <path class="vn-flow" d="M498 190 C528 230, 500 288, 514 313" />
-                <!-- merge 3 searches into dedupe -->
-                <path d="M664 67 C700 92, 660 150, 680 190" />
-                <path d="M664 190 H680" />
-                <path d="M664 313 C700 288, 660 230, 680 190" />
-                <!-- dedupe -> writer -> output -->
-                <path d="M830 190 H846" />
-                <path d="M996 190 H1012" />
+                <path d="M166 190 H216" />
+                <path d="M366 190 H416" />
+                <path d="M566 190 H616" />
+                <path d="M766 190 H816" />
+                <path d="M966 190 H1016" />
               </g>
 
               <g class="vnode vnode-io">
                 <rect x="16" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="91" y="187">Your prompt</text>
-                <text class="vn-sub" x="91" y="203">the request</text>
+                <text class="vn-label" x="91" y="187">Your details</text>
+                <text class="vn-sub" x="91" y="203">skills and history</text>
               </g>
               <g class="vnode">
-                <rect x="182" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="257" y="187">Role analysis</text>
-                <text class="vn-sub" x="257" y="203">gpt-4o-mini</text>
+                <rect x="216" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="291" y="187">Profile analysis</text>
+                <text class="vn-sub" x="291" y="203">gpt-4o-mini</text>
               </g>
               <g class="vnode">
-                <rect x="348" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="423" y="187">Research plan</text>
-                <text class="vn-sub" x="423" y="203">gpt-4o-mini</text>
+                <rect x="416" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="491" y="187">CV writer</text>
+                <text class="vn-sub" x="491" y="203">deepseek-v3.2</text>
               </g>
               <g class="vnode vnode-settle">
-                <rect x="514" y="40" width="150" height="54" rx="13" />
-                <text class="vn-label" x="589" y="64">Web search</text>
-                <text class="vn-sub" x="589" y="80">search model</text>
-              </g>
-              <g class="vnode vnode-settle">
-                <rect x="514" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="589" y="187">Web search</text>
-                <text class="vn-sub" x="589" y="203">search model</text>
-              </g>
-              <g class="vnode vnode-settle">
-                <rect x="514" y="286" width="150" height="54" rx="13" />
-                <text class="vn-label" x="589" y="310">Web search</text>
-                <text class="vn-sub" x="589" y="326">search model</text>
-              </g>
-              <g class="vnode">
-                <rect x="680" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="755" y="187">Dedupe sources</text>
-                <text class="vn-sub" x="755" y="203">rank and merge</text>
+                <rect x="616" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="691" y="187">Gig search</text>
+                <text class="vn-sub" x="691" y="203">Freelancer + HN</text>
               </g>
               <g class="vnode vnode-worker">
-                <rect x="846" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="921" y="187">Report writer</text>
-                <text class="vn-sub" x="921" y="203">gpt-5.6-luna</text>
+                <rect x="816" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="891" y="187">Rank and proposals</text>
+                <text class="vn-sub" x="891" y="203">gpt-5.6-luna</text>
               </g>
               <g class="vnode vnode-io">
-                <rect x="1012" y="163" width="150" height="54" rx="13" />
-                <text class="vn-label" x="1087" y="187">Cited report</text>
-                <text class="vn-sub" x="1087" y="203">result</text>
+                <rect x="1016" y="163" width="150" height="54" rx="13" />
+                <text class="vn-label" x="1091" y="187">CV and gigs</text>
+                <text class="vn-sub" x="1091" y="203">result</text>
               </g>
             </svg>
           </div>
-          <figcaption class="vision-graph-cap" id="wf-graph-cap">A live workflow: Client Research plans queries, searches the web in parallel, dedupes sources, and writes a cited report. Every node, model, and cost is shown before you run.</figcaption>
+          <figcaption class="vision-graph-cap" id="wf-graph-cap">A live workflow: CV and Freelance Gig Match turns your details into a styled CV, searches real gig boards, and ranks the best matches with tailored proposals. Every node, model, and cost is shown before you run.</figcaption>
+        </figure>
+
+        <figure class="cv-showcase reveal" aria-labelledby="cv-showcase-cap">
+          <img class="cv-showcase-img" src="/assets/cv-example.png" alt="Example CV rendered by the CV and Freelance Gig Match workflow, ready to save as PDF." loading="lazy" width="900" height="851" />
+          <figcaption class="vision-graph-cap" id="cv-showcase-cap">The rendered CV, ready to save as PDF. Pick a template and accent color, then download.</figcaption>
         </figure>
 
         <div class="wf-intro-actions reveal">
