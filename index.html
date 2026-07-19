@@ -153,6 +153,7 @@
                 <marker id="vgArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0 0L10 5L0 10z" fill="rgba(212,175,55,0.55)" />
                 </marker>
+                <clipPath id="cvClip"><rect x="1031" y="30" width="120" height="114" rx="9" /></clipPath>
               </defs>
 
               <rect x="6" y="6" width="1168" height="368" rx="20" fill="url(#vgDots)" stroke="rgba(212,175,55,0.16)" />
@@ -196,14 +197,14 @@
                 <text class="vn-label" x="1091" y="187">CV and gigs</text>
                 <text class="vn-sub" x="1091" y="203">result</text>
               </g>
+
+              <!-- small preview of the rendered CV sitting above the final result node -->
+              <path d="M1091 144 V163" fill="none" stroke="rgba(212,175,55,0.45)" stroke-width="2" marker-end="url(#vgArrow)" />
+              <image href="/assets/cv-example.png" x="1031" y="30" width="120" height="114" preserveAspectRatio="xMidYMin slice" clip-path="url(#cvClip)" />
+              <rect x="1031" y="30" width="120" height="114" rx="9" fill="none" stroke="rgba(212,175,55,0.45)" />
             </svg>
           </div>
           <figcaption class="vision-graph-cap" id="wf-graph-cap">A live workflow: CV and Freelance Gig Match turns your details into a styled CV, searches real gig boards, and ranks the best matches with tailored proposals. Every node, model, and cost is shown before you run.</figcaption>
-        </figure>
-
-        <figure class="cv-showcase reveal" aria-labelledby="cv-showcase-cap">
-          <img class="cv-showcase-img" src="/assets/cv-example.png" alt="Example CV rendered by the CV and Freelance Gig Match workflow, ready to save as PDF." loading="lazy" width="900" height="851" />
-          <figcaption class="vision-graph-cap" id="cv-showcase-cap">The rendered CV, ready to save as PDF. Pick a template and accent color, then download.</figcaption>
         </figure>
 
         <div class="wf-intro-actions reveal">

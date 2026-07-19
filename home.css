@@ -2247,21 +2247,6 @@ h3 {
   line-height: 1.6;
 }
 
-/* Rendered-CV showcase under the workflow graph */
-.cv-showcase {
-  margin: 34px auto 0;
-  max-width: 660px;
-  text-align: center;
-}
-
-.cv-showcase-img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 14px;
-  border: 1px solid rgba(212, 175, 55, 0.28);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
-}
 
 /* layer legend */
 .vision-legend {
