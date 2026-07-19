@@ -1543,41 +1543,57 @@ function buildCanvasLayout(steps, inputHint, outputHint) {
     { type: "output", idx: steps.length + 1, name: "Final Output", purpose: outputHint || "Ready to use result" },
   ];
 
+  // Fan-in flow (left to right): input -> parallel worker steps -> the premium
+  // GPT 5.6 hub -> output. Input feeds the workers (not the hub directly), the
+  // workers converge on the hub, and the hub emits the output. Coordinates use a
+  // 150x115 viewBox (matching the board's aspect) so the SVG lines and the
+  // percentage-positioned cards line up without distortion.
   const total = nodes.length;
-  const HUB = { x: 80, y: 43 };
-  const OUT = { x: 80, y: 92 };
-  const RX = 48, RY = 33;
-
-  // Planets = input + every non-hub ai step, in order. The hub and output get fixed
-  // positions; planets fan across the top ~300 degrees, leaving the bottom for the output.
-  const planets = nodes.filter((nd) => nd.type === "input" || (nd.type === "ai" && !nd.hub));
-  const P = planets.length;
-  planets.forEach((nd, i) => {
-    const deg = P <= 1 ? 0 : 210 + (i * (300 / (P - 1)));
-    const r = (deg * Math.PI) / 180;
-    nd.vx = HUB.x + RX * Math.sin(r);
-    nd.vy = HUB.y - RY * Math.cos(r);
+  const VBW = 150;
+  const workers = nodes.filter((nd) => nd.type === "ai" && !nd.hub);
+  const W = workers.length;
+  // The board grows taller as there are more parallel workers, so the worker cards
+  // never overlap however many steps a workflow has.
+  const VBH = Math.max(120, W * 26 + 28);
+  const INPUT = { x: 16, y: VBH * 0.46 };
+  const HUB = { x: 112, y: VBH * 0.44 };
+  const OUT = { x: 112, y: VBH * 0.87 };
+  const WORKER_X = 64;
+  workers.forEach((nd, i) => {
+    nd.vx = WORKER_X;
+    nd.vy = W <= 1 ? VBH * 0.44 : 8 + i * ((VBH - 16) / (W - 1)); // spread 8..VBH-8
   });
   nodes.forEach((nd) => {
     if (nd.hub) { nd.vx = HUB.x; nd.vy = HUB.y; }
+    else if (nd.type === "input") { nd.vx = INPUT.x; nd.vy = INPUT.y; }
     else if (nd.type === "output") { nd.vx = OUT.x; nd.vy = OUT.y; }
-    // viewBox 160x100 -> percentages of the board (width 100%, height = 62.5% of width).
-    nd.xPct = nd.vx / 1.6;
-    nd.yPct = nd.vy;
+    nd.xPct = (nd.vx / VBW) * 100;
+    nd.yPct = (nd.vy / VBH) * 100;
   });
 
-  // Spokes: each planet -> hub (trimmed to stop just outside the hub card), plus hub -> output.
-  const spokeLines = planets.map((nd) => {
-    const dx = HUB.x - nd.vx, dy = HUB.y - nd.vy;
+  // A line from a->b, trimmed by ta at the start and tb at the end so it begins and
+  // ends outside the node cards (leaving a clear gap, arrowhead in the open).
+  function seg(ax, ay, bx, by, ta, tb) {
+    const dx = bx - ax, dy = by - ay;
     const len = Math.hypot(dx, dy) || 1;
-    const ex = HUB.x - (dx / len) * 22;
-    const ey = HUB.y - (dy / len) * 20;
-    return `<line x1="${nd.vx.toFixed(1)}" y1="${nd.vy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" />`;
-  }).join("");
-  const outLine = `<line x1="${HUB.x}" y1="${(HUB.y + 17).toFixed(1)}" x2="${OUT.x}" y2="${(OUT.y - 8).toFixed(1)}" />`;
-  const svg = `<svg class="wfg-solar-links" viewBox="0 0 160 100" preserveAspectRatio="none" aria-hidden="true">`
-    + `<defs><marker id="wfSpokeArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="3.4" markerHeight="3.4" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(242,210,122,0.6)" /></marker></defs>`
-    + `<g class="wfg-solar-flow" stroke="rgba(242,210,122,0.45)" stroke-width="0.4" fill="none" marker-end="url(#wfSpokeArrow)">${spokeLines}${outLine}</g>`
+    const ux = dx / len, uy = dy / len;
+    const x1 = ax + ux * ta, y1 = ay + uy * ta;
+    const x2 = bx - ux * tb, y2 = by - uy * tb;
+    return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" />`;
+  }
+
+  let lines = "";
+  workers.forEach((nd) => {
+    lines += seg(INPUT.x, INPUT.y, nd.vx, nd.vy, 15, 16); // input -> worker
+    lines += seg(nd.vx, nd.vy, HUB.x, HUB.y, 16, 24);     // worker -> hub
+  });
+  // Straight-through path when a workflow is a single step (no workers): input -> hub.
+  if (!W) lines += seg(INPUT.x, INPUT.y, HUB.x, HUB.y, 15, 24);
+  lines += seg(HUB.x, HUB.y, OUT.x, OUT.y, 15, 12); // hub -> output
+
+  const svg = `<svg class="wfg-solar-links" viewBox="0 0 ${VBW} ${VBH}" preserveAspectRatio="none" aria-hidden="true">`
+    + `<defs><marker id="wfSpokeArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="3.2" markerHeight="3.2" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(242,210,122,0.65)" /></marker></defs>`
+    + `<g class="wfg-solar-flow" stroke="rgba(242,210,122,0.4)" stroke-width="0.5" fill="none" marker-end="url(#wfSpokeArrow)">${lines}</g>`
     + `</svg>`;
 
   const cardsHtml = nodes.map((node) => renderCanvasNode(node)).join("");
@@ -1594,7 +1610,7 @@ function buildCanvasLayout(steps, inputHint, outputHint) {
     </tr>`;
   }).join("");
 
-  return { nodes, total, boardHtml, summaryHtml };
+  return { nodes, total, boardHtml, summaryHtml, aspect: VBW / VBH };
 }
 
 function renderTabSteps(wf) {
@@ -1613,7 +1629,7 @@ function renderTabSteps(wf) {
         </div>
       </div>
       <div class="wfg2-board">
-        <div class="wfg-solar" id="wfCanvasGrid">
+        <div class="wfg-solar" id="wfCanvasGrid" style="aspect-ratio:${layout.aspect.toFixed(3)}">
           ${layout.boardHtml}
         </div>
       </div>
