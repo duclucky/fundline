@@ -2916,7 +2916,7 @@ a.nav-item {
 
 .wf-api-pair {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 20px;
   align-items: start;
 }
