@@ -1443,7 +1443,7 @@ function renderDetail(slug, wf) {
           </div>
           <div class="wf-tab-panels">
             ${renderTabOverview(wf)}
-            ${renderTabSteps(wf)}
+            ${renderTabSteps(slug, wf)}
             ${renderTabExample(wf)}
             ${renderTabApi(slug, wf)}
           </div>
@@ -1503,11 +1503,15 @@ function renderCanvasNode(node) {
     : "STEP " + String(node.stepNum).padStart(2, "0");
   const model = node.model ? `<span class="wfg2-model">${esc(node.model)}</span>` : "";
   const iconType = node.hub ? "hub" : node.type;
+  const tip = (node.purpose || node.model)
+    ? `<span class="wfg2-tip">${node.model ? `<span class="wfg2-tip-model">${esc(node.model)}</span>` : ""}${node.purpose ? esc(node.purpose) : ""}</span>`
+    : "";
   const state = `<span class="wfg2-state">`
     + `<span class="wfg2-state-dot"></span>`
     + `<span class="wfg2-check"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
     + `</span>`;
-  return `<div class="wfg2-node ${cls}" data-node-idx="${node.idx}" style="left:${node.xPct.toFixed(2)}%;top:${node.yPct.toFixed(2)}%">
+  const w = node.wPct ? `width:${node.wPct.toFixed(2)}%;` : "";
+  return `<div class="wfg2-node ${cls}" data-node-idx="${node.idx}" style="left:${node.xPct.toFixed(2)}%;top:${node.yPct.toFixed(2)}%;${w}">
     <div class="wfg2-node-top">
       <span class="wfg2-ico">${wfgNodeIcon(iconType)}</span>
       <span class="wfg2-step">${step}</span>
@@ -1515,112 +1519,175 @@ function renderCanvasNode(node) {
     </div>
     <div class="wfg2-name">${esc(node.name)}</div>
     ${model}
+    ${tip}
   </div>`;
 }
 
-// Hub-and-spoke ("solar") layout: the final synthesis step (upgraded to the premium
-// GPT 5.6 model) sits at the centre; every other step plus the user input orbits it
-// as a planet, and all spokes converge on the centre, which produces the output.
-// This mirrors the hybrid engine: cheap models run in parallel, then one premium
-// model synthesizes. Returns { nodes, total, boardHtml, summaryHtml }.
-// boardHtml is the spokes SVG + absolutely-positioned node cards, dropped into the
-// #wfCanvasGrid container by renderTabSteps and by the tier-switch redraw.
-// Coordinates use a 160x100 viewBox (matching the board's 16:10 aspect) so the SVG
-// spokes and the percentage-positioned cards line up without distortion.
-function buildCanvasLayout(steps, inputHint, outputHint) {
+// The real per-node dependency graph for each workflow (generated from the server
+// engine's computeDependencies over workflow-defs.js). Each value maps a step's
+// serverKey to the serverKeys it reads. Custom executors (cv-gig-match, crypto-dd)
+// are hand-listed to match their real flow. Drives the layered canvas so the true
+// chains ("node doi") are shown, not a flat fan.
+const WF_FLOWS = {
+  "call-recap": {"transcript_cleaner":[],"meeting_summary":["transcript_cleaner"],"decision_extractor":["meeting_summary","transcript_cleaner"],"action_items":["meeting_summary","transcript_cleaner"],"risk_blocker":["meeting_summary","transcript_cleaner"],"followup_email":["meeting_summary","decision_extractor","action_items"],"billables":["action_items","transcript_cleaner"],"formatter":["meeting_summary","decision_extractor","action_items","risk_blocker","billables","followup_email"]},
+  "proposal-sow": {"requirement_extractor":[],"context_synth":["requirement_extractor"],"proposal_generator":["requirement_extractor","context_synth"],"sow_generator":["requirement_extractor","proposal_generator"],"milestone_builder":["sow_generator","requirement_extractor"],"risk_assumption":["proposal_generator","sow_generator"],"formatter":["proposal_generator","sow_generator","milestone_builder","risk_assumption"]},
+  "client-research": {"role_analysis":[],"research_plan":[],"web_research":["research_plan"],"report_writer":["role_analysis","web_research"]},
+  "market-pain-research": {"source_cleaner":[],"web_research":["source_cleaner"],"pain_clusterer":["web_research"],"objection_extractor":["pain_clusterer","web_research"],"opportunity_mapper":["pain_clusterer","objection_extractor"],"idea_generator":["opportunity_mapper","objection_extractor"],"formatter":["pain_clusterer","objection_extractor","opportunity_mapper","idea_generator","web_research"]},
+  "code-review": {"code_normalizer":[],"logic_review":["code_normalizer"],"security_review":[],"perf_review":[],"fix_suggestions":["logic_review","security_review","perf_review"],"formatter":["logic_review","security_review","perf_review","fix_suggestions"]},
+  "upwork-proposal": {"job_parser":[],"client_need":["job_parser"],"fit_matcher":["job_parser"],"hook_generator":["client_need","fit_matcher"],"proposal_draft":["hook_generator","client_need","fit_matcher"],"screening_answers":["job_parser"],"bid_checker":["proposal_draft"],"formatter":["proposal_draft","screening_answers","bid_checker"]},
+  "rfp-proposal": {"rfp_parser":[],"complexity_estimator":["rfp_parser"],"scope_builder":["rfp_parser","complexity_estimator"],"estimate_generator":["complexity_estimator","rfp_parser"],"proposal_outline":["rfp_parser","scope_builder"],"missing_info":["rfp_parser","complexity_estimator"],"formatter":["proposal_outline","scope_builder","estimate_generator","complexity_estimator","missing_info"]},
+  "cold-outreach": {"prospect_analyzer":[],"pain_mapper":["prospect_analyzer"],"offer_positioning":["pain_mapper","prospect_analyzer"],"email_sequence":["offer_positioning","pain_mapper"],"subject_lines":["offer_positioning"],"linkedin_dm":["offer_positioning","prospect_analyzer"],"cta_optimizer":["email_sequence"],"formatter":["offer_positioning","subject_lines","email_sequence","linkedin_dm","cta_optimizer"]},
+  "follow-up-nurture": {"state_extractor":[],"intent_planner":["state_extractor"],"objection_handler":["intent_planner","state_extractor"],"sequence_generator":["objection_handler","intent_planner"],"timing_suggestion":["sequence_generator"],"formatter":["state_extractor","intent_planner","sequence_generator","timing_suggestion"]},
+  "timeline-from-sow": {"sow_parser":[],"task_breakdown":["sow_parser"],"dependency_mapper":["task_breakdown"],"timeline_builder":["task_breakdown","dependency_mapper","sow_parser"],"risk_buffer":["timeline_builder"],"invoice_hint":["timeline_builder"],"formatter":["task_breakdown","timeline_builder","dependency_mapper","risk_buffer","invoice_hint"]},
+  "handover-report": {"work_cleaner":[],"deliverable_mapper":["work_cleaner"],"handover_writer":["deliverable_mapper","work_cleaner"],"usage_notes":["handover_writer"],"pending_items":["deliverable_mapper","work_cleaner"],"invoice_readiness":["deliverable_mapper","pending_items"],"formatter":["handover_writer","usage_notes","pending_items","invoice_readiness"]},
+  "seo-content-brief": {"intent_classifier":[],"serp_research":["intent_classifier"],"competitor_analyzer":["serp_research"],"gap_analyzer":["competitor_analyzer","serp_research"],"brief_generator":["intent_classifier","gap_analyzer","competitor_analyzer"],"seo_qa":["intent_classifier","brief_generator"],"formatter":["intent_classifier","brief_generator","gap_analyzer","seo_qa","serp_research"]},
+  "seo-audit": {"input_normalizer":[],"page_research":["input_normalizer"],"technical_seo":["page_research","input_normalizer"],"content_seo":["page_research"],"issue_prioritizer":["technical_seo","content_seo"],"recommendation_writer":["issue_prioritizer"],"formatter":["technical_seo","content_seo","issue_prioritizer","recommendation_writer","page_research"]},
+  "keyword-strategy": {"keyword_cleaner":[],"intent_classifier":["keyword_cleaner"],"semantic_clusterer":["intent_classifier"],"hub_spoke":["semantic_clusterer"],"priority_scorer":["hub_spoke"],"roadmap_generator":["hub_spoke","priority_scorer"],"formatter":["intent_classifier","semantic_clusterer","hub_spoke","priority_scorer","roadmap_generator"]},
+  "pr-diff-review": {"diff_parser":[],"context_summary":["diff_parser"],"logic_review":["context_summary"],"security_review":[],"test_review":["logic_review"],"pr_comments":["logic_review","security_review","test_review"],"merge_scorer":["logic_review","security_review","test_review"],"formatter":["merge_scorer","context_summary","logic_review","security_review","test_review","pr_comments"]},
+  "x-thread-writer": {"content_extractor":[],"thread_architect":["content_extractor"],"tweet_writer":["thread_architect","content_extractor"],"hook_optimizer":["tweet_writer"],"formatter":["tweet_writer","hook_optimizer"]},
+  "newsletter-writer": {"brief_extractor":[],"outline_builder":["brief_extractor"],"draft_writer":["outline_builder","brief_extractor"],"subject_lines":["draft_writer"],"polish_editor":["draft_writer"],"formatter":["subject_lines","polish_editor"]},
+  "linkedin-post": {"angle_extractor":[],"hook_writer":["angle_extractor"],"post_writer":["hook_writer","angle_extractor"],"hashtag_cta":["post_writer"],"formatter":["post_writer","hook_writer","hashtag_cta"]},
+  "crypto-research": {"scope_planner":[],"web_research":["scope_planner"],"tokenomics_analyst":["web_research"],"tech_team_analyst":["web_research"],"risk_assessor":["tokenomics_analyst","tech_team_analyst","web_research"],"formatter":["tokenomics_analyst","tech_team_analyst","risk_assessor","web_research"]},
+  "tokenomics-analyzer": {"input_normalizer":[],"supply_analyst":["input_normalizer"],"distribution_analyst":["input_normalizer"],"utility_demand":["input_normalizer"],"risk_rating":["supply_analyst","distribution_analyst","utility_demand"],"formatter":["supply_analyst","distribution_analyst","utility_demand","risk_rating"]},
+  "whitepaper-summary": {"section_splitter":[],"core_summary":["section_splitter"],"mechanism_summary":[],"claims_flags":["core_summary","mechanism_summary"],"formatter":["core_summary","mechanism_summary","claims_flags"]},
+  "narrative-scan": {"narrative_framer":[],"web_research":["narrative_framer"],"project_mapper":["web_research"],"trend_catalyst":["web_research"],"opportunity_take":["project_mapper","trend_catalyst"],"formatter":["project_mapper","trend_catalyst","opportunity_take","web_research"]},
+  "competitor-analysis": {"scope_extractor":[],"web_research":["scope_extractor"],"positioning_map":["web_research"],"gap_finder":["positioning_map"],"swot":["positioning_map","gap_finder"],"formatter":["positioning_map","gap_finder","swot","web_research"]},
+  "gtm-plan": {"product_extractor":[],"segment_targeting":["product_extractor"],"positioning_messaging":["segment_targeting"],"channel_plan":["segment_targeting","positioning_messaging"],"milestones_metrics":["channel_plan"],"formatter":["segment_targeting","positioning_messaging","channel_plan","milestones_metrics"]},
+  "lean-canvas": {"idea_extractor":[],"canvas_builder":["idea_extractor"],"assumptions_risks":["canvas_builder"],"experiments":["assumptions_risks"],"formatter":["canvas_builder","assumptions_risks","experiments"]},
+  "swot-analysis": {"context_extractor":[],"swot_generator":["context_extractor"],"strategy_actions":["swot_generator"],"formatter":["swot_generator","strategy_actions"]},
+  "cv-gig-match": {"profile":[],"cv_writer":["profile"],"gig_search":["profile"],"ranking":["cv_writer","gig_search"]},
+  "crypto-dd": {"intake":[],"fetch":["intake"],"news":["intake"],"writer":["fetch","news"],"verifier":["writer","fetch"]},
+};
+
+// The dependency map for a workflow, keyed by step serverKey. Falls back to a simple
+// linear chain (each step reads the previous one) if the slug is not in WF_FLOWS.
+function getWfFlow(slug, wf) {
+  if (WF_FLOWS[slug]) return WF_FLOWS[slug];
+  const f = {};
+  (wf.steps || []).forEach((s, i) => { f[s.serverKey] = i > 0 ? [wf.steps[i - 1].serverKey] : []; });
+  return f;
+}
+
+// Layered dependency graph. Each step is placed in a column by its dependency depth
+// (longest path from the input), so real chains read left to right and parallel steps
+// stack in the same column. The premium GPT 5.6 step is highlighted as the hub. Edges
+// are the real dependencies, so a step that feeds another ("node doi") is drawn as a
+// connected pair. Coordinates use a VBW x VBH viewBox that matches the board aspect so
+// the SVG edges and the percentage-positioned cards line up without distortion.
+function buildCanvasLayout(steps, inputHint, outputHint, flow) {
   const n = steps.length;
+  flow = flow || {};
   // The premium/final step is the last one, unless the last is a "verifier" that
   // runs after the writer (crypto-dd), in which case the writer before it is final.
   let hubStep = n;
   if (n > 1 && steps[n - 1] && steps[n - 1].serverKey === "verifier") hubStep = n - 1;
 
-  const nodes = [
-    { type: "input", idx: 0, name: "User Input", purpose: inputHint || "Your prompt or instructions" },
-    ...steps.map((s, i) => ({
-      type: "ai", idx: i + 1, stepNum: i + 1, name: s.name, model: s.model, purpose: s.purpose,
-      hub: (i + 1) === hubStep,
-    })),
-    { type: "output", idx: steps.length + 1, name: "Final Output", purpose: outputHint || "Ready to use result" },
-  ];
-
-  // Fan-in flow (left to right): input -> parallel worker steps -> the premium
-  // GPT 5.6 hub -> output. Input feeds the workers (not the hub directly), the
-  // workers converge on the hub, and the hub emits the output. Coordinates use a
-  // 150x115 viewBox (matching the board's aspect) so the SVG lines and the
-  // percentage-positioned cards line up without distortion.
+  const inputNode = { type: "input", idx: 0, key: "__input", name: "User Input", purpose: inputHint || "Your prompt or instructions" };
+  const outputNode = { type: "output", idx: n + 1, key: "__output", name: "Final Output", purpose: outputHint || "Ready to use result" };
+  const stepNodes = steps.map((s, i) => ({
+    type: "ai", idx: i + 1, stepNum: i + 1, key: s.serverKey, name: s.name, model: s.model,
+    purpose: s.purpose, hub: (i + 1) === hubStep,
+  }));
+  const nodes = [inputNode, ...stepNodes, outputNode];
   const total = nodes.length;
-  const VBW = 150;
-  const workers = nodes.filter((nd) => nd.type === "ai" && !nd.hub);
-  const W = workers.length;
-  // The board grows taller as there are more parallel workers, so the worker cards
-  // never overlap however many steps a workflow has.
-  const VBH = Math.max(120, W * 26 + 28);
-  const INPUT = { x: 16, y: VBH * 0.46 };
-  const HUB = { x: 112, y: VBH * 0.44 };
-  const OUT = { x: 112, y: VBH * 0.87 };
-  const WORKER_X = 64;
-  workers.forEach((nd, i) => {
-    nd.vx = WORKER_X;
-    nd.vy = W <= 1 ? VBH * 0.44 : 8 + i * ((VBH - 16) / (W - 1)); // spread 8..VBH-8
-  });
+
+  const byKey = {};
+  stepNodes.forEach((sn) => { byKey[sn.key] = sn; });
+  const stepDeps = (key) => ((flow[key] || []).filter((d) => byKey[d]));
+
+  // Depth = longest dependency path from the input (steps reading only input are depth 1).
+  function depth(key) {
+    const sn = byKey[key];
+    if (!sn) return 0;
+    if (sn._d != null) return sn._d;
+    sn._d = -1; // guard against cycles
+    const ds = stepDeps(key);
+    sn._d = ds.length ? 1 + Math.max.apply(null, ds.map(depth).map((d) => (d < 0 ? 0 : d))) : 1;
+    return sn._d;
+  }
+  stepNodes.forEach((sn) => depth(sn.key));
+  const maxD = stepNodes.length ? Math.max(1, ...stepNodes.map((sn) => sn._d)) : 1;
+  const totalCols = maxD + 2; // input col 0, steps 1..maxD, output col maxD+1
+
+  const COLW = 100, ROWH = 142;
+  const cols = {};
+  for (let c = 1; c <= maxD; c++) cols[c] = [];
+  stepNodes.forEach((sn) => cols[sn._d].push(sn));
+  const maxRows = Math.max(1, ...Object.keys(cols).map((c) => cols[c].length));
+  const VBW = totalCols * COLW;
+  const VBH = maxRows * ROWH + 24;
+  const colX = (c) => (c + 0.5) * COLW;
+
+  // Assign y: input/output centred; each column ordered by the average y of its deps
+  // (barycenter) to reduce edge crossings, then spread evenly down the column.
+  inputNode.vx = colX(0); inputNode.vy = VBH / 2;
+  outputNode.vx = colX(maxD + 1); outputNode.vy = VBH / 2;
+  for (let c = 1; c <= maxD; c++) {
+    const arr = cols[c];
+    arr.forEach((sn) => {
+      const ds = stepDeps(sn.key);
+      sn._bc = ds.length ? ds.reduce((a, d) => a + (byKey[d].vy != null ? byKey[d].vy : VBH / 2), 0) / ds.length : VBH / 2;
+    });
+    arr.sort((a, b) => a._bc - b._bc);
+    const k = arr.length;
+    arr.forEach((sn, i) => {
+      sn.vx = colX(c);
+      sn.vy = VBH * (i + 1) / (k + 1);
+    });
+  }
+
+  const workerWpct = (COLW * 0.74) / VBW * 100;
+  const hubWpct = (COLW * 0.90) / VBW * 100;
+  const ioWpct = (COLW * 0.62) / VBW * 100;
   nodes.forEach((nd) => {
-    if (nd.hub) { nd.vx = HUB.x; nd.vy = HUB.y; }
-    else if (nd.type === "input") { nd.vx = INPUT.x; nd.vy = INPUT.y; }
-    else if (nd.type === "output") { nd.vx = OUT.x; nd.vy = OUT.y; }
     nd.xPct = (nd.vx / VBW) * 100;
     nd.yPct = (nd.vy / VBH) * 100;
+    nd.wPct = nd.hub ? hubWpct : (nd.type === "ai" ? workerWpct : ioWpct);
   });
 
-  // A line from a->b, trimmed by ta at the start and tb at the end so it begins and
-  // ends outside the node cards (leaving a clear gap, arrowhead in the open).
-  function seg(ax, ay, bx, by, ta, tb) {
-    const dx = bx - ax, dy = by - ay;
+  // A line a->b, trimmed at both ends so the arrowhead lands in the gap between cards.
+  function seg(a, b) {
+    const dx = b.vx - a.vx, dy = b.vy - a.vy;
     const len = Math.hypot(dx, dy) || 1;
     const ux = dx / len, uy = dy / len;
-    const x1 = ax + ux * ta, y1 = ay + uy * ta;
-    const x2 = bx - ux * tb, y2 = by - uy * tb;
+    const x1 = a.vx + ux * (COLW * 0.40), y1 = a.vy + uy * (COLW * 0.40);
+    const x2 = b.vx - ux * (COLW * 0.44), y2 = b.vy - uy * (COLW * 0.44);
     return `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" />`;
   }
 
-  let lines = "";
-  workers.forEach((nd) => {
-    lines += seg(INPUT.x, INPUT.y, nd.vx, nd.vy, 15, 16); // input -> worker
-    lines += seg(nd.vx, nd.vy, HUB.x, HUB.y, 16, 24);     // worker -> hub
-  });
-  // Straight-through path when a workflow is a single step (no workers): input -> hub.
-  if (!W) lines += seg(INPUT.x, INPUT.y, HUB.x, HUB.y, 15, 24);
-  lines += seg(HUB.x, HUB.y, OUT.x, OUT.y, 15, 12); // hub -> output
+  const dependedOn = new Set();
+  stepNodes.forEach((sn) => stepDeps(sn.key).forEach((d) => dependedOn.add(d)));
 
+  let lines = "";
+  stepNodes.forEach((sn) => {
+    const ds = stepDeps(sn.key);
+    if (!ds.length) lines += seg(inputNode, sn);
+    else ds.forEach((d) => { lines += seg(byKey[d], sn); });
+  });
+  // Sinks (steps nothing else depends on) feed the output.
+  stepNodes.forEach((sn) => { if (!dependedOn.has(sn.key)) lines += seg(sn, outputNode); });
+  if (!stepNodes.length) lines += seg(inputNode, outputNode);
+
+  const arrowSize = (COLW * 0.32).toFixed(1);
   const svg = `<svg class="wfg-solar-links" viewBox="0 0 ${VBW} ${VBH}" preserveAspectRatio="none" aria-hidden="true">`
-    + `<defs><marker id="wfSpokeArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="3.2" markerHeight="3.2" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(242,210,122,0.65)" /></marker></defs>`
-    + `<g class="wfg-solar-flow" stroke="rgba(242,210,122,0.4)" stroke-width="0.5" fill="none" marker-end="url(#wfSpokeArrow)">${lines}</g>`
+    + `<defs><marker id="wfSpokeArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="${arrowSize}" markerHeight="${arrowSize}" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="rgba(242,210,122,0.75)" /></marker></defs>`
+    + `<g class="wfg-solar-flow" stroke="rgba(242,210,122,0.5)" stroke-width="1.7" fill="none" marker-end="url(#wfSpokeArrow)">${lines}</g>`
     + `</svg>`;
 
   const cardsHtml = nodes.map((node) => renderCanvasNode(node)).join("");
   const boardHtml = svg + cardsHtml;
 
-  const summaryHtml = nodes.map((node, i) => {
-    const label = node.hub ? "Final" : node.type === "input" ? "Input" : node.type === "output" ? "Output" : "Step " + String(node.stepNum).padStart(2, "0");
-    return `
-    <tr data-step-row="${i}">
-      <td><span class="wfg-row-label">${esc(label)}</span><span class="wfg-row-name">${esc(node.name)}</span></td>
-      <td>${node.model ? `<span class="wf-graph-model-tag">${esc(node.model)}</span>` : '<span class="wf-muted">-</span>'}</td>
-      <td class="wf-muted" style="font-size:12px;line-height:1.5">${esc(node.purpose)}</td>
-      <td><span class="wfg-step-status wfg-step-status--pending">Pending</span></td>
-    </tr>`;
-  }).join("");
-
-  return { nodes, total, boardHtml, summaryHtml, aspect: VBW / VBH };
+  return { nodes, total, boardHtml, aspect: VBW / VBH };
 }
 
-function renderTabSteps(wf) {
-  const layout = buildCanvasLayout(wf.steps, wf.inputHint, wf.outputHint);
+function renderTabSteps(slug, wf) {
+  const layout = buildCanvasLayout(wf.steps, wf.inputHint, wf.outputHint, getWfFlow(slug, wf));
   return `<div class="wf-tab-panel" data-panel="Workflow Steps">
     <div class="wfg-canvas">
       <div class="wfg-canvas-head">
         <div>
           <div class="wfg-canvas-title">Workflow Structure</div>
-          <div class="wfg-canvas-sub">Cheap models run in parallel, then one premium model synthesizes the result.</div>
+          <div class="wfg-canvas-sub">Steps flow left to right into the final GPT 5.6 model. Hover a step to see what it does.</div>
         </div>
         <div class="wfg-chips">
           <span class="wfg-chip">${layout.total} nodes</span>
@@ -1631,15 +1698,6 @@ function renderTabSteps(wf) {
       <div class="wfg2-board">
         <div class="wfg-solar" id="wfCanvasGrid" style="aspect-ratio:${layout.aspect.toFixed(3)}">
           ${layout.boardHtml}
-        </div>
-      </div>
-      <div class="wfg-summary">
-        <div class="wfg-summary-hd">Execution Summary</div>
-        <div class="wf-table-wrap">
-          <table class="wfg-sum-table">
-            <thead><tr><th>Step</th><th>Model</th><th>Purpose</th><th>Status</th></tr></thead>
-            <tbody id="wfSummaryTbody">${layout.summaryHtml}</tbody>
-          </table>
         </div>
       </div>
     </div>
@@ -1846,14 +1904,13 @@ function bindDetail(slug, wf) {
           runBtn.innerHTML = `${runIcon} ${isBillingEnabled(wf) ? `Pay ${tierPrice} USDC and run` : "Run Workflow"}`;
         }
 
-        // Redraw the canvas and summary table with the selected tier's steps.
-        const layout = buildCanvasLayout(tierDef.steps, wf.inputHint, wf.outputHint);
+        // Redraw the canvas with the selected tier's steps (structure is unchanged,
+        // only the per-node model labels differ).
+        const layout = buildCanvasLayout(tierDef.steps, wf.inputHint, wf.outputHint, getWfFlow(slug, wf));
         const canvasGrid = document.getElementById("wfCanvasGrid");
         if (canvasGrid) {
           canvasGrid.innerHTML = layout.boardHtml;
         }
-        const summaryTbody = document.getElementById("wfSummaryTbody");
-        if (summaryTbody) summaryTbody.innerHTML = layout.summaryHtml;
 
         switchToTab("Workflow Steps");
       });

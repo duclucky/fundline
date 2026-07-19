@@ -437,7 +437,7 @@ a {
   gap: 20px;
   align-content: start;
   width: 100%;
-  max-width: 1500px;
+  max-width: 1680px;
   margin: 0 auto;
   padding: 34px;
 }
@@ -2358,6 +2358,11 @@ a.nav-item {
   flex-direction: column;
 }
 
+/* Give the page title breathing room from the top and align it with the body below. */
+.wf-main .topbar {
+  padding: 50px 32px 8px;
+}
+
 .wf-loading {
   display: flex;
   align-items: center;
@@ -2554,8 +2559,8 @@ a.nav-item {
 /* Detail */
 
 .wf-detail-body {
-  padding: 0 32px 48px;
-  max-width: 1240px;
+  padding: 30px 32px 48px;
+  max-width: 1680px;
 }
 
 .wf-detail-hero { margin-bottom: 28px; }
@@ -3582,12 +3587,10 @@ a.nav-item {
 
 /* Hub-and-spoke ("solar") workflow canvas: the premium final model sits at the
    centre, every other step orbits it, and all spokes converge on the centre. */
-.wfg2-board { overflow-x: auto; }
+.wfg2-board { overflow: visible; }
 .wfg-solar {
   position: relative;
   width: 100%;
-  min-width: 460px;
-  aspect-ratio: 1.25;
   margin: 0 auto;
 }
 .wfg-solar-links {
@@ -3607,16 +3610,53 @@ a.nav-item {
 
 .wfg-solar .wfg2-node {
   position: absolute;
-  width: clamp(104px, 21%, 144px);
   transform: translate(-50%, -50%);
   z-index: 1;
   gap: 4px;
   padding: 8px 10px;
+  min-width: 90px;
+  background: #14151a; /* opaque so dependency edges pass cleanly behind the cards */
+  cursor: default;
 }
-.wfg-solar .wfg2-node--input,
-.wfg-solar .wfg2-node--output { width: clamp(84px, 16%, 118px); }
-.wfg-solar .wfg2-node:not(.wfg2-node--hub) .wfg2-model { font-size: 8.8px; letter-spacing: 0; }
-.wfg-solar .wfg2-name { font-size: 12px; }
+.wfg-solar .wfg2-model { font-size: 8.4px; letter-spacing: 0; }
+.wfg-solar .wfg2-name { font-size: 11.5px; }
+.wfg-solar .wfg2-step { font-size: 8.5px; }
+
+/* Hover tooltip: the node's Purpose (replaces the old Execution Summary table) */
+.wfg2-tip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 220px;
+  padding: 8px 11px;
+  background: #0d0e12;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--muted);
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+  z-index: 50;
+}
+.wfg2-tip-model {
+  display: block;
+  margin-bottom: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--gold);
+}
+.wfg-solar .wfg2-node:hover { z-index: 40; }
+.wfg-solar .wfg2-node:hover .wfg2-tip { opacity: 1; visibility: visible; }
 
 .wfg-solar .wfg2-node--hub {
   width: clamp(124px, 23%, 168px);
