@@ -1089,7 +1089,7 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
 const MCP_TOOLS = [
   {
     name: "list_workflows",
-    description: "Discover Fundline workflows and their per-run USDC price. Optional keyword search on slug or name.",
+    description: "Discover Fundline workflows with the per-run USDC price for every tier (normal, plus, pro), returned as structured JSON so you do not need to run one to learn its price. Optional keyword search on slug or name.",
     inputSchema: { type: "object", properties: { query: { type: "string", description: "Optional keyword filter (e.g. 'research')." } } },
   },
   {
@@ -1326,8 +1326,41 @@ async function handleMcp(req, res) {
       if (name === "list_workflows") {
         const r = await fetch(selfBase + "/api/workflows" + (args.query ? "?q=" + encodeURIComponent(args.query) : ""));
         const j = await r.json();
-        const list = (j.workflows || []).map((w) => "- " + w.slug + " (" + w.name + ") from " + (w.tiers && w.tiers.normal ? w.tiers.normal.usdc : "?") + " USDC").join("\n");
-        return { content: [{ type: "text", text: (j.workflows || []).length + " workflows:\n" + list }] };
+        // Keep every tier the workflow actually has (normal, plus, pro), with both the
+        // decimal USDC price and the raw base units, so an agent can pick a tier by price
+        // without having to trigger a 402 quote. Missing tiers are simply omitted.
+        const workflows = (j.workflows || []).map((w) => {
+          const tiers = {};
+          ["normal", "plus", "pro"].forEach((t) => {
+            if (w.tiers && w.tiers[t]) tiers[t] = { usdc: w.tiers[t].usdc, units: w.tiers[t].units };
+          });
+          return { slug: w.slug, name: w.name, tiers };
+        });
+        const payload = {
+          count: workflows.length,
+          currency: "USDC",
+          chainId: j.chainId,
+          usdc: j.usdc,
+          billingEnabled: j.billingEnabled,
+          workflows,
+        };
+        // A readable summary listing all tier prices (for LLM-driven callers), plus the
+        // full structured JSON in structuredContent and as a plain-JSON content block
+        // (for programmatic callers that parse rather than read).
+        const summary = workflows.map((w) => {
+          const priced = ["normal", "plus", "pro"]
+            .filter((t) => w.tiers[t])
+            .map((t) => t + " " + w.tiers[t].usdc)
+            .join(" / ");
+          return "- " + w.slug + " (" + w.name + "): " + (priced ? priced + " USDC" : "price at quote");
+        }).join("\n");
+        return {
+          content: [
+            { type: "text", text: workflows.length + " workflows (USDC per run, by tier):\n" + summary },
+            { type: "text", text: JSON.stringify(payload) },
+          ],
+          structuredContent: payload,
+        };
       }
       if (name === "run_workflow") {
         if (!args.slug || !args.prompt) throw new Error("slug and prompt are required");
