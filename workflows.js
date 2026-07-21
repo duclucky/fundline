@@ -216,7 +216,7 @@ const WORKFLOWS = {
     category: "Documents",
     live: true,
     usesRetrieval: false,
-    price: "0.025",
+    price: "0.01",
     version: "v1.0.0",
     runtime: "~30s",
     modelCount: 1,
@@ -242,21 +242,21 @@ const WORKFLOWS = {
     ],
     tiers: {
       normal: {
-        price: "0.025",
+        price: "0.01",
         steps: [
           { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes and brief into a structured proposal.", tokens: "~2000" },
           { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the proposal as a downloadable PDF.", tokens: "~" },
         ],
       },
       plus: {
-        price: "0.04",
+        price: "0.02",
         steps: [
           { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes and brief into a structured proposal.", tokens: "~2000" },
           { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the proposal as a downloadable PDF.", tokens: "~" },
         ],
       },
       pro: {
-        price: "0.075",
+        price: "0.03",
         steps: [
           { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes and brief into a structured proposal.", tokens: "~2000" },
           { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the proposal as a downloadable PDF.", tokens: "~" },
@@ -277,7 +277,7 @@ const WORKFLOWS = {
     category: "Documents",
     live: true,
     usesRetrieval: false,
-    price: "0.025",
+    price: "0.01",
     version: "v1.0.0",
     runtime: "~50s",
     modelCount: 1,
@@ -304,7 +304,7 @@ const WORKFLOWS = {
     ],
     tiers: {
       normal: {
-        price: "0.025",
+        price: "0.01",
         steps: [
           { serverKey: "research", name: "Web research", model: "Tavily", purpose: "Gather live sources on the topic (when enabled).", tokens: "~" },
           { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes, brief, and any sources into a structured report.", tokens: "~2000" },
@@ -312,7 +312,7 @@ const WORKFLOWS = {
         ],
       },
       plus: {
-        price: "0.04",
+        price: "0.02",
         steps: [
           { serverKey: "research", name: "Web research", model: "Tavily", purpose: "Gather live sources on the topic (when enabled).", tokens: "~" },
           { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes, brief, and any sources into a structured report.", tokens: "~2000" },
@@ -320,7 +320,7 @@ const WORKFLOWS = {
         ],
       },
       pro: {
-        price: "0.075",
+        price: "0.03",
         steps: [
           { serverKey: "research", name: "Web research", model: "Tavily", purpose: "Gather live sources on the topic (when enabled).", tokens: "~" },
           { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes, brief, and any sources into a structured report.", tokens: "~2000" },
@@ -959,10 +959,14 @@ Object.keys(WF_CATALOG).forEach((slug) => {
 
 // Global display price multiplier. Keep in sync with WORKFLOW_PRICE_MULTIPLIER in server.js
 // (the server is the billing source of truth; this only keeps the shown price matching it).
+// Doc-gen workflows are priced directly from measured GPT-5.6 cost (5x cost, floored to the
+// 0.01 catalog floor), so they are exempt here too. Keep in sync with the docgen exemption
+// in server.js (def.type === "docgen").
 const WF_PRICE_MULTIPLIER = 2;
+const WF_PRICE_FIXED = { "proposal-doc": true, "report-doc": true };
 Object.keys(WORKFLOWS).forEach((slug) => {
   const wf = WORKFLOWS[slug];
-  if (!wf) return;
+  if (!wf || WF_PRICE_FIXED[slug]) return;
   const scale = (v) => {
     const n = parseFloat(v);
     return Number.isFinite(n) ? (n * WF_PRICE_MULTIPLIER).toFixed(2) : v;

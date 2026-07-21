@@ -20,11 +20,24 @@ function stripFence(s) {
   return t.trim();
 }
 
+function tryParse(s) { try { return JSON.parse(s); } catch (_) { return null; } }
+// Repair the most common LLM JSON slip: trailing commas before a closing } or ].
+function repairJson(s) { return String(s).replace(/,(\s*[}\]])/g, "$1"); }
+
 // Parse the model output into a validated document-spec, or null if unusable.
 function parseDocSpec(content) {
   const raw = stripFence(content);
-  let obj = null;
-  try { obj = JSON.parse(raw); } catch { obj = null; }
+  let obj = tryParse(raw) || tryParse(repairJson(raw));
+  if (!obj) {
+    // Salvage: extract the outermost {...} block if the model wrapped the JSON in prose,
+    // then also try repairing trailing commas, so a small slip does not force a retry.
+    const first = raw.indexOf("{");
+    const last = raw.lastIndexOf("}");
+    if (first !== -1 && last > first) {
+      const slice = raw.slice(first, last + 1);
+      obj = tryParse(slice) || tryParse(repairJson(slice));
+    }
+  }
   if (!obj || typeof obj !== "object") return null;
   const sections = Array.isArray(obj.sections) ? obj.sections.filter((s) => s && s.heading) : [];
   if (!sections.length) return null;
@@ -97,7 +110,8 @@ function buildDocSpecMessages(docType, input, brief, sources, today) {
     + sectionHintFor(docType) + "\n"
     + "Rules: use ONLY the facts the user provides (and the researched sources if given); do NOT invent "
     + "figures, names, dates, or citations. Write in the same language as the user's content. No emojis. "
-    + "Output must be valid JSON and nothing else.";
+    + "CRITICAL: reply with ONLY the raw JSON object - no prose, no explanation, and no markdown "
+    + "code fences before or after it. Start your reply with { and end with }.";
 
   const user = "Document type: " + docType + "\n"
     + (briefLines.length ? "Brief:\n" + briefLines.join("\n") + "\n\n" : "")

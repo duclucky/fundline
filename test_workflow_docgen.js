@@ -31,6 +31,7 @@ function once(content) { return () => Promise.resolve({ content: content, usage:
   assert("parse no sections null", D.parseDocSpec('{"meta":{}}') === null);
   const dropped = D.parseDocSpec('{"sections":[{"heading":"H","blocks":[{"type":"paragraph","text":"ok"},{"type":"bogus","x":1}]}]}');
   assert("parse drops bad block", dropped && dropped.sections[0].blocks.length === 1);
+  assert("parse salvages prose-wrapped json", !!D.parseDocSpec("Here is your proposal:\n\n" + VALID + "\n\nHope this helps!"));
 
   // happy path -> real PDF
   const r1 = await D.runDocGenWorkflow({ docType: "proposal", input: "Build X for Acme, 3 phases, 11000 USDC", callModel: once(VALID) });

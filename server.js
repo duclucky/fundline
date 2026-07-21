@@ -331,15 +331,17 @@ WORKFLOW_RUN_DEFS["crypto-dd"] = {
 // Document generation. type "docgen" -> custom executor (workflow-docgen.js): the LLM turns
 // the caller's content/brief into a document-spec, then doc-render.js renders a PDF. The
 // writer step uses the premium final model (GPT-5.6) when configured, else the tier STRONG.
-// Prices are placeholders (measure live before heavy promotion). Doubled by the multiplier below.
+// Prices are set from a live measure: one GPT-5.6 writer call is ~$0.0001/run, and the doc-gen
+// rule is 5x cost. Since 5x is far below the 0.01 USDC catalog floor, we floor to a small
+// monotonic 0.01/0.02/0.03. These docgen defs are EXEMPT from the global doubling below.
 WORKFLOW_RUN_DEFS["proposal-doc"] = {
   type: "docgen",
   name: "Proposal Document",
   docType: "proposal",
   tiers: {
-    normal: { priceUnits: 25000, models: { STRONG: "deepseek-v3.2" } },
-    plus: { priceUnits: 40000, models: { STRONG: "gpt-4.1-mini" } },
-    pro: { priceUnits: 75000, models: { STRONG: "claude-sonnet-4-6" } },
+    normal: { priceUnits: 10000, models: { STRONG: "deepseek-v3.2" } },
+    plus: { priceUnits: 20000, models: { STRONG: "gpt-4.1-mini" } },
+    pro: { priceUnits: 30000, models: { STRONG: "claude-sonnet-4-6" } },
   },
 };
 WORKFLOW_RUN_DEFS["report-doc"] = {
@@ -347,9 +349,9 @@ WORKFLOW_RUN_DEFS["report-doc"] = {
   name: "Report Document",
   docType: "report",
   tiers: {
-    normal: { priceUnits: 25000, models: { STRONG: "deepseek-v3.2" } },
-    plus: { priceUnits: 40000, models: { STRONG: "gpt-4.1-mini" } },
-    pro: { priceUnits: 75000, models: { STRONG: "claude-sonnet-4-6" } },
+    normal: { priceUnits: 10000, models: { STRONG: "deepseek-v3.2" } },
+    plus: { priceUnits: 20000, models: { STRONG: "gpt-4.1-mini" } },
+    pro: { priceUnits: 30000, models: { STRONG: "claude-sonnet-4-6" } },
   },
 };
 
@@ -361,6 +363,8 @@ const WORKFLOW_PRICE_MULTIPLIER = 2;
 Object.keys(WORKFLOW_RUN_DEFS).forEach((slug) => {
   const def = WORKFLOW_RUN_DEFS[slug];
   if (!def || !def.tiers) return;
+  // Doc-gen prices are set directly from measured GPT-5.6 cost, so exempt them from doubling.
+  if (def.type === "docgen") return;
   ["normal", "plus", "pro"].forEach((t) => {
     if (def.tiers[t] && def.tiers[t].priceUnits != null) {
       def.tiers[t].priceUnits = Math.round(def.tiers[t].priceUnits * WORKFLOW_PRICE_MULTIPLIER);
