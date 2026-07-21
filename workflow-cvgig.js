@@ -267,11 +267,11 @@ async function runCvGigWorkflow(opts) {
 
   // 3. CV content (JSON, retry once on parse failure)
   onProgress({ step: "cv_writer", status: "running" });
-  const cvRes = await callModel(cvModel, buildCvMessages(input, profile, templateId), 2000);
+  const cvRes = await callModel(cvModel, buildCvMessages(input, profile, templateId), 3000);
   account("CV writer", cvModel, cvRes.usage);
   let cvJson = parseCvJson(cvRes.content);
   if (!cvJson) {
-    const retryRes = await callModel(cvModel, buildCvRetryMessages(input, profile, templateId), 2000);
+    const retryRes = await callModel(cvModel, buildCvRetryMessages(input, profile, templateId), 3000);
     account("CV writer (retry)", cvModel, retryRes.usage);
     cvJson = parseCvJson(retryRes.content);
   }
@@ -314,7 +314,7 @@ async function runCvGigWorkflow(opts) {
   onProgress({ step: "ranking", status: "running" });
   let ranked = [];
   if (fetchedGigs.length) {
-    const rankRes = await callModel(rankModel, buildRankMessages(profile, fetchedGigs, topGigs), 2000);
+    const rankRes = await callModel(rankModel, buildRankMessages(profile, fetchedGigs, topGigs), 3000);
     account("Rank and proposals", rankModel, rankRes.usage);
     ranked = parseRanked(rankRes.content, fetchedGigs) || fetchedGigs.slice(0, topGigs).map((g) => Object.assign({}, g, { fit: 0, reason: "", proposal: "" }));
     ranked = ranked.slice(0, topGigs);

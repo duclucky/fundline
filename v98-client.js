@@ -63,7 +63,7 @@ async function callV98Chat(config, params) {
   const body = {
     model: params.model,
     messages: params.messages || [],
-    max_tokens: params.maxTokens != null ? params.maxTokens : 1024,
+    max_tokens: params.maxTokens != null ? params.maxTokens : 4096,
   };
   if (params.temperature != null) body.temperature = params.temperature;
 

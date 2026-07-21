@@ -830,6 +830,20 @@ Object.keys(WF_CATALOG).forEach((slug) => {
   }
 });
 
+// Global display price multiplier. Keep in sync with WORKFLOW_PRICE_MULTIPLIER in server.js
+// (the server is the billing source of truth; this only keeps the shown price matching it).
+const WF_PRICE_MULTIPLIER = 2;
+Object.keys(WORKFLOWS).forEach((slug) => {
+  const wf = WORKFLOWS[slug];
+  if (!wf) return;
+  const scale = (v) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? (n * WF_PRICE_MULTIPLIER).toFixed(2) : v;
+  };
+  if (wf.tiers) ["normal", "plus", "pro"].forEach((t) => { if (wf.tiers[t] && wf.tiers[t].price != null) wf.tiers[t].price = scale(wf.tiers[t].price); });
+  if (wf.price != null) wf.price = scale(wf.price);
+});
+
 const CATEGORY_COLORS = {
   Freelance: "var(--gold)",
   "Client Communication": "#6df7a0",
@@ -1470,8 +1484,8 @@ function renderTabOverview(wf) {
       <div class="wf-overview-block wf-overview-full">
         <h4>Limits</h4>
         <div class="wf-limits-row">
-          <div class="wf-limit-item"><span class="wf-limit-lbl">Max input</span><span class="wf-limit-val">${wf.limits.inputChars.toLocaleString()} characters</span></div>
-          <div class="wf-limit-item"><span class="wf-limit-lbl">Max output</span><span class="wf-limit-val">${wf.limits.outputWords.toLocaleString()} words</span></div>
+          <div class="wf-limit-item"><span class="wf-limit-lbl">Max input</span><span class="wf-limit-val">Up to 20,000 characters</span></div>
+          <div class="wf-limit-item"><span class="wf-limit-lbl">Max output</span><span class="wf-limit-val">No fixed limit</span></div>
           <div class="wf-limit-item"><span class="wf-limit-lbl">Max concurrent calls</span><span class="wf-limit-val">5</span></div>
         </div>
       </div>

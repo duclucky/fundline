@@ -215,8 +215,9 @@ function dataSheet(market, security, risk) {
 
 function buildWriterMessages(name, symbol, sheet, news) {
   const system = "You are a crypto risk analyst writing the narrative of a due-diligence report. You are given a data "
-    + "sheet with computed risk scores. Write concise markdown with these sections only: '## Summary' (3-4 sentences on "
-    + "the overall picture and the biggest risks) and '## What the data shows' (a short paragraph per notable dimension). "
+    + "sheet with computed risk scores. Write clear, thorough markdown with these sections: '## Summary' (the overall "
+    + "picture and the biggest risks) and '## What the data shows' (a paragraph on each notable dimension, going as deep "
+    + "as the data supports). "
     + "Rules: use ONLY the numbers and facts in the data sheet and news; do NOT invent addresses, dates, figures, audits, "
     + "or partnerships; do NOT restate the full scores table (it is added separately); do NOT give buy/sell advice. No emojis.";
   const user = `Token: ${name || symbol}.\n\nData sheet:\n${sheet}\n\nNews summary: ${news && news.summary ? news.summary : "(none)"}`
@@ -396,7 +397,7 @@ async function runCryptoDdWorkflow(opts) {
 
   // 5. Writer narrative (STRONG).
   onProgress({ step: "writer", status: "running" });
-  const writeRes = await callModel(writerModel, buildWriterMessages(name, symbol, sheet, news), 1200);
+  const writeRes = await callModel(writerModel, buildWriterMessages(name, symbol, sheet, news), 4096);
   account("Report writer", writerModel, writeRes.usage);
   const narrative = String(writeRes.content || "").trim();
   onProgress({ step: "writer", status: "done" });

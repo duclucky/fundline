@@ -27,17 +27,15 @@ function out(ctx, id) {
 
 // Build an LLM (or local) node from a compact spec.
 // spec: { id, name, alias, maxTokens, outWords, system, user(ctx), retrieval, parse, isFinal, run }
-// outWords is the node's target output length in words. It is appended to the
-// prompt as a length directive (so the model produces a roughly known size) AND
-// stored on the node so the cost estimator can predict cost. It defaults from the
-// token cap with headroom (maxTokens is the hard ceiling; outWords is the target).
+// outWords is kept only so the cost estimator can predict cost. Length directives are
+// intentionally NOT injected into prompts anymore: outputs are left free so results read
+// naturally and go deeper. Per-run cost is bounded instead by the global daily budget and
+// per-key caps. maxTokens is a generous hard ceiling that prevents truncation, not a target.
 function step(spec) {
   const isFinal = !!spec.isFinal;
-  // The final formatter reproduces every section in full, so it gets a high cap
-  // and NO length directive (a short target would truncate the document). It uses
-  // the cheap FORMATTER model, so the larger cap costs almost nothing. Content
-  // nodes keep their length directive so cost stays predictable.
-  const maxTokens = isFinal ? Math.max(spec.maxTokens || 0, 4096) : (spec.maxTokens || 1200);
+  // Generous ceilings so nothing truncates: the final formatter reproduces the whole
+  // document; content nodes are free to be thorough. Any higher per-node maxTokens is kept.
+  const maxTokens = isFinal ? Math.max(spec.maxTokens || 0, 8192) : Math.max(spec.maxTokens || 0, 4096);
   const outWords = spec.outWords || Math.round(maxTokens / 1.7);
   const node = { id: spec.id, name: spec.name, alias: spec.alias, maxTokens, outWords };
   if (typeof spec.run === "function") {
@@ -46,7 +44,7 @@ function step(spec) {
   } else {
     node.build = (ctx) => [
       { role: "system", content: spec.system },
-      { role: "user", content: spec.user(ctx) + (isFinal ? "" : ("\n\nKeep your response to about " + outWords + " words.")) },
+      { role: "user", content: spec.user(ctx) },
     ];
   }
   if (spec.retrieval) node.retrieval = true;

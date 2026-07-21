@@ -18,6 +18,7 @@ const gigSources = require("./gig-sources");
 const cvGig = require("./workflow-cvgig");
 const cryptoData = require("./crypto-data");
 const cryptoDd = require("./workflow-cryptodd");
+const sanctionsData = require("./sanctions-data");
 
 const PORT = Number(process.env.PORT || 5190);
 const ROOT = __dirname;
@@ -325,6 +326,22 @@ WORKFLOW_RUN_DEFS["crypto-dd"] = {
     pro: { priceUnits: 30000, models: { FAST: "gpt-4o-mini", STRONG: "claude-sonnet-4-6", VERIFY: "claude-sonnet-4-6" } },
   },
 };
+
+// Global workflow price multiplier, applied to every workflow and tier AFTER all defs are
+// built (bands + per-slug overrides + the custom cvgig/cryptodd defs). This is the billing
+// source of truth; keep it in sync with WF_PRICE_MULTIPLIER in workflows.js so the displayed
+// price matches the charged price. 2 = double all prices.
+const WORKFLOW_PRICE_MULTIPLIER = 2;
+Object.keys(WORKFLOW_RUN_DEFS).forEach((slug) => {
+  const def = WORKFLOW_RUN_DEFS[slug];
+  if (!def || !def.tiers) return;
+  ["normal", "plus", "pro"].forEach((t) => {
+    if (def.tiers[t] && def.tiers[t].priceUnits != null) {
+      def.tiers[t].priceUnits = Math.round(def.tiers[t].priceUnits * WORKFLOW_PRICE_MULTIPLIER);
+    }
+  });
+});
+
 // Treasury hot key that signs release/refund (Fundline-controlled, matches
 // ARC_TREASURY_ADDRESS). Secret; read-only escrow verification works without it.
 const ARC_TREASURY_PRIVATE_KEY = String(process.env.ARC_TREASURY_PRIVATE_KEY || "").trim();
@@ -692,6 +709,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.pathname === "/api/tools/sanctions-screen") {
+    handleSanctionsScreen(req, res, url);
+    return;
+  }
+
   if (url.pathname === "/mcp") {
     handleMcp(req, res);
     return;
@@ -1049,7 +1071,7 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
     return;
   }
 
-  const description = String(input.description || "").trim().slice(0, 4000);
+  const description = String(input.description || "").trim().slice(0, 20000);
   const category = String(input.category || "general").trim().slice(0, 60);
   if (!description) {
     workflowLimiter.rollbackReserve({ ...paths, ipKey, kind: "gen" });
@@ -1578,6 +1600,35 @@ function handleWorkflowList(req, res, url) {
   });
 }
 
+// GET /api/tools/sanctions-screen?address=0x...&chain=<chainId> - screen a wallet address
+// against sanctions + address-risk sources (GoPlus keyless; Chainalysis if CHAINALYSIS_API_KEY
+// is set). A resale-safe trust tool for an agent about to transact with a counterparty. No auth
+// (open discovery/try); metered billing and the MCP tool wrapper are a later step. The result is
+// informational only (see the disclaimer field), never a compliance guarantee.
+async function handleSanctionsScreen(req, res, url) {
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const address = String((url && url.searchParams.get("address")) || "").trim();
+  const chainId = String((url && url.searchParams.get("chain")) || "").trim();
+  if (!sanctionsData.isEvmAddress(address)) {
+    sendJson(res, 400, { error: { code: "invalid_address", message: "Provide a valid EVM address as ?address=0x... (40 hex chars)." } });
+    return;
+  }
+  try {
+    const result = await sanctionsData.screenAddress({
+      address,
+      chainId: chainId || undefined,
+      chainalysisApiKey: process.env.CHAINALYSIS_API_KEY || "",
+    });
+    result.checkedAt = new Date().toISOString();
+    sendJson(res, 200, result);
+  } catch (error) {
+    sendJson(res, 502, { error: { code: "screen_failed", message: error.message } });
+  }
+}
+
 // GET /api/workflows/runs - an agent pulls its own paid-run history. Identity is the
 // wallet: the agent signs the standard Fundline message with the same wallet it paid
 // from, and we return the runs recorded under that address. All of this is public on
@@ -1681,7 +1732,7 @@ async function handleWorkflowRun(req, res, slug) {
     return;
   }
 
-  const query = String(input.prompt || input.query || "").trim().slice(0, 4000);
+  const query = String(input.prompt || input.query || "").trim().slice(0, 20000);
   const mode = input.mode === "paste" ? "paste" : "search";
   const pastedSources = input.sources;
   // crypto-dd takes a chain + token, not a free-text prompt; skip the prompt-required check.

@@ -146,7 +146,7 @@ function buildSearchMessages(query, queries, today) {
 function buildWriterMessages(persona, contextText, query, totalWords, today) {
   const user = `Information: "${contextText}"\n---\n`
     + `Using the above information, answer the following query or task: "${query}" in a detailed report -- `
-    + `the report should be well structured, informative, in-depth, and comprehensive, with facts and numbers if available and at least ${totalWords} words.\n\n`
+    + `the report should be well structured, informative, in-depth, and comprehensive, with facts and numbers where available. Write in as much depth as the information supports.\n\n`
     + "Guidelines:\n"
     + "- Determine your own concrete opinion based on the information; do not defer to vague conclusions.\n"
     + "- Write in markdown using #, ##, ### headers; use tables for structured comparisons.\n"
@@ -224,7 +224,7 @@ async function runResearchWorkflow(opts) {
 
   // 4. Write the report
   onProgress({ step: "report_writer", status: "running" });
-  const writeRes = await callModel(writerModel, buildWriterMessages(persona, contextText, query, totalWords, today), 4000);
+  const writeRes = await callModel(writerModel, buildWriterMessages(persona, contextText, query, totalWords, today), 8192);
   account("Report writer", writerModel, writeRes.usage);
   onProgress({ step: "report_writer", status: "done" });
 
