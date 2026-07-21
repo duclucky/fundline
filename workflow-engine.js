@@ -26,6 +26,7 @@
 //         outputs:{id->content}, parsed:{id->value} }
 
 const v98Models = require("./v98-models");
+const modelCost = require("./model-cost");
 const research = require("./workflow-research");
 
 // A recording proxy: every string property read is added to `set`, and the read
@@ -141,7 +142,7 @@ async function runWorkflowGraph(opts) {
   const stepsByIndex = new Array(nodes.length);
   let totalCostMicros = 0;
   function account(index, name, modelId, usage) {
-    const cost = v98Models.computeCostMicros(modelId, usage.prompt_tokens, usage.completion_tokens, groupRatio) || 0;
+    const cost = modelCost.costMicros(modelId, usage.prompt_tokens, usage.completion_tokens, groupRatio) || 0;
     totalCostMicros += cost;
     stepsByIndex[index] = { name, model: modelId, costMicros: cost };
     return cost;

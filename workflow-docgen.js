@@ -10,6 +10,7 @@
 
 const docRender = require("./doc-render");
 const v98Models = require("./v98-models");
+const modelCost = require("./model-cost");
 
 const DOC_TYPES = { proposal: "proposal", report: "report" };
 
@@ -189,7 +190,7 @@ async function runDocGenWorkflow(opts) {
   let totalCostMicros = 0;
   function account(name, model, usage) {
     const u = usage || {};
-    const cost = v98Models.computeCostMicros(model, u.prompt_tokens || 0, u.completion_tokens || 0, groupRatio);
+    const cost = modelCost.costMicros(model, u.prompt_tokens || 0, u.completion_tokens || 0, groupRatio);
     steps.push({ name: name, model: model, costMicros: cost });
     totalCostMicros += cost;
   }

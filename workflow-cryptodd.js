@@ -11,6 +11,7 @@
 // Returns { report, riskJson, steps, sources, totalCostMicros, meta }.
 
 const v98Models = require("./v98-models");
+const modelCost = require("./model-cost");
 const cryptoData = require("./crypto-data");
 
 // --- JSON helpers ---
@@ -321,7 +322,7 @@ async function runCryptoDdWorkflow(opts) {
   const steps = [];
   let totalCostMicros = 0;
   function account(name, modelId, usage) {
-    const cost = v98Models.computeCostMicros(modelId, usage.prompt_tokens, usage.completion_tokens, groupRatio) || 0;
+    const cost = modelCost.costMicros(modelId, usage.prompt_tokens, usage.completion_tokens, groupRatio) || 0;
     totalCostMicros += cost;
     steps.push({ name, model: modelId, costMicros: cost });
     return cost;
