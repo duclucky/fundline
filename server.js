@@ -19,6 +19,8 @@ const cvGig = require("./workflow-cvgig");
 const cryptoData = require("./crypto-data");
 const cryptoDd = require("./workflow-cryptodd");
 const sanctionsData = require("./sanctions-data");
+const docGen = require("./workflow-docgen");
+const docStore = require("./doc-store");
 
 const PORT = Number(process.env.PORT || 5190);
 const ROOT = __dirname;
@@ -324,6 +326,30 @@ WORKFLOW_RUN_DEFS["crypto-dd"] = {
     normal: { priceUnits: 10000, models: { FAST: "gpt-4o-mini", STRONG: "deepseek-v3.2", VERIFY: "gpt-4.1-mini" } },
     plus: { priceUnits: 20000, models: { FAST: "gpt-4o-mini", STRONG: "gpt-4.1-mini", VERIFY: "gpt-4.1-mini" } },
     pro: { priceUnits: 30000, models: { FAST: "gpt-4o-mini", STRONG: "claude-sonnet-4-6", VERIFY: "claude-sonnet-4-6" } },
+  },
+};
+// Document generation. type "docgen" -> custom executor (workflow-docgen.js): the LLM turns
+// the caller's content/brief into a document-spec, then doc-render.js renders a PDF. The
+// writer step uses the premium final model (GPT-5.6) when configured, else the tier STRONG.
+// Prices are placeholders (measure live before heavy promotion). Doubled by the multiplier below.
+WORKFLOW_RUN_DEFS["proposal-doc"] = {
+  type: "docgen",
+  name: "Proposal Document",
+  docType: "proposal",
+  tiers: {
+    normal: { priceUnits: 25000, models: { STRONG: "deepseek-v3.2" } },
+    plus: { priceUnits: 40000, models: { STRONG: "gpt-4.1-mini" } },
+    pro: { priceUnits: 75000, models: { STRONG: "claude-sonnet-4-6" } },
+  },
+};
+WORKFLOW_RUN_DEFS["report-doc"] = {
+  type: "docgen",
+  name: "Report Document",
+  docType: "report",
+  tiers: {
+    normal: { priceUnits: 25000, models: { STRONG: "deepseek-v3.2" } },
+    plus: { priceUnits: 40000, models: { STRONG: "gpt-4.1-mini" } },
+    pro: { priceUnits: 75000, models: { STRONG: "claude-sonnet-4-6" } },
   },
 };
 
@@ -711,6 +737,12 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === "/api/tools/sanctions-screen") {
     handleSanctionsScreen(req, res, url);
+    return;
+  }
+
+  const docFileMatch = url.pathname.match(/^\/d\/([a-f0-9]{24})$/);
+  if (docFileMatch) {
+    handleDocFile(req, res, docFileMatch[1]);
     return;
   }
 
@@ -1496,7 +1528,7 @@ async function handleWorkflowPreflight(req, res, slug, url) {
   }
   const def = WORKFLOW_RUN_DEFS[slug];
   const graph = workflowDefs.getGraph(slug);
-  const customType = def && (def.type === "cvgig" || def.type === "cryptodd");
+  const customType = def && (def.type === "cvgig" || def.type === "cryptodd" || def.type === "docgen");
   if (!def || (!customType && !graph)) {
     sendJson(res, 501, { error: "not_implemented", message: "Unknown or unavailable workflow \"" + slug + "\". See GET /api/workflows for runnable slugs." });
     return;
@@ -1629,6 +1661,23 @@ async function handleSanctionsScreen(req, res, url) {
   }
 }
 
+// GET /d/:id - serve a stored doc-gen PDF by its capability id (unguessable, TTL-limited).
+// Inline so the owner reads it in the browser; 404 when missing or expired.
+function handleDocFile(req, res, id) {
+  const doc = docStore.getDoc(id);
+  if (!doc) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+    return;
+  }
+  res.writeHead(200, {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": "inline; filename=\"" + String(doc.filename).replace(/[\r\n"]/g, "") + "\"",
+    "Cache-Control": "private, max-age=3600",
+  });
+  res.end(doc.buffer);
+}
+
 // GET /api/workflows/runs - an agent pulls its own paid-run history. Identity is the
 // wallet: the agent signs the standard Fundline message with the same wallet it paid
 // from, and we return the runs recorded under that address. All of this is public on
@@ -1718,7 +1767,7 @@ async function handleWorkflowRun(req, res, slug) {
   const def = WORKFLOW_RUN_DEFS[slug];
   const graph = workflowDefs.getGraph(slug);
   // cvgig and cryptodd have custom executors and no node graph; every other slug needs one.
-  const customType = def && (def.type === "cvgig" || def.type === "cryptodd");
+  const customType = def && (def.type === "cvgig" || def.type === "cryptodd" || def.type === "docgen");
   if (!def || (!customType && !graph)) {
     sendJson(res, 501, { error: "not_implemented", message: "Unknown or unavailable workflow \"" + slug + "\". See GET /api/workflows for runnable slugs." });
     return;
@@ -2077,6 +2126,31 @@ async function handleWorkflowRun(req, res, slug) {
         searchWeb: cryptoSearchWeb,
         onProgress: (evt) => sendSSE("progress", evt),
       });
+    } else if (def.type === "docgen") {
+      result = await docGen.runDocGenWorkflow({
+        docType: def.docType || input.docType || "proposal",
+        input: query,
+        brief: (input.brief && typeof input.brief === "object") ? input.brief : {},
+        research: !!input.research,
+        format: "pdf",
+        writerModel: finalModelId || tierDef.models.STRONG,
+        groupRatio: V98STORE_GROUP_RATIO,
+        today: new Date().toISOString().slice(0, 10),
+        callModel,
+        searchWeb,
+        onProgress: (evt) => sendSSE("progress", evt),
+      });
+      // Persist the PDF and hand back an unguessable link (the agent passes it to its owner
+      // to read); the machine-readable markdown stays in `output`. No base64 in the response.
+      if (result && result.file && result.file.base64) {
+        try {
+          const docId = docStore.putDoc(Buffer.from(result.file.base64, "base64"), result.file.filename);
+          result.file = { format: result.file.format, filename: result.file.filename, url: getRequestBaseUrl(req) + "/d/" + docId };
+        } catch (storeErr) {
+          console.error("[DocGen] store error:", storeErr.message);
+          result.file = null;
+        }
+      }
     } else {
       result = await workflowEngine.runWorkflowGraph({
         graph,
@@ -2138,6 +2212,7 @@ async function handleWorkflowRun(req, res, slug) {
       steps: (result.steps || []).map((s) => ({ name: s.name, model: s.model })),
       cvJson: result.cvJson || null,
       riskJson: result.riskJson || null,
+      file: result.file || null,
       priceUsdc: unitsToUsdcString(priceUnits),
       releaseTx,
       explorerUrl: releaseTx ? `${ARCSCAN_EXPLORER_BASE}/tx/${releaseTx}` : null,

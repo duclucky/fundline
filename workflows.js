@@ -209,6 +209,133 @@ const WORKFLOWS = {
     examplePrompt: "Chain: ethereum; Token: 0x6982508145454ce325dDbE47a25d4ec3d2311933",
     exampleOutput: "# Crypto due-diligence: Pepe (PEPE)\n\n**Overall risk: 18/100 - Lower risk**\n\nChain: ethereum | Contract: 0x6982...1933\n\n## Risk scores\n\n| Dimension | Score | Severity | Basis |\n|---|---|---|---|\n| Honeypot and trading tax | 0/100 | low | Trading tax is low (buy 0%, sell 0%). |\n| Ownership and admin controls | 10/100 | low | Ownership renounced; no dangerous admin controls found. |\n| Holder concentration | 15/100 | low | Top 10 holders control 22% of supply. |\n| Liquidity depth and LP lock | 12/100 | low | Liquidity is $19,978,779. |\n| Contract verification and age | 0/100 | low | source verified; pair is 800+ days old. |\n\n## Summary\nPEPE shows deep liquidity, renounced ownership, and a verified contract...\n\n## Verification\nAll statements in this report were checked against the fetched on-chain and market data.",
   },
+  "proposal-doc": {
+    name: "Proposal Document",
+    description: "Turn your notes, scope, and pricing into a polished, client-ready proposal PDF.",
+    longDesc: "Turns your notes about a client, project, scope, and pricing into a complete proposal: executive summary, understanding of the need, proposed solution, scope and deliverables, timeline, pricing, terms and assumptions, and next steps. Uses only the facts you provide, then renders a downloadable PDF.",
+    category: "Documents",
+    live: true,
+    usesRetrieval: false,
+    price: "0.025",
+    version: "v1.0.0",
+    runtime: "~30s",
+    modelCount: 1,
+    calls: 0,
+    inputLabel: "What the proposal is about (your notes, scope, pricing, etc.)",
+    inputHint: "Fill in your notes and any optional details below. Only the facts you provide are used, nothing is invented.",
+    outputHint: "A structured proposal (executive summary, scope, timeline, pricing, next steps) plus a downloadable PDF.",
+    limits: { inputChars: 8000, outputWords: 2000 },
+    // Structured form: the content field (role "content") becomes the standard run
+    // input; the brief fields (role "brief") collect into a `brief` object sent
+    // alongside it. See the run-button handler in bindDetail for the wiring.
+    fields: [
+      { key: "content", label: "What the proposal is about (your notes, scope, pricing, etc.)", type: "textarea", role: "content", rows: 8, required: true, placeholder: "Client, the problem, your proposed solution, scope, pricing, and timeline..." },
+      { key: "recipient", label: "Recipient", type: "text", role: "brief", placeholder: "Acme Corp" },
+      { key: "sender", label: "From (sender)", type: "text", role: "brief", placeholder: "Your name or company" },
+      { key: "goal", label: "Goal", type: "text", role: "brief", placeholder: "Win the contract, get sign-off, etc." },
+      { key: "audience", label: "Audience", type: "text", role: "brief", placeholder: "e.g. head of marketing, procurement team" },
+      { key: "tone", label: "Tone", type: "text", role: "brief", placeholder: "e.g. formal, friendly, confident" },
+    ],
+    steps: [
+      { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes and brief into a structured proposal.", tokens: "~2000" },
+      { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the proposal as a downloadable PDF.", tokens: "~" },
+    ],
+    tiers: {
+      normal: {
+        price: "0.025",
+        steps: [
+          { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes and brief into a structured proposal.", tokens: "~2000" },
+          { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the proposal as a downloadable PDF.", tokens: "~" },
+        ],
+      },
+      plus: {
+        price: "0.04",
+        steps: [
+          { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes and brief into a structured proposal.", tokens: "~2000" },
+          { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the proposal as a downloadable PDF.", tokens: "~" },
+        ],
+      },
+      pro: {
+        price: "0.075",
+        steps: [
+          { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes and brief into a structured proposal.", tokens: "~2000" },
+          { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the proposal as a downloadable PDF.", tokens: "~" },
+        ],
+      },
+    },
+    pricing: [
+      { step: "Document writer", model: "gpt-5.6", inputTokens: 0, outputTokens: 0, cost: "" },
+      { step: "Render PDF", model: "PDF renderer", inputTokens: 0, outputTokens: 0, cost: "" },
+    ],
+    examplePrompt: "Client: Acme Corp. Redesign their marketing site, 6 weeks, budget $18k, must launch before Q3, wants a modern look and faster load times. Payment: 40/40/20.",
+    exampleOutput: "# Website Redesign Proposal\n\nFrom: Nova Studio  |  To: Acme Corp\n\n## Executive summary\nNova Studio proposes a 6-week redesign of the Acme Corp marketing site to modernize the look and improve load times ahead of the Q3 launch.\n\n## Understanding the need\nAcme Corp wants a faster, modern marketing site that supports the Q3 product launch.\n\n## Proposed solution\nA redesigned, mobile-first site built for speed and clarity, aligned to the new product line.\n\n## Scope and deliverables\n- Discovery and content audit\n- New design system and page templates\n- Build, QA, and launch support\n\n## Timeline\n| Phase | Duration |\n|---|---|\n| Design | 2 weeks |\n| Build | 3 weeks |\n| Launch | 1 week |\n\n## Pricing\n**Total:** $18,000\n**Payment terms:** 40% upfront, 40% at build complete, 20% at launch\n\n## Next steps\nReply to confirm scope; the contract and invoice follow.",
+  },
+  "report-doc": {
+    name: "Report Document",
+    description: "Turn a topic or your notes into a structured report PDF, with optional live web research.",
+    longDesc: "Turns a topic or your notes into a structured report: executive summary, scope, findings, analysis, and recommendations. Turn on web research to gather and cite live sources. Uses only the facts you provide (and any researched sources), then renders a downloadable PDF.",
+    category: "Documents",
+    live: true,
+    usesRetrieval: false,
+    price: "0.025",
+    version: "v1.0.0",
+    runtime: "~50s",
+    modelCount: 1,
+    calls: 0,
+    inputLabel: "Topic or content to turn into a report",
+    inputHint: "Fill in the topic or your notes and any optional details below. Turn on web research to add live, cited sources.",
+    outputHint: "A structured report (executive summary, findings, analysis, recommendations) plus a downloadable PDF.",
+    limits: { inputChars: 10000, outputWords: 2200 },
+    // Same content/brief pattern as proposal-doc. The research checkbox has no role;
+    // its checked state is read directly by key ("research") and sent as a boolean.
+    fields: [
+      { key: "content", label: "Topic or content to turn into a report", type: "textarea", role: "content", rows: 8, required: true, placeholder: "The topic, or your notes, data, and findings..." },
+      { key: "recipient", label: "Recipient", type: "text", role: "brief", placeholder: "e.g. the board, a client, your team" },
+      { key: "sender", label: "From (sender)", type: "text", role: "brief", placeholder: "Your name or company" },
+      { key: "goal", label: "Goal", type: "text", role: "brief", placeholder: "What this report should help the reader decide or understand" },
+      { key: "audience", label: "Audience", type: "text", role: "brief", placeholder: "Who will read this" },
+      { key: "tone", label: "Tone", type: "text", role: "brief", placeholder: "e.g. formal, neutral, analytical" },
+      { key: "research", label: "Search the web for sources", type: "checkbox" },
+    ],
+    steps: [
+      { serverKey: "research", name: "Web research", model: "Tavily", purpose: "Gather live sources on the topic (when enabled).", tokens: "~" },
+      { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes, brief, and any sources into a structured report.", tokens: "~2000" },
+      { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the report as a downloadable PDF.", tokens: "~" },
+    ],
+    tiers: {
+      normal: {
+        price: "0.025",
+        steps: [
+          { serverKey: "research", name: "Web research", model: "Tavily", purpose: "Gather live sources on the topic (when enabled).", tokens: "~" },
+          { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes, brief, and any sources into a structured report.", tokens: "~2000" },
+          { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the report as a downloadable PDF.", tokens: "~" },
+        ],
+      },
+      plus: {
+        price: "0.04",
+        steps: [
+          { serverKey: "research", name: "Web research", model: "Tavily", purpose: "Gather live sources on the topic (when enabled).", tokens: "~" },
+          { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes, brief, and any sources into a structured report.", tokens: "~2000" },
+          { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the report as a downloadable PDF.", tokens: "~" },
+        ],
+      },
+      pro: {
+        price: "0.075",
+        steps: [
+          { serverKey: "research", name: "Web research", model: "Tavily", purpose: "Gather live sources on the topic (when enabled).", tokens: "~" },
+          { serverKey: "document", name: "Document writer", model: "gpt-5.6", purpose: "Turn your notes, brief, and any sources into a structured report.", tokens: "~2000" },
+          { serverKey: "render", name: "Render PDF", model: "PDF renderer", purpose: "Render the report as a downloadable PDF.", tokens: "~" },
+        ],
+      },
+    },
+    pricing: [
+      { step: "Web research", model: "Tavily", inputTokens: 0, outputTokens: 0, cost: "" },
+      { step: "Document writer", model: "gpt-5.6", inputTokens: 0, outputTokens: 0, cost: "" },
+      { step: "Render PDF", model: "PDF renderer", inputTokens: 0, outputTokens: 0, cost: "" },
+    ],
+    examplePrompt: "Topic: Q2 freelance payment trends. Notes: payment delays are the top complaint, agencies want faster payouts for overseas contractors, interest in stablecoins is growing.",
+    exampleOutput: "# Q2 Freelance Payment Trends Report\n\nFrom: Fundline Research\n\n## Executive summary\nDemand for faster, lower-fee freelance payouts grew through Q2, driven by cross-border hiring.\n\n## Introduction and scope\nThis report summarizes freelance payment trends for Q2 based on the notes and sources provided.\n\n## Findings\n- Payment delays remain the top complaint among freelancers.\n- Agencies paying overseas contractors are looking for faster payout options.\n- Interest in stablecoin payouts is growing.\n\n## Analysis\nSlow bank transfers and FX fees are the main driver behind interest in faster settlement rails.\n\n## Recommendations\n- Offer a stablecoin payout option alongside existing rails.\n- Highlight settlement speed in onboarding materials.",
+  },
 };
 
 // ─── Live workflow catalog (graph-driven, server-backed) ───────────────────
@@ -857,6 +984,7 @@ const CATEGORY_COLORS = {
   Content: "#6df7a0",
   Crypto: "#ffbd67",
   Business: "#ff9a8b",
+  Documents: "var(--gold)",
 };
 
 // In-session run history; persisted to sessionStorage so sidebar navigation (which
@@ -1192,13 +1320,38 @@ function slugifyForFile(str) {
   return String(str || "workflow").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "workflow";
 }
 
+// Decode a server-returned base64 file (e.g. the PDF from proposal-doc/report-doc) into a
+// Blob and trigger a browser download. Pure client-side, no network call.
+function downloadWorkflowFile(file) {
+  if (!file) return;
+  // Preferred: the server returns a link to the stored PDF; open it to read.
+  if (file.url) { window.open(file.url, "_blank", "noopener"); return; }
+  if (!file.base64) return;
+  const mime = file.format === "pdf" ? "application/pdf" : "application/octet-stream";
+  let bytes;
+  try {
+    const binary = atob(file.base64);
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  } catch (_) {
+    return;
+  }
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.filename || ("document." + (file.format || "pdf"));
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // --- Result report modal ---
 function closeResultModal() {
   const overlay = document.getElementById("wfResultModal");
   if (overlay) overlay.hidden = true;
   document.body.style.overflow = "";
 }
-function openResultModal(markdown, slug, cvJson) {
+function openResultModal(markdown, slug, cvJson, file) {
   let overlay = document.getElementById("wfResultModal");
   if (!overlay) {
     overlay = document.createElement("div");
@@ -1211,6 +1364,7 @@ function openResultModal(markdown, slug, cvJson) {
           <h3 class="wf-modal-title">Result</h3>
           <div class="wf-modal-actions">
             <button class="wf-result-btn" id="wfModalViewCv" type="button" hidden>View CV</button>
+            <button class="wf-result-btn" id="wfModalDownloadFile" type="button" hidden>Download PDF</button>
             <button class="wf-result-btn" id="wfModalCopy" type="button">Copy</button>
             <button class="wf-result-btn" id="wfModalDownload" type="button">Download .doc</button>
             <button class="wf-modal-close" id="wfModalClose" type="button" aria-label="Close">
@@ -1238,6 +1392,18 @@ function openResultModal(markdown, slug, cvJson) {
     } else {
       viewCvBtn.hidden = true;
       viewCvBtn.onclick = null;
+    }
+  }
+  // Show the "Download PDF" button when this run produced a rendered file (proposal-doc, report-doc).
+  const downloadFileBtn = document.getElementById("wfModalDownloadFile");
+  if (downloadFileBtn) {
+    if (file && file.base64) {
+      downloadFileBtn.hidden = false;
+      downloadFileBtn.textContent = file.format === "pdf" ? "Download PDF" : "Download file";
+      downloadFileBtn.onclick = () => downloadWorkflowFile(file);
+    } else {
+      downloadFileBtn.hidden = true;
+      downloadFileBtn.onclick = null;
     }
   }
   const copyBtn = document.getElementById("wfModalCopy");
@@ -1379,7 +1545,7 @@ function renderWorkflowCard(slug, wf) {
       <div class="wf-card-meta">
         <span class="wf-meta-pill">${esc(wf.version)}</span>
         <span class="wf-meta-pill">${esc(wf.runtime)}</span>
-        <span class="wf-meta-pill">${wf.modelCount} models</span>
+        <span class="wf-meta-pill">${wf.modelCount} model${wf.modelCount === 1 ? "" : "s"}</span>
       </div>
       <button class="wf-card-btn" data-slug="${esc(slug)}" type="button">View workflow</button>
     </article>`;
@@ -1527,6 +1693,8 @@ const WF_FLOWS = {
   "swot-analysis": {"context_extractor":[],"swot_generator":["context_extractor"],"strategy_actions":["swot_generator"],"formatter":["swot_generator","strategy_actions"]},
   "cv-gig-match": {"profile":[],"cv_writer":["profile"],"gig_search":["profile"],"ranking":["cv_writer","gig_search"]},
   "crypto-dd": {"intake":[],"fetch":["intake"],"news":["intake"],"writer":["fetch","news"],"verifier":["writer","fetch"]},
+  "proposal-doc": {"document":[],"render":["document"]},
+  "report-doc": {"research":[],"document":["research"],"render":["document"]},
 };
 
 // The dependency map for a workflow, keyed by step serverKey. Falls back to a simple
@@ -1551,7 +1719,7 @@ function renderTabSteps(slug, wf) {
         </div>
         <div class="wfg-chips">
           <span class="wfg-chip">${layout.total} nodes</span>
-          <span class="wfg-chip">${wf.modelCount} AI models</span>
+          <span class="wfg-chip">${wf.modelCount} AI model${wf.modelCount === 1 ? "" : "s"}</span>
           <span class="wfg-chip">${esc(wf.runtime)}</span>
         </div>
       </div>
@@ -1646,6 +1814,11 @@ function renderRunPanel(slug, wf) {
     <div id="wfFieldsForm" class="wf-fields-form">
       <p class="wf-run-hint wf-muted">${esc(wf.inputHint)}</p>
       ${wf.fields.map((f) => {
+        // Checkbox fields (e.g. report-doc's "Search the web for sources") render as a
+        // single toggle row, reusing the existing gold-accented checkbox pattern.
+        if (f.type === "checkbox") {
+          return `<div class="wf-run-field"><label class="memo-toggle"><input type="checkbox" id="wff_${esc(f.key)}" />${esc(f.label)}</label></div>`;
+        }
         const req = f.required ? ` <span class="wf-field-req">*</span>` : "";
         const ph = esc(f.placeholder || "");
         const ctrl = f.type === "textarea"
@@ -1848,18 +2021,32 @@ function bindDetail(slug, wf) {
     document.getElementById("wfRunBtn").addEventListener("click", () => {
       let prompt = "";
       const fieldMap = {};
+      const brief = {};
       if (wf.fields) {
-        // Gather the structured form into labeled lines so the model maps each field.
+        // Gather the structured form. Fields tagged role "content" become the prompt
+        // as-is; role "brief" fields collect into a `brief` object (sent alongside the
+        // prompt, e.g. proposal-doc/report-doc); checkboxes store a boolean under their
+        // own key (e.g. report-doc's "research"). Fields without a role (cv-gig-match,
+        // crypto-dd) keep the original behavior: every filled field is appended to the
+        // prompt as a labeled line.
         const parts = [];
         let missing = null;
         wf.fields.forEach((f) => {
           const fel = document.getElementById("wff_" + f.key);
+          if (f.type === "checkbox") {
+            fieldMap[f.key] = Boolean(fel && fel.checked);
+            return;
+          }
           const val = fel && fel.value ? fel.value.trim() : "";
           if (f.required && !val && !missing) missing = fel;
-          if (val) { parts.push(f.label + ": " + val); fieldMap[f.key] = val; }
+          if (!val) return;
+          fieldMap[f.key] = val;
+          if (f.role === "content") prompt = val;
+          else if (f.role === "brief") brief[f.key] = val;
+          else parts.push(f.label + ": " + val);
         });
         if (missing) { flashOutline(missing); return; }
-        prompt = parts.join("\n");
+        if (!prompt) prompt = parts.join("\n");
       } else {
         const mode = inputModes.querySelector(".wf-run-mode-btn.is-active").dataset.mode;
         if (mode === "own") {
@@ -1889,14 +2076,14 @@ function bindDetail(slug, wf) {
         document.getElementById("wfRunResult").hidden = true;
         document.getElementById("wfRunReceipt").hidden = true;
         fundWorkflowRun(slug, (text) => { runBtn.innerHTML = esc(text); }, activeTier)
-          .then((runId) => runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, runId, tier: activeTier, chain: fieldMap.chain, token: fieldMap.token }))
+          .then((runId) => runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, runId, tier: activeTier, chain: fieldMap.chain, token: fieldMap.token, brief: brief, research: fieldMap.research }))
           .catch((err) => {
             runBtn.disabled = false;
             runBtn.innerHTML = `${runIcon} Run Workflow`;
             displayRunError(err.message || "Payment was not completed.");
           });
       } else {
-        runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, tier: activeTier, chain: fieldMap.chain, token: fieldMap.token });
+        runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, tier: activeTier, chain: fieldMap.chain, token: fieldMap.token, brief: brief, research: fieldMap.research });
       }
     });
   }
@@ -1951,6 +2138,8 @@ function runWorkflow(slug, wf, opts) {
   if (opts.runId) reqBody.runId = opts.runId;
   if (opts.chain) reqBody.chain = opts.chain;
   if (opts.token) reqBody.token = opts.token;
+  if (opts.brief && Object.keys(opts.brief).length) reqBody.brief = opts.brief;
+  if (opts.research) reqBody.research = opts.research;
 
   (async () => {
     setNodeState(0, "completed");
@@ -2103,10 +2292,10 @@ function runWorkflow(slug, wf, opts) {
     const viewBtn = document.getElementById("wfViewResultBtn");
     if (viewBtn) {
       viewBtn.hidden = false;
-      viewBtn.onclick = () => openResultModal(output, slug, data.cvJson);
+      viewBtn.onclick = () => openResultModal(output, slug, data.cvJson, data.file);
     }
     // Open the report immediately so the user sees it right away.
-    openResultModal(output, slug, data.cvJson);
+    openResultModal(output, slug, data.cvJson, data.file);
 
     receiptEl.hidden = false;
     const steps = Array.isArray(data.steps) ? data.steps : [];
@@ -2134,6 +2323,18 @@ function runWorkflow(slug, wf, opts) {
         if (!ok) alert("Please allow pop-ups for this site to open your CV, then click again.");
       };
       document.getElementById("wfReceiptBody").appendChild(cvBtn);
+    }
+
+    // Document-generation workflows (proposal-doc, report-doc) return a rendered file;
+    // offer a direct client-side download of the exact PDF that was generated.
+    if (data.file && data.file.base64) {
+      const fileBtn = document.createElement("button");
+      fileBtn.type = "button";
+      fileBtn.className = "wf-btn-run";
+      fileBtn.style.marginTop = "12px";
+      fileBtn.textContent = data.file.format === "pdf" ? "Download PDF" : "Download file";
+      fileBtn.onclick = () => downloadWorkflowFile(data.file);
+      document.getElementById("wfReceiptBody").appendChild(fileBtn);
     }
 
     if (quotaEl && data.remaining != null) {
@@ -2283,7 +2484,9 @@ function applyFinalModels() {
   function upgrade(steps, model) {
     if (!steps || !steps.length || !model) return;
     let i = steps.length - 1;
-    if (steps[i] && steps[i].serverKey === "verifier" && i > 0) i -= 1;
+    // Skip trailing non-content steps (a verifier pass, or the docgen PDF render step)
+    // so the premium label lands on the actual content-writing step.
+    if (steps[i] && (steps[i].serverKey === "verifier" || steps[i].serverKey === "render") && i > 0) i -= 1;
     if (steps[i]) steps[i].model = model;
   }
   Object.keys(WORKFLOWS).forEach((slug) => {
