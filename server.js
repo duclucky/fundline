@@ -1875,6 +1875,9 @@ async function executeDurableWorkflowJob(job, hooks) {
     def,
     tierDef,
     finalModelId,
+    workflowSlug: slug,
+    tier,
+    runId: job.payment.mode === "escrow" ? job.payment.reference : job.jobId,
     input,
     query,
     graph,
@@ -1896,12 +1899,18 @@ async function executeDurableWorkflowJob(job, hooks) {
     persistDocument: (file) => {
       try {
         const docId = docStore.putDoc(Buffer.from(file.base64, "base64"), file.filename);
-        return { format: file.format, filename: file.filename, url: getPublicBaseUrl() + "/d/" + docId };
+        return {
+          format: file.format || "pdf",
+          filename: file.filename,
+          mimeType: file.mimeType || "application/pdf",
+          url: getPublicBaseUrl() + "/d/" + docId,
+        };
       } catch (error) {
         console.error("[DocGen] async store error:", error.message);
         return null;
       }
     },
+    onArtifactError: (error) => console.error("[Workflow PDF] async error:", error.message),
     executors: { engine: workflowEngine, cvGig, cryptoDd, docGen },
     onProgress: hooks.onProgress,
   });
@@ -1921,6 +1930,8 @@ async function executeDurableWorkflowJob(job, hooks) {
     cvJson: result.cvJson || null,
     riskJson: result.riskJson || null,
     file: result.file || null,
+    artifacts: Array.isArray(result.artifacts) ? result.artifacts : [],
+    artifactWarning: result.artifactWarning || null,
     priceUsdc: unitsToUsdcString(job.payment.amount),
     releaseTx: null,
     explorerUrl: null,
@@ -2535,6 +2546,9 @@ async function handleWorkflowRun(req, res, slug) {
       def,
       tierDef,
       finalModelId,
+      workflowSlug: slug,
+      tier,
+      runId: runId || x402TxHash || "",
       input,
       query,
       graph,
@@ -2556,12 +2570,18 @@ async function handleWorkflowRun(req, res, slug) {
       persistDocument: (file) => {
         try {
           const docId = docStore.putDoc(Buffer.from(file.base64, "base64"), file.filename);
-          return { format: file.format, filename: file.filename, url: getRequestBaseUrl(req) + "/d/" + docId };
+          return {
+            format: file.format || "pdf",
+            filename: file.filename,
+            mimeType: file.mimeType || "application/pdf",
+            url: getRequestBaseUrl(req) + "/d/" + docId,
+          };
         } catch (storeErr) {
           console.error("[DocGen] store error:", storeErr.message);
           return null;
         }
       },
+      onArtifactError: (error) => console.error("[Workflow PDF] error:", error.message),
       executors: {
         engine: workflowEngine,
         cvGig,
@@ -2617,6 +2637,8 @@ async function handleWorkflowRun(req, res, slug) {
       cvJson: result.cvJson || null,
       riskJson: result.riskJson || null,
       file: result.file || null,
+      artifacts: Array.isArray(result.artifacts) ? result.artifacts : [],
+      artifactWarning: result.artifactWarning || null,
       priceUsdc: unitsToUsdcString(priceUnits),
       releaseTx,
       explorerUrl: releaseTx ? `${ARCSCAN_EXPLORER_BASE}/tx/${releaseTx}` : null,

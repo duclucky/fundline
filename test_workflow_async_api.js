@@ -82,13 +82,28 @@ async function main() {
     workerId: claimed.execution.workerId,
     leaseToken: claimed.execution.leaseToken,
   };
-  store.storeResult(JOB_ID, { output: "# Durable result", steps: [] }, lease);
+  const artifact = {
+    kind: "file",
+    role: "deliverable",
+    format: "pdf",
+    filename: "client-research.pdf",
+    mimeType: "application/pdf",
+    url: "https://fundline.test/d/pdf",
+  };
+  store.storeResult(JOB_ID, {
+    output: "# Durable result",
+    steps: [],
+    file: artifact,
+    artifacts: [artifact],
+  }, lease);
   store.transition(JOB_ID, ["processing"], "settlement_pending", {}, lease);
   const pendingResult = serverModule.buildWorkflowJobResponse(store, store.getJob(JOB_ID));
   assert.equal(pendingResult.statusCode, 202);
   assert.equal(pendingResult.body.status, "settlement_pending");
   assert.equal(pendingResult.body.resultReady, true);
   assert.equal(pendingResult.body.result.output, "# Durable result");
+  assert.equal(pendingResult.body.result.file.mimeType, "application/pdf");
+  assert.deepEqual(pendingResult.body.result.artifacts, [artifact]);
   assert.equal(Object.hasOwn(pendingResult.body, "owner"), false);
   assert.equal(Object.hasOwn(pendingResult.body.request, "input"), false);
   store.transition(JOB_ID, ["settlement_pending"], "succeeded", {

@@ -5,6 +5,21 @@ const { executeWorkflowDefinition } = require("./workflow-execution");
 
 async function main() {
   const calls = [];
+  const finalizedTypes = [];
+  const finalizeResult = async (result, options) => {
+    finalizedTypes.push({
+      slug: options.slug,
+      tier: options.tier,
+      runId: options.runId,
+    });
+    const file = {
+      format: "pdf",
+      filename: options.slug + ".pdf",
+      mimeType: "application/pdf",
+      url: "https://fundline.test/d/pdf",
+    };
+    return { ...result, file, artifacts: [file] };
+  };
   const base = {
     tierDef: { models: { FAST: "fast", STRONG: "strong", VERIFY: "verify" } },
     finalModelId: "gpt-5.6-luna",
@@ -57,9 +72,14 @@ async function main() {
     ...base,
     def: { type: "cvgig" },
     input: { remoteOnly: true },
+    workflowSlug: "cv-gig-match",
+    tier: "normal",
+    runId: "cv-run",
+    finalizeResult,
     onJsearchUsed: () => { jsearchUses += 1; },
   });
   assert.equal(cvResult.report, "cv");
+  assert.equal(cvResult.file.mimeType, "application/pdf");
   assert.deepEqual(calls.shift(), ["cvgig", "gpt-5.6-luna", true]);
   assert.equal(jsearchUses, 1);
 
@@ -72,6 +92,10 @@ async function main() {
   await executeWorkflowDefinition({
     ...base,
     def: { type: "cvgig" },
+    workflowSlug: "cv-gig-match",
+    tier: "normal",
+    runId: "cv-run-2",
+    finalizeResult,
     onJsearchUsed: () => { jsearchUses += 1; },
   });
   assert.equal(jsearchUses, 1);
@@ -80,23 +104,27 @@ async function main() {
     ...base,
     def: { type: "cryptodd" },
     input: { chain: "arc", token: "0xtoken" },
+    workflowSlug: "crypto-dd",
+    tier: "plus",
+    runId: "crypto-run",
+    finalizeResult,
   });
   assert.deepEqual(calls.shift(), ["cryptodd", "gpt-5.6-luna", "verify"]);
 
   const docResult = await executeWorkflowDefinition({
     ...base,
     def: { type: "docgen", docType: "proposal" },
-    persistDocument: (file) => ({
-      format: file.format,
-      filename: file.filename,
-      url: "https://fundline.test/d/abc",
-    }),
+    workflowSlug: "proposal-doc",
+    tier: "pro",
+    runId: "doc-run",
+    finalizeResult,
   });
   assert.deepEqual(calls.shift(), ["docgen", "gpt-5.6-luna", "proposal"]);
   assert.deepEqual(docResult.file, {
     format: "pdf",
-    filename: "a.pdf",
-    url: "https://fundline.test/d/abc",
+    filename: "proposal-doc.pdf",
+    mimeType: "application/pdf",
+    url: "https://fundline.test/d/pdf",
   });
 
   await executeWorkflowDefinition({
@@ -105,8 +133,19 @@ async function main() {
     graph: { nodes: [] },
     mode: "paste",
     pastedSources: ["source"],
+    workflowSlug: "client-research",
+    tier: "normal",
+    runId: "graph-run",
+    finalizeResult,
   });
   assert.deepEqual(calls.shift(), ["graph", "gpt-5.6-luna", "Build proposal"]);
+  assert.deepEqual(finalizedTypes, [
+    { slug: "cv-gig-match", tier: "normal", runId: "cv-run" },
+    { slug: "cv-gig-match", tier: "normal", runId: "cv-run-2" },
+    { slug: "crypto-dd", tier: "plus", runId: "crypto-run" },
+    { slug: "proposal-doc", tier: "pro", runId: "doc-run" },
+    { slug: "client-research", tier: "normal", runId: "graph-run" },
+  ]);
 
   console.log("PASS: workflow execution router");
 }
