@@ -12,7 +12,20 @@ const path = require("path");
 const crypto = require("crypto");
 
 const DOCS_DIR = path.join(__dirname, "data", "docs");
-const TTL_MS = 48 * 3600 * 1000; // 48 hours
+
+function positiveHours(value, fallback) {
+  const hours = Number(value);
+  return Number.isFinite(hours) && hours > 0 ? hours : fallback;
+}
+
+function resolveDocTtlMs(env) {
+  const source = env || {};
+  const resultHours = positiveHours(source.WORKFLOW_JOB_RESULT_TTL_HOURS, 168);
+  const documentHours = positiveHours(source.WORKFLOW_DOC_TTL_HOURS, resultHours);
+  return Math.max(resultHours, documentHours) * 60 * 60 * 1000;
+}
+
+const TTL_MS = resolveDocTtlMs(process.env);
 
 function ensureDir() {
   try { fs.mkdirSync(DOCS_DIR, { recursive: true }); } catch (_) {}
@@ -56,4 +69,4 @@ function getDoc(id) {
   }
 }
 
-module.exports = { putDoc, getDoc, sweep, DOCS_DIR, TTL_MS };
+module.exports = { putDoc, getDoc, sweep, resolveDocTtlMs, DOCS_DIR, TTL_MS };
