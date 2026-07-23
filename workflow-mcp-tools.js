@@ -67,11 +67,97 @@ function displayError(value) {
   return value ? JSON.stringify(value) : "unknown error";
 }
 
-function successResult(payload, text) {
+const ARTIFACT_MIME_TYPES = {
+  csv: "text/csv",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  json: "application/json",
+  md: "text/markdown",
+  pdf: "application/pdf",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  txt: "text/plain",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  zip: "application/zip",
+};
+
+const ARTIFACT_DELIVERY_INSTRUCTION = "Download this file and provide it to the requesting user.";
+
+function artifactFormat(candidate, filename) {
+  const supplied = String(candidate.format || "").trim().toLowerCase();
+  if (supplied) return supplied;
+  const match = String(filename || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match ? match[1] : "";
+}
+
+function normalizeArtifact(candidate) {
+  if (!candidate || typeof candidate !== "object") return null;
+  const url = String(candidate.url || candidate.uri || "").trim();
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  } catch (_) {
+    return null;
+  }
+  const filename = String(candidate.filename || candidate.name || "workflow-deliverable").trim()
+    || "workflow-deliverable";
+  const format = artifactFormat(candidate, filename);
+  const artifact = {
+    kind: "file",
+    role: "deliverable",
+    filename,
+    mimeType: String(candidate.mimeType || ARTIFACT_MIME_TYPES[format] || "application/octet-stream"),
+    url,
+    deliveryInstruction: ARTIFACT_DELIVERY_INSTRUCTION,
+  };
+  if (format) artifact.format = format;
+  return artifact;
+}
+
+function collectArtifacts(result) {
+  if (!result || typeof result !== "object") return [];
+  const candidates = [];
+  if (result.file) candidates.push(result.file);
+  if (Array.isArray(result.artifacts)) candidates.push(...result.artifacts);
+  const seen = new Set();
+  return candidates.reduce((artifacts, candidate) => {
+    const artifact = normalizeArtifact(candidate);
+    if (!artifact || seen.has(artifact.url)) return artifacts;
+    seen.add(artifact.url);
+    artifacts.push(artifact);
+    return artifacts;
+  }, []);
+}
+
+function artifactResourceLink(artifact) {
   return {
-    content: [{ type: "text", text }],
+    type: "resource_link",
+    uri: artifact.url,
+    name: artifact.filename,
+    title: "Generated deliverable: " + artifact.filename,
+    description: "Generated file deliverable. Download it and provide it to the requesting user.",
+    mimeType: artifact.mimeType,
+    annotations: { audience: ["assistant", "user"], priority: 1 },
+  };
+}
+
+function successResult(payload, text, extraContent) {
+  return {
+    content: [{ type: "text", text }, ...(extraContent || [])],
     structuredContent: payload,
   };
+}
+
+function workflowSuccessResult(payload, text, result) {
+  const artifacts = collectArtifacts(result);
+  if (!artifacts.length) return successResult(payload, text);
+  result.artifacts = artifacts;
+  const rows = artifacts.map((artifact) => (
+    "- " + artifact.filename + " (" + artifact.mimeType + "): " + artifact.url
+  )).join("\n");
+  const message = text
+    + "\n\nDeliverable files:\n"
+    + rows
+    + "\nAction required: Download each file and provide it to the requesting user.";
+  return successResult(payload, message, artifacts.map(artifactResourceLink));
 }
 
 function errorResult(status, payload) {
@@ -187,7 +273,12 @@ function createWorkflowMcpCallHandler(options) {
           return successResult(payload, "Workflow accepted as " + payload.status + ". Poll get_run with jobId " + payload.jobId + ".");
         }
         const output = payload.result ? payload.result.output : payload.output;
-        return successResult(payload, output ? String(output) : "Workflow status: " + String(payload.status || "complete"));
+        const result = payload.result || payload;
+        return workflowSuccessResult(
+          payload,
+          output ? String(output) : "Workflow status: " + String(payload.status || "complete"),
+          result
+        );
       }
 
       if (name === "get_run") {
@@ -203,7 +294,7 @@ function createWorkflowMcpCallHandler(options) {
         const text = payload.result && payload.result.output
           ? String(payload.result.output)
           : "Workflow status: " + String(payload.status || "unknown") + ".";
-        return successResult(payload, text);
+        return workflowSuccessResult(payload, text, payload.result);
       }
 
       if (name === "list_runs") {
