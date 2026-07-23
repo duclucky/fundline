@@ -169,6 +169,7 @@ async function main() {
   assert.equal(legacy.content[0].text.includes(PDF_URL), true);
   assert.equal(legacy.content[0].text.includes(CSV_URL), true);
   assert.equal(JSON.parse(calls[0].options.body).async, undefined);
+  assert.equal(JSON.parse(calls[0].options.body).stream, false);
 
   calls = [];
   handler = createWorkflowMcpCallHandler({

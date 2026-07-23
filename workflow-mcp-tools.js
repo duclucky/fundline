@@ -252,7 +252,7 @@ function createWorkflowMcpCallHandler(options) {
             txHash: payment.txHash,
           })).toString("base64");
         }
-        const body = { tier, prompt: input.prompt };
+        const body = { tier, prompt: input.prompt, stream: false };
         if (quotedPayment) {
           body.async = true;
           body.jobId = quotedJobId;
