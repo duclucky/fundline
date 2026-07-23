@@ -569,6 +569,9 @@ function normalizePublicConfig(config) {
     chainId,
     chainIdHex,
     rpcUrl: String(config.rpcUrl || DEFAULT_PUBLIC_CONFIG.rpcUrl),
+    rpcFallbackUrls: Array.isArray(config.rpcFallbackUrls)
+      ? config.rpcFallbackUrls.map((value) => String(value || "").trim()).filter(Boolean)
+      : [],
     explorerBase: String(config.explorerBase || DEFAULT_PUBLIC_CONFIG.explorerBase).replace(/\/$/, ""),
     usdcTokenAddress,
     usdcDecimals: paymentTokenDecimals,
@@ -1431,7 +1434,9 @@ async function refreshPaymentSourceStatus(id, options = {}) {
     const chain = getPaymentSourceChain(source.key);
     const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
 
-    const balance = await readUsdcBalanceFromRpc(chain.rpcUrls[0], chain.usdc, wallet);
+    const balance = source.key === "arcTestnet"
+      ? await readInvoiceUsdcBalance(config, wallet)
+      : await readUsdcBalanceFromRpc(chain.rpcUrls[0], chain.usdc, wallet);
     const enough = balance >= amountUnits;
     const balanceText = `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC`;
     if (!enough) {
@@ -1615,7 +1620,7 @@ async function payInvoiceWithWallet(id) {
     setProgressStep(progress, "check", "active", "Checking Arc USDC balance...");
     setButtonBusy(button, "Checking balance...");
     const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
-    const balance = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payerWallet);
+    const balance = await readInvoiceUsdcBalance(config, payerWallet);
     if (balance < amountUnits) {
       throw new Error(`Insufficient Arc USDC. Need ${formatUsdc(invoice.total)} USDC, wallet has ${formatUnits(balance, ARC_USDC_DECIMALS)} USDC.`);
     }
@@ -1623,7 +1628,13 @@ async function payInvoiceWithWallet(id) {
 
     setProgressStep(progress, "pay", "active", "Preparing payment...");
     setButtonBusy(button, "Preparing payment...");
-    await submitArcPaymentWithProgress(invoice, payerWallet, button, progress);
+    await submitArcPaymentWithProgress(
+      invoice,
+      payerWallet,
+      button,
+      progress,
+      { invoiceRpcRecovery: true },
+    );
   } catch (error) {
     const isRejected = error?.code === 4001 || String(error?.message).toLowerCase().includes("rejected") || String(error?.message).toLowerCase().includes("denied");
     const msg = isRejected ? "Rejected by user" : error?.message || "Wallet payment failed";
@@ -1665,14 +1676,20 @@ async function _retryDirectPay(id, fromStep) {
       setProgressStep(progress, "check", "active", "Checking Arc USDC balance...");
       setButtonBusy(button, "Checking balance...");
       const amountUnits = parseTokenUnits(invoice.total, ARC_USDC_DECIMALS);
-      const balance = await readUsdcBalanceFromRpc(config.rpcUrl, config.usdcTokenAddress, payerWallet);
+      const balance = await readInvoiceUsdcBalance(config, payerWallet);
       if (balance < amountUnits) throw new Error(`Insufficient Arc USDC. Need ${formatUsdc(invoice.total)} USDC.`);
       setProgressStep(progress, "check", "done", `${formatUnits(balance, ARC_USDC_DECIMALS)} USDC available`);
     }
     if (fromStep === "check" || fromStep === "pay") {
       setProgressStep(progress, "pay", "active", "Preparing payment...");
       setButtonBusy(button, "Paying invoice...");
-      await submitArcPaymentWithProgress(invoice, payerWallet, button, progress);
+      await submitArcPaymentWithProgress(
+        invoice,
+        payerWallet,
+        button,
+        progress,
+        { invoiceRpcRecovery: true },
+      );
     }
     if (fromStep === "verify") {
       setProgressStep(progress, "verify", "active", "Verifying on Arcscan...");
@@ -1742,45 +1759,111 @@ async function submitArcPayment(invoice, payerWallet, button) {
   return autoVerifySubmittedPayment(invoice.id, { payerWallet, txHash, button });
 }
 
-// Stepper-aware version used by direct pay path.
-async function submitArcPaymentWithProgress(invoice, payerWallet, button, progress) {
+// Stepper-aware version used by direct pay and bridge paths. Invoice RPC recovery
+// is explicitly enabled only by the direct payment call sites.
+async function submitArcPaymentWithProgress(invoice, payerWallet, button, progress, options = {}) {
   const provider = getActiveProvider();
   const config = state.publicConfig || DEFAULT_PUBLIC_CONFIG;
+  const invoiceRpcRecovery = options.invoiceRpcRecovery === true;
   setProgressStep(progress, "pay", "active", "Switching to Arc network...");
-  await ensurePaymentNetwork(provider, config);
-  const onchainDecimals = await readUsdcDecimals(provider, config.usdcTokenAddress);
+  invoiceRpcRecovery
+    ? await ensureInvoicePaymentNetwork(provider, config)
+    : await ensurePaymentNetwork(provider, config);
+  const onchainDecimals = invoiceRpcRecovery
+    ? await readInvoiceUsdcDecimals(config)
+    : await readUsdcDecimals(provider, config.usdcTokenAddress);
   if (onchainDecimals !== 6) {
     throw new Error(`Critical Error: Expected Arc USDC to have 6 decimals but found ${onchainDecimals}.`);
   }
   const amountUnits = parseTokenUnits(invoice.total, config.usdcDecimals);
-  const allowance = await readUsdcAllowance(provider, config.usdcTokenAddress, payerWallet, config.paymentRouterAddress);
+  const allowance = invoiceRpcRecovery
+    ? await readInvoiceUsdcAllowance(config, payerWallet, config.paymentRouterAddress)
+    : await readUsdcAllowance(provider, config.usdcTokenAddress, payerWallet, config.paymentRouterAddress);
   if (allowance < amountUnits) {
     // Arc's CallFrom precompile cannot call Arc native precompiles (USDC at 0x3600...).
     // Use a 2-tx flow: approve first, then pay.
     setProgressStep(progress, "pay", "active", "Step 1/2: Approving USDC (sign tx)...");
     setButtonBusy(button, "Approve USDC (1 of 2)...");
-    const approveTxHash = await sendUsdcApprove(provider, {
-      from: payerWallet,
-      token: config.usdcTokenAddress,
-      spender: config.paymentRouterAddress,
-      amount: amountUnits,
-    });
-    setProgressStep(progress, "pay", "active", "Confirming USDC approval...");
-    setButtonBusy(button, "Confirming approval...");
-    await waitForArcTx(provider, approveTxHash);
+    const approval = invoiceRpcRecovery
+      ? await window.FundlinePaymentVerification.submitInvoiceTransactionOnce({
+        submit: () => sendUsdcApprove(provider, {
+          from: payerWallet,
+          token: config.usdcTokenAddress,
+          spender: config.paymentRouterAddress,
+          amount: amountUnits,
+        }),
+        checkState: async () => {
+          setProgressStep(progress, "pay", "active", "Wallet RPC busy. Checking approval on-chain...");
+          return (
+            await readInvoiceUsdcAllowance(config, payerWallet, config.paymentRouterAddress)
+          ) >= amountUnits;
+        },
+        attempts: 5,
+        delayMs: 2000,
+        unknownMessage: "The wallet RPC is busy. The approval status is unknown. Check wallet activity before retrying.",
+      })
+      : {
+        status: "submitted",
+        value: await sendUsdcApprove(provider, {
+          from: payerWallet,
+          token: config.usdcTokenAddress,
+          spender: config.paymentRouterAddress,
+          amount: amountUnits,
+        }),
+      };
+    if (approval.status === "submitted") {
+      setProgressStep(progress, "pay", "active", "Confirming USDC approval...");
+      setButtonBusy(button, "Confirming approval...");
+      if (invoiceRpcRecovery) {
+        await waitForInvoiceTx(config, approval.value);
+      } else {
+        await waitForArcTx(provider, approval.value);
+      }
+    }
     setProgressStep(progress, "pay", "active", "Step 2/2: Paying invoice (sign tx)...");
     setButtonBusy(button, "Pay invoice (2 of 2)...");
   } else {
     setProgressStep(progress, "pay", "active", "Paying invoice...");
     setButtonBusy(button, "Paying invoice...");
   }
-  const txHash = await sendRouterPayment(provider, {
-    from: payerWallet,
-    router: config.paymentRouterAddress,
-    invoiceId: invoice.onchainInvoiceId,
-    merchantWallet: invoice.merchantWallet,
-    amount: amountUnits,
-  });
+  const payment = invoiceRpcRecovery
+    ? await window.FundlinePaymentVerification.submitInvoiceTransactionOnce({
+      submit: () => sendRouterPayment(provider, {
+        from: payerWallet,
+        router: config.paymentRouterAddress,
+        invoiceId: invoice.onchainInvoiceId,
+        merchantWallet: invoice.merchantWallet,
+        amount: amountUnits,
+      }),
+      checkState: async () => {
+        setProgressStep(progress, "pay", "active", "Wallet RPC busy. Checking payment on-chain...");
+        return verifyPaymentAndMarkPaid(
+          invoice.id,
+          { preventDefault() {} },
+          { payerWallet, txHash: "", auto: true, showPendingToast: false },
+        );
+      },
+      attempts: 10,
+      delayMs: 2000,
+      unknownMessage: "The wallet RPC is busy. Payment status is unknown. Check wallet activity before retrying.",
+    })
+    : {
+      status: "submitted",
+      value: await sendRouterPayment(provider, {
+        from: payerWallet,
+        router: config.paymentRouterAddress,
+        invoiceId: invoice.onchainInvoiceId,
+        merchantWallet: invoice.merchantWallet,
+        amount: amountUnits,
+      }),
+    };
+  if (payment.status === "recovered") {
+    setProgressStep(progress, "pay", "done", "Payment found on-chain");
+    setProgressStep(progress, "verify", "done", "Payment verified");
+    setProgressStep(progress, "receipt", "done", "Receipt available");
+    return true;
+  }
+  const txHash = payment.value;
   setProgressStep(progress, "pay", "done", "Payment submitted");
   if (_activeBridgeContext) _activeBridgeContext.arcTxHash = txHash;
   const form = document.querySelector("#paymentVerifyForm");
@@ -2089,6 +2172,38 @@ async function ensurePaymentNetwork(provider, config) {
   }
 }
 
+async function ensureInvoicePaymentNetwork(provider, config) {
+  const expected = String(config.chainIdHex || "").toLowerCase();
+  if (!expected) return;
+  const session = window.FundlineWallet?.getSession?.();
+  const embedded = session && (session.kind === "circle" || session.kind === "privy");
+  if (embedded) {
+    const current = String(await invoiceRpcCall(config, "eth_chainId", [])).toLowerCase();
+    if (current !== expected) throw new Error("Invoice payment RPC is connected to the wrong Arc network.");
+    return;
+  }
+  try {
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: expected }],
+    });
+  } catch (error) {
+    if (Number(error?.code) !== 4902) throw error;
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [
+        {
+          chainId: expected,
+          chainName: config.networkName || "Arc Testnet",
+          nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+          rpcUrls: getInvoiceRpcUrls(config),
+          blockExplorerUrls: config.explorerBase ? [config.explorerBase] : [],
+        },
+      ],
+    });
+  }
+}
+
 async function ensureWalletNetwork(provider, chain) {
   // Embedded wallets cannot switch to CCTP source chains; cross-chain bridging is external-wallet only.
   const s = window.FundlineWallet && window.FundlineWallet.getSession ? window.FundlineWallet.getSession() : null;
@@ -2148,6 +2263,62 @@ async function readUsdcBalanceFromRpc(rpcUrl, token, owner) {
   const data = `${ERC20_BALANCE_OF_SELECTOR}${encodeAddress(owner)}`;
   const result = await rpcCall(rpcUrl, "eth_call", [{ to: token, data }, "latest"]);
   return hexToBigInt(result);
+}
+
+function getInvoiceRpcUrls(config) {
+  return window.FundlinePaymentVerification.normalizeRpcUrls(
+    config.rpcUrl,
+    config.rpcFallbackUrls,
+  );
+}
+
+function invoiceRpcCall(config, method, params) {
+  return window.FundlinePaymentVerification.rpcRequestWithFallback({
+    fetchImpl: fetch,
+    urls: getInvoiceRpcUrls(config),
+    method,
+    params,
+  });
+}
+
+async function readInvoiceUsdcBalance(config, owner) {
+  const data = `${ERC20_BALANCE_OF_SELECTOR}${encodeAddress(owner)}`;
+  const result = await invoiceRpcCall(
+    config,
+    "eth_call",
+    [{ to: config.usdcTokenAddress, data }, "latest"],
+  );
+  return hexToBigInt(result);
+}
+
+async function readInvoiceUsdcAllowance(config, owner, spender) {
+  const data = `${ERC20_ALLOWANCE_SELECTOR}${encodeAddress(owner)}${encodeAddress(spender)}`;
+  const result = await invoiceRpcCall(
+    config,
+    "eth_call",
+    [{ to: config.usdcTokenAddress, data }, "latest"],
+  );
+  return hexToBigInt(result);
+}
+
+async function readInvoiceUsdcDecimals(config) {
+  const result = await invoiceRpcCall(
+    config,
+    "eth_call",
+    [{ to: config.usdcTokenAddress, data: ERC20_DECIMALS_SELECTOR }, "latest"],
+  );
+  return Number(hexToBigInt(result));
+}
+
+async function waitForInvoiceTx(config, txHash) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    await delay(3000);
+    const receipt = await invoiceRpcCall(config, "eth_getTransactionReceipt", [txHash]);
+    if (!receipt) continue;
+    if (receipt.status === "0x0") throw new Error("Transaction reverted on-chain.");
+    return receipt;
+  }
+  throw new Error("Transaction not confirmed after 3 minutes.");
 }
 
 async function rpcCall(rpcUrl, method, params) {
