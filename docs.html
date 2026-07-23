@@ -752,20 +752,110 @@ console.log("Paid", amount, "USDC:", data.output);</code></pre>
   }
 }</code></pre>
           </div>
-          <h4>Durable asynchronous runs</h4>
+          <h4>Durable asynchronous run</h4>
+          <p>
+            Treat quote, payment, enqueue, and polling as one logical run. Save the
+            <code>jobId</code>, <code>runId</code>, and <code>recoveryToken</code> before sending
+            USDC. The recovery token authorizes result access, so do not log, commit, or share it.
+          </p>
           <ol>
-            <li>Call <code>run_workflow</code> without payment. It returns a <code>jobId</code>, <code>runId</code>, exact price, escrow address, and <code>recoveryToken</code>.</li>
-            <li>Approve and fund the quoted <code>runId</code> through <code>FundlineRunEscrow</code>.</li>
-            <li>Call <code>run_workflow</code> again with <code>payment.jobId</code>, <code>payment.runId</code>, and <code>payment.recoveryToken</code>. The tool returns <code>queued</code> immediately.</li>
-            <li>Call <code>get_run</code> with the <code>jobId</code> and <code>recoveryToken</code> until the status is <code>succeeded</code>, <code>refunded</code>, or <code>failed</code>.</li>
-            <li>Keep the recovery token private. A run ID or transaction hash alone cannot read the output.</li>
+            <li>Call <code>list_workflows</code> and select a valid slug and tier.</li>
+            <li>Call <code>run_workflow</code> without payment and set <code>paymentMode</code> to <code>escrow</code>.</li>
+            <li>Verify chain ID <code>5042002</code>, canonical USDC, escrow address, and the exact quoted amount.</li>
+            <li>Approve only that amount and call <code>fund(runId, amount)</code> from the payer wallet.</li>
+            <li>Call <code>run_workflow</code> with <code>payment.jobId</code>, <code>payment.runId</code>, and <code>payment.recoveryToken</code>.</li>
+            <li>Poll <code>get_run</code>, honoring <code>retryAfterSeconds</code>, until <code>succeeded</code>, <code>refunded</code>, or <code>failed</code>.</li>
+          </ol>
+          <div class="code-card">
+            <div class="code-head"><span>Durable MCP sequence</span><button data-copy="#mcp-durable-sequence" type="button">Copy</button></div>
+            <pre id="mcp-durable-sequence"><code># 1. Quote. POST each JSON-RPC request to https://fundline.xyz/mcp
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_workflow","arguments":{"slug":"proposal-doc","tier":"normal","prompt":"Create a concise proposal","paymentMode":"escrow"}}}
+# -&gt; { "status":"awaiting_payment", "jobId":"0x...", "runId":"0x...",
+#      "recoveryToken":"keep-private", "amount":"10000", "chainId":5042002, ... }
+
+# 2. After approve + fund(runId, amount), enqueue the same job.
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_workflow","arguments":{"slug":"proposal-doc","tier":"normal","prompt":"Create a concise proposal","payment":{"jobId":"0x...","runId":"0x...","recoveryToken":"keep-private"}}}}
+# -&gt; { "status":"queued", "jobId":"0x...", "retryAfterSeconds":1 }
+
+# 3. Poll without paying again.
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_run","arguments":{"jobId":"0x...","recoveryToken":"keep-private"}}}
+# -&gt; processing | settling | succeeded | refunding | refunded | failed</code></pre>
+          </div>
+          <p>
+            If the MCP connection times out, call <code>get_run</code> again with the same credentials.
+            Do not create or fund another job. Successful results remain retrievable for seven days by
+            default.
+          </p>
+          <p>
+            <strong>Legacy direct x402:</strong> older clients may obtain an HTTP 402 challenge from the
+            workflow <code>/run</code> endpoint, pay it, then call MCP <code>run_workflow</code> with only
+            <code>payment.payerWallet</code> and <code>payment.txHash</code>. New MCP clients that need x402
+            should request <code>paymentMode: "x402"</code> so they receive durable job credentials before paying.
+            Escrow remains recommended because refunds are contract-backed. Some clients reach remote MCP
+            servers through a local bridge such as <code>mcp-remote</code>.
+          </p>
+
+          <h4>RPC fallback for agent wallets</h4>
+          <p>
+            Verify every RPC returns Arc Testnet chain ID <code>5042002</code> (<code>0x4cef52</code>)
+            before signing. Use canonical USDC at
+            <code>0x3600000000000000000000000000000000000000</code> with six decimals.
+            Try RPCs in this order:
+          </p>
+          <ol>
+            <li><code>https://rpc.drpc.testnet.arc.network</code></li>
+            <li><code>https://rpc.blockdaemon.testnet.arc.network</code></li>
+            <li><code>https://rpc.quicknode.testnet.arc.network</code></li>
+            <li><code>https://rpc.testnet.arc.network</code></li>
           </ol>
           <p>
-            Successful results remain retrievable for seven days by default, so a client can recover
-            after a timeout or lost connection without paying for another run. Direct x402 payment
-            remains available for compatibility by passing a payer wallet and transaction hash without
-            job credentials, but escrow is the recommended path for long-running MCP work. Some clients
-            reach remote MCP servers through a local bridge such as <code>mcp-remote</code>.
+            Rotate only after a connection timeout, HTTP 429, HTTP 5xx, or JSON-RPC
+            <code>-32011</code>. Do not rotate and blindly retry a contract revert, insufficient funds,
+            invalid input, bad signature, or wrong chain response.
+          </p>
+          <div class="code-card">
+            <div class="code-head"><span>Read-only RPC rotation</span><button data-copy="#mcp-rpc-fallback" type="button">Copy</button></div>
+            <pre id="mcp-rpc-fallback"><code>const ARC_RPCS = [
+  "https://rpc.drpc.testnet.arc.network",
+  "https://rpc.blockdaemon.testnet.arc.network",
+  "https://rpc.quicknode.testnet.arc.network",
+  "https://rpc.testnet.arc.network",
+];
+
+async function arcRpc(method, params = []) {
+  let lastError;
+  for (const url of ARC_RPCS) {
+    let response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+      });
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+    if (response.status === 429 || response.status &gt;= 500) {
+      lastError = new Error("RPC temporarily unavailable");
+      continue;
+    }
+    const body = await response.json();
+    if (body.error?.code === -32011) {
+      lastError = new Error(body.error.message);
+      continue;
+    }
+    if (body.error) throw new Error(body.error.message);
+    return body.result;
+  }
+  throw lastError || new Error("All Arc RPC endpoints are unavailable");
+}</code></pre>
+          </div>
+          <p>
+            For <code>eth_sendRawTransaction</code>, sign once and retain the transaction hash. After an
+            ambiguous timeout, query <code>eth_getTransactionByHash</code> and
+            <code>eth_getTransactionReceipt</code> through another RPC before rebroadcasting the same signed raw transaction.
+            Never create a second payment with a new nonce just because one RPC lost its response.
           </p>
         </section>
 
@@ -861,8 +951,13 @@ console.log("Paid", amount, "USDC:", data.output);</code></pre>
                 <td><code>5042002</code></td>
               </tr>
               <tr>
-                <th>RPC</th>
-                <td><code>https://rpc.testnet.arc.network</code></td>
+                <th>RPC order</th>
+                <td>
+                  <code>https://rpc.drpc.testnet.arc.network</code><br>
+                  <code>https://rpc.blockdaemon.testnet.arc.network</code><br>
+                  <code>https://rpc.quicknode.testnet.arc.network</code><br>
+                  <code>https://rpc.testnet.arc.network</code>
+                </td>
               </tr>
               <tr>
                 <th>Explorer</th>
