@@ -25,12 +25,12 @@ check("price exists for gpt-4.1-mini", getPrice("gpt-4.1-mini") !== null);
 check("price null for unknown", getPrice("nope") === null);
 
 // --- cost math (micro-USD = pt*inPer1M + ct*outPer1M, times group ratio) ---
-// gpt-4.1-mini: in 0.40 / out 1.60 per 1M.
-eq("1M input only", computeCostMicros("gpt-4.1-mini", 1000000, 0, 1), 400000);
-eq("1M output only", computeCostMicros("gpt-4.1-mini", 0, 1000000, 1), 1600000);
-eq("mixed small (9 in, 10 out)", computeCostMicros("gpt-4.1-mini", 9, 10, 1), 20); // 3.6 + 16 = 19.6 -> 20
-eq("group ratio 2x doubles", computeCostMicros("gpt-4.1-mini", 1000000, 0, 2), 800000);
-eq("group ratio default when 0", computeCostMicros("gpt-4.1-mini", 1000000, 0, 0), 400000);
+// gpt-4.1-mini: measured v98 billing is in 1.13 / out 4.53 per 1M.
+eq("1M input only", computeCostMicros("gpt-4.1-mini", 1000000, 0, 1), 1130000);
+eq("1M output only", computeCostMicros("gpt-4.1-mini", 0, 1000000, 1), 4530000);
+eq("mixed small (9 in, 10 out)", computeCostMicros("gpt-4.1-mini", 9, 10, 1), 55);
+eq("group ratio 2x doubles", computeCostMicros("gpt-4.1-mini", 1000000, 0, 2), 2260000);
+eq("group ratio default when 0", computeCostMicros("gpt-4.1-mini", 1000000, 0, 0), 1130000);
 eq("unknown model -> null", computeCostMicros("nope", 100, 100, 1), null);
 // claude-3-5-sonnet: in 3.00 / out 15.00 per 1M -> 1000 in + 500 out = 3000 + 7500 = 10500 micro
 eq("sonnet 1000 in 500 out", computeCostMicros("claude-3-5-sonnet-20241022", 1000, 500, 1), 10500);
