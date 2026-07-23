@@ -11,6 +11,7 @@ const workflowLimiter = require("./workflow-limiter");
 const workflowResearch = require("./workflow-research");
 const workflowEngine = require("./workflow-engine");
 const { executeWorkflowDefinition } = require("./workflow-execution");
+const { createWorkflowModelProvider } = require("./workflow-model-provider");
 const { createWorkflowJobStore } = require("./workflow-job-store");
 const { createWorkflowJobWorker } = require("./workflow-job-worker");
 const { createWorkflowJobSettlement } = require("./workflow-job-settlement");
@@ -116,23 +117,20 @@ const workflowJobStore = createWorkflowJobStore({
 const V98STORE_API_KEY = String(process.env.V98STORE_API_KEY || "").trim();
 const V98STORE_BASE_URL = String(process.env.V98STORE_BASE_URL || "https://v98store.com/v1").trim();
 const V98STORE_GROUP_RATIO = Number(process.env.V98STORE_GROUP_RATIO || 1) || 1;
-// Premium provider for the FINAL content node of every workflow (per tier). The endpoint
-// and model ids are not secret, so they are hardcoded; only the API key comes from the
-// cPanel env. When WORKFLOW_FINAL_API_KEY is unset, workflows fall back to the normal
-// per-tier model (no behaviour change). OpenAI-compatible (POST {base}/chat/completions).
-const WORKFLOW_FINAL_BASE_URL = String(process.env.WORKFLOW_FINAL_BASE_URL || "https://cheapkeyai.shop/v1").trim();
-const WORKFLOW_FINAL_API_KEY = String(process.env.WORKFLOW_FINAL_API_KEY || "").trim();
+// GPT-5.6 models for the FINAL content node of every workflow. All workflow models use
+// the shared v98store connection above, while deployments may override each model id.
 const WORKFLOW_FINAL_MODELS = {
   normal: String(process.env.WORKFLOW_FINAL_MODEL_NORMAL || "gpt-5.6-luna").trim(),
   plus: String(process.env.WORKFLOW_FINAL_MODEL_PLUS || "gpt-5.6-terra").trim(),
   pro: String(process.env.WORKFLOW_FINAL_MODEL_PRO || "gpt-5.6-sol").trim(),
 };
-const WORKFLOW_FINAL_MODEL_SET = new Set(Object.values(WORKFLOW_FINAL_MODELS).filter(Boolean));
-// The premium model id for a tier, or "" when the premium provider is not configured.
-function finalModelForTier(tier) {
-  if (!WORKFLOW_FINAL_API_KEY || !WORKFLOW_FINAL_BASE_URL) return "";
-  return WORKFLOW_FINAL_MODELS[tier] || "";
-}
+const workflowModelProvider = createWorkflowModelProvider({
+  apiKey: V98STORE_API_KEY,
+  baseUrl: V98STORE_BASE_URL,
+  models: WORKFLOW_FINAL_MODELS,
+  callChat: v98Client.callV98Chat,
+});
+const { finalModelForTier } = workflowModelProvider;
 // JSearch (OpenWeb Ninja) gig API for the CV + Gig Match workflow. On-demand only:
 // free sources (Freelancer.com + Hacker News) run every time; JSearch is a top-up
 // when the free two are thin, capped monthly to stay under the ~200/month plan.
@@ -989,9 +987,9 @@ function handlePublicConfig(req, res) {
     walletPrivyEnabled: WALLET_PRIVY_ENABLED,
     walletPrivyPolicyEnabled: WALLET_PRIVY_POLICY_ENABLED && privyServerClient.available(),
     workflowRunnerEnabled: WORKFLOW_RATE_LIMIT_ENABLED,
-    // Premium final-node models per tier, so the UI can show the real model on the final
-    // step. Null when the premium provider is not configured (UI keeps the normal labels).
-    workflowFinalModels: WORKFLOW_FINAL_API_KEY ? { ...WORKFLOW_FINAL_MODELS } : null,
+    // Final-node models per tier, so the UI can show the real v98store model on the final
+    // step. Null when v98store is not configured (UI keeps the normal labels).
+    workflowFinalModels: V98STORE_API_KEY ? { ...WORKFLOW_FINAL_MODELS } : null,
     workflowFreeRunsPerDay: WORKFLOW_RUNS_PER_IP_PER_DAY,
     workflowGenPromptsPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
     workflowBetaNotice: WORKFLOW_BETA_NOTICE,
@@ -1791,20 +1789,11 @@ async function executeDurableWorkflowJob(job, hooks) {
 
   const query = String(input.prompt || input.query || "").trim().slice(0, 20000);
   const mode = input.mode === "paste" ? "paste" : "search";
-  const v98config = { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL };
-  const finalConfig = { apiKey: WORKFLOW_FINAL_API_KEY, baseUrl: WORKFLOW_FINAL_BASE_URL };
   const finalModelId = finalModelForTier(tier);
   const searchWeb = TAVILY_API_KEY && mode !== "paste"
     ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 5 }).then((r) => r.results)
     : null;
-  const callModel = (modelId, messages, maxTokens) => {
-    const usePremium = Boolean(WORKFLOW_FINAL_API_KEY) && WORKFLOW_FINAL_MODEL_SET.has(modelId);
-    return v98Client.callV98Chat(usePremium ? finalConfig : v98config, {
-      model: modelId,
-      messages,
-      maxTokens,
-    }).then((response) => ({ content: response.content, usage: response.usage }));
-  };
+  const callModel = workflowModelProvider.callModel;
   const result = await executeWorkflowDefinition({
     def,
     tierDef,
@@ -2444,22 +2433,12 @@ async function handleWorkflowRun(req, res, slug) {
     try { res.write("event: " + name + "\ndata: " + JSON.stringify(data) + "\n\n"); } catch (_) {}
   }
 
-  const v98config = { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL };
-  const finalConfig = { apiKey: WORKFLOW_FINAL_API_KEY, baseUrl: WORKFLOW_FINAL_BASE_URL };
-  const finalModelId = finalModelForTier(tier); // "" when premium provider not configured
+  const finalModelId = finalModelForTier(tier); // "" when v98store is not configured
   // Real web search for retrieval nodes (Tavily). Null in paste mode or when no key.
   const searchWeb = (TAVILY_API_KEY && mode !== "paste")
     ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 5 }).then((r) => r.results)
     : null;
-  // One caller that routes by model id: a premium final-node model id goes to the premium
-  // endpoint; everything else goes to v98store. Lets us upgrade only the final node by
-  // setting its model id, without threading a second caller through every executor.
-  const callModel = (modelId, messages, maxTokens) => {
-    const usePremium = Boolean(WORKFLOW_FINAL_API_KEY) && WORKFLOW_FINAL_MODEL_SET.has(modelId);
-    const cfg = usePremium ? finalConfig : v98config;
-    return v98Client.callV98Chat(cfg, { model: modelId, messages, maxTokens })
-      .then((r) => ({ content: r.content, usage: r.usage }));
-  };
+  const callModel = workflowModelProvider.callModel;
   try {
     const result = await executeWorkflowDefinition({
       def,

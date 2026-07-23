@@ -1,7 +1,7 @@
 "use strict";
 
-// Tests premium-models.js (cheapkey GPT-5.6 pricing) and model-cost.js (the provider-agnostic
-// aggregator that feeds the daily budget + per-key caps). Run: node test_premium_cost.js
+// Tests the fixed GPT-5.6 estimates in premium-models.js and the provider-agnostic
+// model-cost.js aggregator that feeds the daily budget and per-key caps.
 
 const premium = require("./premium-models");
 const modelCost = require("./model-cost");
@@ -18,7 +18,7 @@ function ok(name, cond) {
   else { failed++; console.error("FAIL: " + name); }
 }
 
-// premium-models: prices are flat (input == output) per the cheapkey table.
+// The retained GPT-5.6 estimates are flat (input == output).
 eq("luna 1M in only", premium.premiumCostMicros("gpt-5.6-luna", 1000000, 0), 80000);
 eq("luna 1M out only", premium.premiumCostMicros("gpt-5.6-luna", 0, 1000000), 80000);
 eq("luna 1000 in 500 out", premium.premiumCostMicros("gpt-5.6-luna", 1000, 500), 120); // 1500 * 0.08
@@ -35,7 +35,7 @@ ok("isPremiumModel empty", premium.isPremiumModel("") === false);
 
 // model-cost: premium first, then v98, then 0 for a fully unknown id.
 eq("aggregator routes premium", modelCost.costMicros("gpt-5.6-luna", 1000000, 0, 1), 80000);
-eq("premium ignores group ratio", modelCost.costMicros("gpt-5.6-luna", 1000000, 0, 5), 80000);
+eq("fixed GPT-5.6 estimate ignores group ratio", modelCost.costMicros("gpt-5.6-luna", 1000000, 0, 5), 80000);
 // v98 models delegate to computeCostMicros (robust to price-table drift).
 eq("aggregator delegates v98",
   modelCost.costMicros("gpt-4o-mini", 1000, 500, 1),
