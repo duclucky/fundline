@@ -132,6 +132,16 @@ function renderBlock(doc, block, theme, width) {
   } else if (type === "table") {
     renderTable(doc, block, theme, width);
     doc.moveDown(0.4);
+  } else if (type === "code") {
+    const text = String(block.text || "");
+    ensureSpace(doc, 32);
+    doc.fillColor(theme.text).font("Courier").fontSize(8.5)
+      .text(text, {
+        width,
+        lineGap: 1,
+        indent: 8,
+      });
+    doc.moveDown(0.4);
   }
 }
 
