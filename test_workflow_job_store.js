@@ -125,6 +125,38 @@ assert.throws(
   /lease/i
 );
 
+const retryJobId = "0x" + "55".repeat(32);
+let retryClock = clock;
+const retryStore = createWorkflowJobStore({
+  baseDir: fs.mkdtempSync(path.join(os.tmpdir(), "fundline-jobs-retry-")),
+  now: () => retryClock,
+  randomBytes: () => Buffer.alloc(32, 8),
+  lockLeaseMs: 1000,
+});
+retryStore.createQuote({
+  jobId: retryJobId,
+  request: { slug: "client-research", tier: "normal", input: { prompt: "Retry" } },
+  payment: { mode: "escrow", reference: retryJobId, amount: "10000" },
+});
+retryStore.transition(retryJobId, ["awaiting_payment"], "queued", {});
+const retryClaim = retryStore.claimNext({ workerId: "retry-worker-a", leaseMs: 60000 });
+const retryLease = {
+  workerId: retryClaim.execution.workerId,
+  leaseToken: retryClaim.execution.leaseToken,
+};
+retryStore.storeResult(retryJobId, { output: "stored", steps: [] }, retryLease);
+retryStore.transition(retryJobId, ["processing"], "settlement_pending", {}, retryLease);
+retryStore.deferRetry(retryJobId, ["settlement_pending"], retryLease, 5000);
+assert.equal(retryStore.claimNext({ workerId: "retry-worker-b", leaseMs: 60000 }), null);
+retryClock += 4999;
+assert.equal(retryStore.claimNext({ workerId: "retry-worker-b", leaseMs: 60000 }), null);
+retryClock += 1;
+assert.equal(retryStore.claimNext({ workerId: "retry-worker-b", leaseMs: 60000 }).jobId, retryJobId);
+assert.throws(
+  () => retryStore.deferRetry(retryJobId, ["settlement_pending"], retryLease, 5000),
+  /lease|precondition/i,
+);
+
 clock += 2000;
 const firstSweep = store.sweep({ resultTtlMs: 1000, metadataTtlMs: 10000 });
 assert.equal(firstSweep.resultsDeleted, 1);

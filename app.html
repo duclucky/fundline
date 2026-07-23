@@ -367,6 +367,7 @@
                     <span class="help-tip" tabindex="0" data-help="Your Telegram chat ID. The bot sends payment success alerts to this chat after an invoice is marked paid." aria-label="Telegram chat ID help">?</span>
                   </span>
                   <input name="telegramChatId" inputmode="numeric" placeholder="123456789" />
+                  <small id="telegramLinkStatus" data-status="not_linked">Telegram bot is not linked.</small>
                 </label>
                 <label class="toggle-field">
                   <input name="alerts.paid" type="checkbox" checked />
@@ -391,7 +392,7 @@
                 </label>
               </div>
               <div class="settings-actions">
-                <button class="ghost-action" id="sendTelegramTest" type="button">Verify Telegram</button>
+                <button class="ghost-action" id="sendTelegramTest" type="button">Send test message</button>
                 <button class="primary-action" type="submit">Save settings</button>
               </div>
               <p class="muted">Payments are designed to move directly from the payer wallet to this merchant wallet. The app does not hold funds.</p>
@@ -448,6 +449,7 @@
     <script src="/memo-util.js"></script>
     <script src="/batch-util.js"></script>
     <script src="/nav-drawer.js"></script>
+    <script src="/payment-verification.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

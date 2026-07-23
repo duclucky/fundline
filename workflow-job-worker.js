@@ -11,6 +11,7 @@ function createWorkflowJobWorker(options) {
   const leaseMs = Math.max(1, Number(options.leaseMs) || 60000);
   const heartbeatMs = Math.max(1, Number(options.heartbeatMs) || Math.floor(leaseMs / 3) || 1);
   const pollMs = Math.max(1, Number(options.pollMs) || 1000);
+  const settlementRetryMs = Math.max(1, Number(options.settlementRetryMs) || 5000);
   const now = typeof options.now === "function" ? options.now : Date.now;
   const schedule = typeof options.setTimeout === "function" ? options.setTimeout : setTimeout;
   const cancel = typeof options.clearTimeout === "function" ? options.clearTimeout : clearTimeout;
@@ -92,6 +93,7 @@ function createWorkflowJobWorker(options) {
         store.update(jobId, ["refunding"], {
           execution: { errorCode: "refund_pending" },
         }, controls.lease);
+        store.deferRetry(jobId, ["refunding"], controls.lease, settlementRetryMs);
       } catch (updateError) {
         if (!isLeaseError(updateError)) throw updateError;
       }
@@ -147,6 +149,12 @@ function createWorkflowJobWorker(options) {
             store.update(job.jobId, ["settlement_pending"], {
               execution: { errorCode: "settlement_pending" },
             }, controls.lease);
+            store.deferRetry(
+              job.jobId,
+              ["settlement_pending"],
+              controls.lease,
+              settlementRetryMs,
+            );
           } catch (updateError) {
             if (!isLeaseError(updateError)) throw updateError;
           }

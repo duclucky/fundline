@@ -81,6 +81,38 @@ async function testSettlementRetryState() {
   assert.equal(store.getResult(jobId).output, "stored");
 }
 
+async function testSettlementRetrySchedule() {
+  const store = createStore();
+  const jobId = createQueuedJob(store, "0x" + "23".repeat(32));
+  let executions = 0;
+  let settlements = 0;
+  const worker = createWorkflowJobWorker({
+    store,
+    workerId: "retry-worker",
+    leaseMs: 60000,
+    settlementRetryMs: 5000,
+    executeJob: async () => {
+      executions += 1;
+      return { output: "stored once", steps: [] };
+    },
+    settleJob: async () => {
+      settlements += 1;
+      if (settlements === 1) throw new Error("receipt pending");
+      return { txHash: "0x" + "24".repeat(32), confirmed: true };
+    },
+    refundJob: async () => ({ txHash: "", confirmed: true }),
+  });
+  assert.equal(await worker.runOnce(), true);
+  assert.equal(store.getJob(jobId).status, "settlement_pending");
+  store.advanceClock(4999);
+  assert.equal(await worker.runOnce(), false);
+  store.advanceClock(1);
+  assert.equal(await worker.runOnce(), true);
+  assert.equal(executions, 1);
+  assert.equal(settlements, 2);
+  assert.equal(store.getJob(jobId).status, "succeeded");
+}
+
 async function testExecutionFailureRefundOrder() {
   const store = createStore();
   const jobId = createQueuedJob(store, "0x" + "33".repeat(32));
@@ -235,6 +267,7 @@ async function testHeartbeatPreventsSecondWorkerClaim() {
 async function main() {
   await testSuccessfulExecutionOrder();
   await testSettlementRetryState();
+  await testSettlementRetrySchedule();
   await testExecutionFailureRefundOrder();
   await testRecoverySkipsExecution();
   await testExpiredProcessingRestartsExecution();

@@ -17,11 +17,26 @@ const USDC_ABI = [
   "function transfer(address to, uint256 amount) returns (bool)",
 ];
 
+function waitForConfirmation(tx, options = {}) {
+  const confirmations = Math.max(1, Number(options.confirmations) || 1);
+  const timeoutMs = Math.max(1, Number(options.timeoutMs) || 30000);
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error("Transaction confirmation timed out.");
+      error.code = "transaction_confirmation_timeout";
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([tx.wait(confirmations), timeout]).finally(() => clearTimeout(timer));
+}
+
 function createRunEscrowClient(config) {
   const escrowAddress = String((config && config.escrowAddress) || "").trim();
   const rpcUrl = String((config && config.rpcUrl) || "").trim();
   const treasuryKey = String((config && config.treasuryKey) || "").trim();
   const usdcAddress = String((config && config.usdcAddress) || "").trim();
+  const confirmationTimeoutMs = Math.max(1, Number(config && config.confirmationTimeoutMs) || 30000);
 
   let provider = null;
   let readContract = null;
@@ -70,14 +85,14 @@ function createRunEscrowClient(config) {
     async release(runId, memoText, onSubmitted) {
       const tx = await ensureTreasury().release(runId, toUtf8Bytes(String(memoText || "")));
       if (typeof onSubmitted === "function") onSubmitted(tx.hash);
-      await tx.wait(1);
+      await waitForConfirmation(tx, { confirmations: 1, timeoutMs: confirmationTimeoutMs });
       return tx.hash;
     },
 
     async refund(runId, onSubmitted) {
       const tx = await ensureTreasury().refund(runId);
       if (typeof onSubmitted === "function") onSubmitted(tx.hash);
-      await tx.wait(1);
+      await waitForConfirmation(tx, { confirmations: 1, timeoutMs: confirmationTimeoutMs });
       return tx.hash;
     },
 
@@ -102,10 +117,10 @@ function createRunEscrowClient(config) {
       }
       const tx = await treasuryUsdc.transfer(to, BigInt(amount));
       if (typeof onSubmitted === "function") onSubmitted(tx.hash);
-      await tx.wait(1);
+      await waitForConfirmation(tx, { confirmations: 1, timeoutMs: confirmationTimeoutMs });
       return tx.hash;
     },
   };
 }
 
-module.exports = { createRunEscrowClient, ESCROW_ABI };
+module.exports = { createRunEscrowClient, waitForConfirmation, ESCROW_ABI };

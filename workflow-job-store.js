@@ -311,6 +311,21 @@ function createWorkflowJobStore(config) {
     });
   }
 
+  function deferRetry(jobId, allowedStatuses, lease, delayMs) {
+    const allowed = new Set(allowedStatuses || []);
+    return mutate(jobId, (job) => {
+      if (!allowed.has(job.status)) throw new Error("Workflow job state precondition failed");
+      assertLease(job, lease);
+      return {
+        ...job,
+        updatedAt: new Date(now()).toISOString(),
+        execution: mergePatch(job.execution, {
+          leaseUntil: now() + Math.max(1, Number(delayMs) || 1),
+        }),
+      };
+    });
+  }
+
   function claimNext(options) {
     const workerId = String(options && options.workerId || "").trim();
     const leaseMs = Math.max(1, Number(options && options.leaseMs) || lockLeaseMs);
@@ -469,6 +484,7 @@ function createWorkflowJobStore(config) {
     bindPayment,
     transition,
     update,
+    deferRetry,
     claimNext,
     renewLease,
     storeResult,

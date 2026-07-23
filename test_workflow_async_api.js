@@ -13,9 +13,15 @@ const PAYER = "0x" + "11".repeat(20);
 const JOB_ID = "0x" + "22".repeat(32);
 
 async function main() {
+  const serverSource = fs.readFileSync("server.js", "utf8");
+  assert.match(serverSource, /ARC_RPC_FALLBACK_URLS/);
+  assert.match(serverSource, /rpcFallbackUrls:/);
+  assert.match(serverSource, /workflowAsyncEnabled:\s*WORKFLOW_MCP_ASYNC_ENABLED/);
   assert.equal(typeof serverModule.buildWorkflowJobResponse, "function");
   assert.equal(typeof serverModule.workflowJobAuthorized, "function");
   assert.equal(typeof serverModule.queueAsyncWorkflowRun, "function");
+  assert.equal(typeof serverModule.hydrateWorkflowResumeInput, "function");
+  assert.equal(typeof serverModule.workflowJobRequestInput, "function");
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fundline-async-api-"));
   const store = createWorkflowJobStore({ baseDir: root });
@@ -78,6 +84,13 @@ async function main() {
   };
   store.storeResult(JOB_ID, { output: "# Durable result", steps: [] }, lease);
   store.transition(JOB_ID, ["processing"], "settlement_pending", {}, lease);
+  const pendingResult = serverModule.buildWorkflowJobResponse(store, store.getJob(JOB_ID));
+  assert.equal(pendingResult.statusCode, 202);
+  assert.equal(pendingResult.body.status, "settlement_pending");
+  assert.equal(pendingResult.body.resultReady, true);
+  assert.equal(pendingResult.body.result.output, "# Durable result");
+  assert.equal(Object.hasOwn(pendingResult.body, "owner"), false);
+  assert.equal(Object.hasOwn(pendingResult.body.request, "input"), false);
   store.transition(JOB_ID, ["settlement_pending"], "succeeded", {
     completedAt: new Date().toISOString(),
   }, lease);
@@ -100,6 +113,31 @@ async function main() {
     request: { ...queueOptions.request, input: { prompt: "Beta" } },
   });
   assert.equal(denied.statusCode, 403);
+
+  assert.deepEqual(serverModule.workflowJobRequestInput({
+    async: true,
+    resume: true,
+    jobId: JOB_ID,
+    runId: JOB_ID,
+    recoveryToken: "secret",
+  }), {});
+  const resumed = serverModule.hydrateWorkflowResumeInput({
+    async: true,
+    resume: true,
+    recoveryToken: "secret",
+  }, {
+    jobId: JOB_ID,
+    request: {
+      tier: "normal",
+      input: { prompt: "Private prompt", mode: "search" },
+    },
+    payment: { reference: JOB_ID },
+  });
+  assert.equal(resumed.prompt, "Private prompt");
+  assert.equal(resumed.mode, "search");
+  assert.equal(resumed.jobId, JOB_ID);
+  assert.equal(resumed.runId, JOB_ID);
+  assert.equal(resumed.resume, true);
 
   console.log("PASS: workflow async API helpers");
 }

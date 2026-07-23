@@ -126,6 +126,26 @@ function run() {
   r = server.seedTelegramLinksFromSellers();
   assert(r.added === 1 && r.dropped === 1, "duplicate chatId across wallets: first wins, the other is dropped");
   assert(server.normalizeAddress(server.loadTelegramLinkDb().links[CHAT_X].wallet) === WALLET_A, "the first seller keeps the shared chatId link");
+
+  // Case 8: derived status and unchanged-Chat-ID repair.
+  resetState();
+  const repairDb = { sellers: { [WALLET_A]: seller(WALLET_A, CHAT_X) } };
+  assert(server.getTelegramLinkStatus(WALLET_A, "") === "not_linked", "empty chat ID is not linked");
+  assert(server.ensureTelegramLinkClaim(repairDb, WALLET_A, CHAT_X) === "pending", "missing claim is repaired as pending");
+  assert(server.getTelegramLinkStatus(WALLET_A, CHAT_X) === "pending", "repaired claim reports pending");
+  server.activateTelegramLink(CHAT_X);
+  const activeBefore = server.loadTelegramLinkDb().links[CHAT_X].confirmedAt;
+  assert(server.ensureTelegramLinkClaim(repairDb, WALLET_A, CHAT_X) === "active", "matching active claim stays active");
+  assert(server.loadTelegramLinkDb().links[CHAT_X].confirmedAt === activeBefore, "active claim confirmation is preserved");
+  server.saveTelegramLinkDb({
+    links: {
+      [CHAT_X]: { wallet: WALLET_B, status: "active", linkedAt: "", confirmedAt: "", lastSeenAt: "" },
+    },
+  });
+  assert(server.ensureTelegramLinkClaim(repairDb, WALLET_A, CHAT_X) === "pending", "mismatched claim is repaired for the seller");
+  assert(server.getTelegramLinkStatus(WALLET_A, CHAT_X) === "pending", "repaired mismatch requires /start again");
+  assert(server.ensureTelegramLinkClaim(repairDb, WALLET_A, "") === "not_linked", "clearing chat ID removes the claim");
+  assert(server.loadTelegramLinkDb().links[CHAT_X] === undefined, "cleared claim is removed from the link store");
 }
 
 function main() {

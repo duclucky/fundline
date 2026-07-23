@@ -89,8 +89,17 @@ const ARC_NATIVE_USDC_DECIMALS = Number(process.env.ARC_NATIVE_USDC_DECIMALS || 
 const ARC_USDC_DECIMALS = Number(process.env.ARC_USDC_DECIMALS || 6);
 const ARC_CHAIN_ID = Number(process.env.ARC_CHAIN_ID || 5042002);
 const ARC_RPC_URL = process.env.ARC_RPC_URL || "https://rpc.testnet.arc.network";
+const ARC_RPC_FALLBACK_URLS = String(
+  process.env.ARC_RPC_FALLBACK_URLS || "https://rpc.testnet.arc.network",
+)
+  .split(",")
+  .map((value) => value.trim())
+  .filter((value) => /^https?:\/\//i.test(value) && value !== ARC_RPC_URL);
 const ARC_NETWORK_NAME = process.env.ARC_NETWORK_NAME || "Arc Testnet";
 const ARC_PAYMENT_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_PAYMENT_ROUTER_ADDRESS || "");
+const ARC_VERIFY_RECENT_PAGES = 2;
+const ARC_VERIFY_ROUTER_CANDIDATE_LIMIT = 20;
+const ARC_VERIFY_RECEIPT_CONCURRENCY = 4;
 // FundlineBatchRouter: one-to-many USDC payout (payroll). Distinct from the single
 // invoice router above. payBatch / payBatchWithMemo emit BatchPaid + BatchItemPaid.
 const ARC_BATCH_ROUTER_ADDRESS = normalizeAddress(process.env.ARC_BATCH_ROUTER_ADDRESS || "");
@@ -110,6 +119,14 @@ const WORKFLOW_JOB_RESULT_TTL_HOURS = Number(process.env.WORKFLOW_JOB_RESULT_TTL
 const WORKFLOW_JOB_METADATA_TTL_HOURS = Number(process.env.WORKFLOW_JOB_METADATA_TTL_HOURS || 720) || 720;
 const WORKFLOW_JOB_LEASE_MS = Number(process.env.WORKFLOW_JOB_LEASE_MS || 900000) || 900000;
 const WORKFLOW_JOB_POLL_MS = Number(process.env.WORKFLOW_JOB_POLL_MS || 1000) || 1000;
+const WORKFLOW_SETTLEMENT_RETRY_MS = Math.max(
+  1000,
+  Number(process.env.WORKFLOW_SETTLEMENT_RETRY_MS || 5000) || 5000,
+);
+const WORKFLOW_SETTLEMENT_CONFIRM_TIMEOUT_MS = Math.max(
+  1000,
+  Number(process.env.WORKFLOW_SETTLEMENT_CONFIRM_TIMEOUT_MS || 30000) || 30000,
+);
 const workflowJobStore = createWorkflowJobStore({
   baseDir: path.join(DATA_DIR, "workflow-jobs"),
   lockLeaseMs: WORKFLOW_JOB_LEASE_MS,
@@ -394,6 +411,7 @@ const runEscrow = runEscrowClient.createRunEscrowClient({
   rpcUrl: ARC_RPC_URL,
   treasuryKey: ARC_TREASURY_PRIVATE_KEY,
   usdcAddress: ARC_USDC_TOKEN_ADDRESS,
+  confirmationTimeoutMs: WORKFLOW_SETTLEMENT_CONFIRM_TIMEOUT_MS,
 });
 const workflowJobSettlement = createWorkflowJobSettlement({
   runEscrow,
@@ -904,6 +922,8 @@ module.exports = {
   saveTelegramLinkDb,
   resolveWalletByChatId,
   claimTelegramChatId,
+  ensureTelegramLinkClaim,
+  getTelegramLinkStatus,
   activateTelegramLink,
   seedTelegramLinksFromSellers,
   loadTelegramSessionDb,
@@ -919,6 +939,10 @@ module.exports = {
   handleTelegramCallback,
   findMatchingTokenTransfer,
   findMatchingNativeTransaction,
+  findArcPayment,
+  inspectPaymentReceipt,
+  selectRecentRouterCandidates,
+  ARC_PAYMENT_ROUTER_ADDRESS,
   amountToUnits,
   normalizeBatch,
   normalizeBatchItem,
@@ -935,6 +959,8 @@ module.exports = {
   requiredModelsForRun,
   buildWorkflowJobResponse,
   workflowJobAuthorized,
+  workflowJobRequestInput,
+  hydrateWorkflowResumeInput,
   queueAsyncWorkflowRun,
   isPrivateStaticPath,
   TELEGRAM_LINK_DB_PATH,
@@ -976,6 +1002,7 @@ function handlePublicConfig(req, res) {
     chainId: ARC_CHAIN_ID,
     chainIdHex: toRpcQuantity(ARC_CHAIN_ID),
     rpcUrl: ARC_RPC_URL,
+    rpcFallbackUrls: ARC_RPC_FALLBACK_URLS,
     explorerBase: ARCSCAN_EXPLORER_BASE,
     usdcTokenAddress: ARC_USDC_TOKEN_ADDRESS,
     usdcDecimals: ARC_USDC_DECIMALS,
@@ -1001,6 +1028,7 @@ function handlePublicConfig(req, res) {
     walletPrivyEnabled: WALLET_PRIVY_ENABLED,
     walletPrivyPolicyEnabled: WALLET_PRIVY_POLICY_ENABLED && privyServerClient.available(),
     workflowRunnerEnabled: WORKFLOW_RATE_LIMIT_ENABLED,
+    workflowAsyncEnabled: WORKFLOW_MCP_ASYNC_ENABLED,
     // Final-node models per tier, so the UI can show the real v98store model on the final
     // step. Null when v98store is not configured (UI keeps the normal labels).
     workflowFinalModels: V98STORE_API_KEY ? { ...WORKFLOW_FINAL_MODELS } : null,
@@ -1708,19 +1736,37 @@ function workflowJobAuthorized(store, job, credentials) {
 
 function workflowJobRequestInput(input) {
   const clean = JSON.parse(JSON.stringify(input || {}));
-  ["async", "jobId", "runId", "recoveryToken", "payment", "paymentMode"].forEach((key) => {
+  ["async", "resume", "jobId", "runId", "recoveryToken", "payment", "paymentMode", "stream"].forEach((key) => {
     delete clean[key];
   });
   return clean;
 }
 
+function hydrateWorkflowResumeInput(input, existingJob) {
+  return {
+    ...(existingJob.request?.input || {}),
+    async: true,
+    resume: true,
+    jobId: existingJob.jobId,
+    runId: existingJob.payment?.reference || existingJob.jobId,
+    recoveryToken: input.recoveryToken,
+    stream: false,
+  };
+}
+
 function buildWorkflowJobResponse(store, job) {
   if (!job) return { statusCode: 404, body: { error: "run_not_found" } };
   const body = store.publicJob(job);
-  if (job.status === "succeeded") {
+  if (job.execution && job.execution.resultStored) {
     const result = store.getResult(job.jobId);
-    if (result) body.result = result;
-    else body.resultExpired = true;
+    if (result) {
+      body.resultReady = true;
+      body.result = result;
+    } else {
+      body.resultExpired = true;
+    }
+  }
+  if (job.status === "succeeded") {
     return { statusCode: 200, body };
   }
   if (job.status === "refunded") return { statusCode: 200, body };
@@ -1953,6 +1999,7 @@ function startWorkflowJobSystem() {
     workerId: "server-" + process.pid,
     leaseMs: WORKFLOW_JOB_LEASE_MS,
     pollMs: WORKFLOW_JOB_POLL_MS,
+    settlementRetryMs: WORKFLOW_SETTLEMENT_RETRY_MS,
     executeJob: executeDurableWorkflowJob,
     settleJob: settleDurableWorkflowJob,
     refundJob: refundDurableWorkflowJob,
@@ -2102,6 +2149,27 @@ async function handleWorkflowRun(req, res, slug) {
     return;
   }
 
+  const agentAuth = optionalAgentApiKey(req);
+  if (agentAuth.present && !agentAuth.ok) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
+    return;
+  }
+  const resumeJobId = String(input.jobId || input.runId || "").toLowerCase();
+  if (WORKFLOW_MCP_ASYNC_ENABLED && input.async === true && input.resume === true
+    && /^0x[0-9a-f]{64}$/.test(resumeJobId)) {
+    const resumeJob = workflowJobStore.getJob(resumeJobId);
+    if (!resumeJob || !workflowJobAuthorized(workflowJobStore, resumeJob, {
+      rateKey: agentAuth.ok ? agentAuth.rateKey : "",
+      recoveryToken: String(input.recoveryToken || req.headers["x-fundline-recovery-token"] || ""),
+    })) {
+      sendJson(res, 403, { error: "run_forbidden" });
+      return;
+    }
+    if (resumeJob.status === "awaiting_payment") {
+      input = hydrateWorkflowResumeInput(input, resumeJob);
+    }
+  }
+
   const query = String(input.prompt || input.query || "").trim().slice(0, 20000);
   const mode = input.mode === "paste" ? "paste" : "search";
   const pastedSources = input.sources;
@@ -2128,13 +2196,6 @@ async function handleWorkflowRun(req, res, slug) {
     return;
   }
 
-  // Authentication is optional, but a supplied invalid key is always rejected.
-  // Resolve it before payment so an idempotent async retry can return its stored state.
-  const agentAuth = optionalAgentApiKey(req);
-  if (agentAuth.present && !agentAuth.ok) {
-    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
-    return;
-  }
   const asyncRequested = input.async === true && WORKFLOW_MCP_ASYNC_ENABLED;
   const requestedJobId = String(input.jobId || input.runId || "").toLowerCase();
   if (asyncRequested && /^0x[0-9a-f]{64}$/.test(requestedJobId)) {
@@ -3299,6 +3360,31 @@ function claimTelegramChatId(sellerDb, wallet, rawChatId) {
   return chatId;
 }
 
+function getTelegramLinkStatus(wallet, rawChatId) {
+  const walletKey = normalizeAddress(wallet);
+  const chatId = String(rawChatId || "").trim();
+  if (!walletKey || !chatId) return "not_linked";
+
+  const link = loadTelegramLinkDb().links[chatId];
+  if (!link || normalizeAddress(link.wallet) !== walletKey) return "not_linked";
+  return link.status === "active" ? "active" : "pending";
+}
+
+function ensureTelegramLinkClaim(sellerDb, wallet, rawChatId) {
+  const walletKey = normalizeAddress(wallet);
+  const chatId = String(rawChatId || "").trim().slice(0, 64);
+  if (!walletKey) return "not_linked";
+  if (!chatId) {
+    claimTelegramChatId(sellerDb, walletKey, "");
+    return "not_linked";
+  }
+
+  const status = getTelegramLinkStatus(walletKey, chatId);
+  if (status === "active" || status === "pending") return status;
+  claimTelegramChatId(sellerDb, walletKey, chatId);
+  return "pending";
+}
+
 // One-time, idempotent migration. Merchants who set telegramChatId before the
 // link store existed have no link entry, so /start would bounce them to setup.
 // Seed those chatIds as "pending" so a single /start activates them (no need to
@@ -4337,86 +4423,153 @@ async function handleVerifyPayment(req, res) {
         error: error.message || "Arcscan verification failed",
       });
     }
+    if (error.code === "rpc_timeout" || error.code === "explorer_timeout") {
+      sendJson(res, 504, {
+        error: {
+          code: error.code,
+          message: error.message || "Payment verification timed out",
+        },
+      });
+      return;
+    }
     sendJson(res, 500, { error: error.message || "Arcscan verification failed" });
   }
 }
 
-async function findArcPayment(criteria) {
-  // 1. Strict path first: prefer the PaymentRouter InvoicePaid binding (it carries
-  //    the onchainInvoiceId). Connect-wallet payments go through the router and
-  //    verify here; this path is unchanged.
-  if (criteria.requireInvoiceReference) {
-    const strict = criteria.txHash
-      ? await findPaymentInRpcReceipt(criteria)
-      : await findRecentReferencedPayment(criteria);
-    if (strict) return strict;
-    // No router-bound match. Fall through to accept a direct USDC transfer made
-    // without the router (QR / manual payers who scan-to-pay). These are guarded
-    // by exact amount + recipient + recency + the (txHash) double-spend guard in
-    // the caller, but carry no onchainInvoiceId, so they are a weaker,
-    // unreferenced settlement signal by design.
-  }
+async function findArcPayment(criteria, lookupOverrides = {}) {
+  const lookups = {
+    inspectPaymentInRpcReceipt,
+    findRecentReferencedPayment,
+    findTokenTransferByTx,
+    findNativeTransferByTx,
+    findRecentTokenTransfer,
+    findRecentNativeTransfer,
+    ...lookupOverrides,
+  };
 
-  // 2. Direct transfer, txHash-scoped (preferred over recent-list scans because
-  //    a supplied hash binds the payment explicitly). Precedence: ERC-20 Transfer
-  //    (6 decimals) before native USDC value (18 decimals).
   if (criteria.txHash) {
-    const receiptMatch = await findPaymentInRpcReceipt({ ...criteria, requireInvoiceReference: false });
-    if (receiptMatch) return receiptMatch;
-    const tokenByTx = await findTokenTransferByTx(criteria);
+    const inspection = await lookups.inspectPaymentInRpcReceipt(criteria);
+    if (inspection.routerMatch) return inspection.routerMatch;
+    if (inspection.routerConflict) return null;
+    if (inspection.directMatch) return inspection.directMatch;
+    const tokenByTx = await lookups.findTokenTransferByTx(criteria);
     if (tokenByTx) return tokenByTx;
-    const nativeByTx = await findNativeTransferByTx(criteria);
+    const nativeByTx = await lookups.findNativeTransferByTx(criteria);
     if (nativeByTx) return nativeByTx;
+    return null;
   }
 
-  // 3. Direct transfer, recent-list scan (last resort, when no txHash is given).
-  const recentToken = await findRecentTokenTransfer(criteria);
+  if (criteria.requireInvoiceReference) {
+    const strict = await lookups.findRecentReferencedPayment(criteria);
+    if (strict) return strict;
+  }
+  const recentToken = await lookups.findRecentTokenTransfer(criteria);
   if (recentToken) return recentToken;
-  const recentNative = await findRecentNativeTransfer(criteria);
+  const recentNative = await lookups.findRecentNativeTransfer(criteria);
   if (recentNative) return recentNative;
   return null;
 }
 
-async function findPaymentInRpcReceipt(criteria) {
-  if (!criteria.txHash || !ARC_RPC_URL) return null;
+function inspectPaymentReceipt(receipt, criteria) {
+  if (!receipt || String(receipt.status || "").toLowerCase() !== "0x1") {
+    return { routerMatch: null, directMatch: null, routerConflict: false };
+  }
+  const logs = Array.isArray(receipt.logs) ? receipt.logs : [];
+  const routerMatchLog = findInvoicePaidLog(logs, criteria);
+  const transferMatchLog = findUsdcTransferLog(logs, criteria);
+  const hasRouterEvent = logs.map(normalizeReceiptLog).some((log) =>
+    sameAddress(log.address, ARC_PAYMENT_ROUTER_ADDRESS) && log.topics[0] === INVOICE_PAID_TOPIC
+  );
+  const base = {
+    txHash: criteria.txHash,
+    explorerUrl: `${ARCSCAN_EXPLORER_BASE}/tx/${criteria.txHash}`,
+    from: criteria.payerWallet,
+    to: criteria.merchantWallet,
+    timestamp: "",
+    blockNumber: hexToNumber(receipt.blockNumber),
+    tokenSymbol: "USDC",
+    tokenAddress: ARC_USDC_TOKEN_ADDRESS,
+  };
+  const routerMatch = routerMatchLog && transferMatchLog ? {
+    ...base,
+    source: "rpc_payment_router_event",
+    rawAmount: String(routerMatchLog.amount),
+    onchainInvoiceId: criteria.onchainInvoiceId,
+    referenceVerified: true,
+    transferVerified: true,
+  } : null;
+  const directMatch = transferMatchLog ? {
+    ...base,
+    source: "rpc_usdc_transfer_log",
+    rawAmount: String(transferMatchLog.amount),
+    onchainInvoiceId: "",
+    referenceVerified: false,
+    transferVerified: true,
+  } : null;
+  return {
+    routerMatch,
+    directMatch,
+    routerConflict: Boolean(criteria.requireInvoiceReference && hasRouterEvent && !routerMatchLog),
+  };
+}
+
+async function inspectPaymentInRpcReceipt(criteria) {
+  if (!criteria.txHash || !ARC_RPC_URL) {
+    return { routerMatch: null, directMatch: null, routerConflict: false };
+  }
   try {
     const receipt = await rpcRequest("eth_getTransactionReceipt", [criteria.txHash]);
-    if (!receipt || String(receipt.status || "").toLowerCase() !== "0x1") return null;
-    const logs = Array.isArray(receipt.logs) ? receipt.logs : [];
-    const routerEvent = findInvoicePaidLog(logs, criteria);
-    const transferEvent = findUsdcTransferLog(logs, criteria);
-    if (criteria.requireInvoiceReference && (!routerEvent || !transferEvent)) return null;
-    if (!routerEvent && !transferEvent) return null;
-    return {
-      source: routerEvent ? "rpc_payment_router_event" : "rpc_usdc_transfer_log",
-      txHash: criteria.txHash,
-      explorerUrl: `${ARCSCAN_EXPLORER_BASE}/tx/${criteria.txHash}`,
-      from: criteria.payerWallet,
-      to: criteria.merchantWallet,
-      timestamp: "",
-      blockNumber: hexToNumber(receipt.blockNumber),
-      tokenSymbol: "USDC",
-      tokenAddress: ARC_USDC_TOKEN_ADDRESS,
-      rawAmount: String((routerEvent || transferEvent).amount),
-      onchainInvoiceId: routerEvent ? criteria.onchainInvoiceId : "",
-      referenceVerified: Boolean(routerEvent),
-      transferVerified: Boolean(transferEvent),
-    };
-  } catch {
-    return null;
+    return inspectPaymentReceipt(receipt, criteria);
+  } catch (error) {
+    if (error.code === "rpc_timeout") throw error;
+    return { routerMatch: null, directMatch: null, routerConflict: false };
   }
 }
 
-async function findRecentReferencedPayment(criteria) {
-  const transactions = await fetchArcscanItems(`/addresses/${criteria.payerWallet}/transactions`, {}, 3);
-  for (const transaction of transactions) {
+async function findPaymentInRpcReceipt(criteria) {
+  const inspection = await inspectPaymentInRpcReceipt(criteria);
+  return criteria.requireInvoiceReference
+    ? inspection.routerMatch
+    : (inspection.routerMatch || inspection.directMatch);
+}
+
+function selectRecentRouterCandidates(transactions, criteria, limit = ARC_VERIFY_ROUTER_CANDIDATE_LIMIT) {
+  return (Array.isArray(transactions) ? transactions : []).filter((transaction) => {
     const txHash = normalizeTxHash(transaction.hash || transaction.transaction_hash);
-    if (!txHash) continue;
     const from = normalizeAddress(transaction.from?.hash || transaction.from);
-    if (from && !sameAddress(from, criteria.payerWallet)) continue;
-    if (!isRecentEnough(transaction.timestamp, criteria.createdAt)) continue;
-    const match = await findPaymentInRpcReceipt({ ...criteria, txHash });
-    if (match) return { ...match, timestamp: transaction.timestamp || match.timestamp };
+    const to = normalizeAddress(transaction.to?.hash || transaction.to);
+    return Boolean(
+      txHash
+      && sameAddress(from, criteria.payerWallet)
+      && sameAddress(to, ARC_PAYMENT_ROUTER_ADDRESS)
+      && isRecentEnough(transaction.timestamp, criteria.createdAt)
+    );
+  }).slice(0, limit);
+}
+
+async function findRecentReferencedPayment(criteria) {
+  const transactions = await fetchArcscanItems(
+    `/addresses/${criteria.payerWallet}/transactions`,
+    {},
+    ARC_VERIFY_RECENT_PAGES,
+  );
+  const candidates = selectRecentRouterCandidates(transactions, criteria);
+  for (let index = 0; index < candidates.length; index += ARC_VERIFY_RECEIPT_CONCURRENCY) {
+    const batch = candidates.slice(index, index + ARC_VERIFY_RECEIPT_CONCURRENCY);
+    const inspections = await Promise.all(batch.map((transaction) =>
+      inspectPaymentInRpcReceipt({
+        ...criteria,
+        txHash: normalizeTxHash(transaction.hash || transaction.transaction_hash),
+      })
+    ));
+    for (let offset = 0; offset < inspections.length; offset += 1) {
+      if (inspections[offset].routerMatch) {
+        return {
+          ...inspections[offset].routerMatch,
+          timestamp: batch[offset].timestamp || inspections[offset].routerMatch.timestamp,
+        };
+      }
+    }
   }
   return null;
 }
@@ -4456,13 +4609,18 @@ async function findTokenTransferByTx(criteria) {
   try {
     const transfers = await fetchArcscanItems(`/transactions/${criteria.txHash}/token-transfers`, {}, 1);
     return findMatchingTokenTransfer(transfers, criteria);
-  } catch {
+  } catch (error) {
+    if (error.code === "explorer_timeout") throw error;
     return null;
   }
 }
 
 async function findRecentTokenTransfer(criteria) {
-  const transfers = await fetchArcscanItems(`/addresses/${criteria.payerWallet}/token-transfers`, { type: "ERC-20" }, 4);
+  const transfers = await fetchArcscanItems(
+    `/addresses/${criteria.payerWallet}/token-transfers`,
+    { type: "ERC-20" },
+    ARC_VERIFY_RECENT_PAGES,
+  );
   return findMatchingTokenTransfer(transfers, criteria);
 }
 
@@ -4470,13 +4628,18 @@ async function findNativeTransferByTx(criteria) {
   try {
     const tx = await fetchArcscanJson(`/transactions/${criteria.txHash}`);
     return findMatchingNativeTransaction([tx], criteria);
-  } catch {
+  } catch (error) {
+    if (error.code === "explorer_timeout") throw error;
     return null;
   }
 }
 
 async function findRecentNativeTransfer(criteria) {
-  const transactions = await fetchArcscanItems(`/addresses/${criteria.payerWallet}/transactions`, {}, 3);
+  const transactions = await fetchArcscanItems(
+    `/addresses/${criteria.payerWallet}/transactions`,
+    {},
+    ARC_VERIFY_RECENT_PAGES,
+  );
   return findMatchingNativeTransaction(transactions, criteria);
 }
 
@@ -4731,13 +4894,9 @@ async function handleTelegramVerifyAlert(req, res) {
 
 function buildVerifyAlertMessage() {
   return [
-    "Fundline is connected.",
+    "Fundline test message delivered.",
     "",
-    "Send a USDC invoice as one link. Your client pays from Arc, Base, or Ethereum.",
-    "Fundline confirms the payment on-chain before marking it received.",
-    "Money goes straight to your wallet - never through us.",
-    "",
-    "Your payment alerts are active.",
+    "To finish linking this chat and open the invoice menu, send /start.",
   ].join("\n");
 }
 
@@ -5531,7 +5690,9 @@ function rpcRequest(method, params = []) {
       },
     );
     request.setTimeout(15000, () => {
-      request.destroy(new Error("Arc RPC request timed out"));
+      const error = new Error("Arc RPC request timed out");
+      error.code = "rpc_timeout";
+      request.destroy(error);
     });
     request.on("error", reject);
     request.write(body);
@@ -5989,7 +6150,9 @@ function requestJson(url) {
       },
     );
     request.setTimeout(15000, () => {
-      request.destroy(new Error("Arcscan request timed out"));
+      const error = new Error("Arcscan request timed out");
+      error.code = "explorer_timeout";
+      request.destroy(error);
     });
     request.on("error", reject);
     request.end();
@@ -6320,7 +6483,8 @@ async function handleDashboardSettings(req, res) {
     const db = loadSellerDb();
     const existing = db.sellers[sellerId] || { wallet: sellerId, displayName: "", telegramChatId: "", alerts: { paid: true, failed: true, overdue: true } };
     const settings = { displayName: "", ...existing };
-    sendJson(res, 200, { settings });
+    const telegramLinkStatus = getTelegramLinkStatus(sellerId, settings.telegramChatId);
+    sendJson(res, 200, { settings, telegramLinkStatus });
     return;
   }
 
@@ -6344,14 +6508,12 @@ async function handleDashboardSettings(req, res) {
         telegramChatId: nextChatId,
         alerts
       };
-      // Maintain the confirmed 1:1 chatId<->wallet link store, but only when the
-      // chatId actually changed so a confirmed link is not reset to pending on an
-      // unrelated settings save (e.g. just toggling an alert).
-      if (patch.telegramChatId !== undefined && String(nextChatId).trim() !== String(existing.telegramChatId || "").trim()) {
-        claimTelegramChatId(db, sellerId, nextChatId);
+      let telegramLinkStatus = getTelegramLinkStatus(sellerId, nextChatId);
+      if (patch.telegramChatId !== undefined) {
+        telegramLinkStatus = ensureTelegramLinkClaim(db, sellerId, nextChatId);
       }
       saveSellerDb(db);
-      sendJson(res, 200, { settings: db.sellers[sellerId] });
+      sendJson(res, 200, { settings: db.sellers[sellerId], telegramLinkStatus });
     } catch (err) {
       sendJson(res, 400, { error: { code: "BAD_REQUEST", message: err.message } });
     }

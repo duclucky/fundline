@@ -96,7 +96,7 @@ check("client refund supports submission callback", /async refund\(runId, onSubm
 check("client transfer supports submission callback", /async transferUsdc\(to, amount, onSubmitted\)/.test(clientSource));
 check("client can reconcile transaction receipts", /async getTransactionStatus\(txHash\)/.test(clientSource));
 const callbackIndex = clientSource.indexOf("onSubmitted(tx.hash)");
-const waitIndex = clientSource.indexOf("await tx.wait(1)", callbackIndex);
+const waitIndex = clientSource.indexOf("await waitForConfirmation(tx", callbackIndex);
 check("client records submitted hash before receipt wait", callbackIndex >= 0 && waitIndex > callbackIndex);
 
 console.log(`\nrun escrow surface test: ${passed} passed, ${failed} failed`);

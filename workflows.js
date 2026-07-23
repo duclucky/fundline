@@ -1047,6 +1047,11 @@ function navigate(href) {
 // "coming soon" (safe to deploy the frontend before the server flag/keys are on).
 let WF_RUNNER_ENABLED = false;
 let WF_CONFIG = {};
+const WF_RECOVERY_STORE = window.FundlineWorkflowRuntime.createRecoveryStore(
+  window.localStorage,
+  "fundline-workflow-jobs-v1",
+);
+const WF_SHOWN_RESULTS = new Set();
 function isWorkflowLive(wf) {
   return Boolean(wf && wf.live && WF_RUNNER_ENABLED);
 }
@@ -1074,12 +1079,11 @@ function getEthProvider() {
   return (window.FundlineWallet && window.FundlineWallet.getProvider && window.FundlineWallet.getProvider()) || window.ethereum || null;
 }
 function circleReadShim() {
-  var rpc = "https://rpc.testnet.arc.network";
-  return { request: function (args) {
-    return fetch(rpc, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: (args || {}).method, params: (args || {}).params || [] }) })
-      .then(function (r) { return r.json(); })
-      .then(function (j) { if (j && j.error) throw new Error((j.error && j.error.message) || "RPC error"); return j.result; });
-  } };
+  return window.FundlineWorkflowRuntime.createRpcReadProvider({
+    rpcUrls: window.FundlineWorkflowRuntime.normalizeRpcUrls(WF_CONFIG),
+    fetchImpl: window.fetch.bind(window),
+    rpcTimeoutMs: 10000,
+  });
 }
 function encAddr(a) { return String(a).toLowerCase().replace(/^0x/, "").padStart(64, "0"); }
 function encUint(n) { return BigInt(n).toString(16).padStart(64, "0"); }
@@ -1122,16 +1126,13 @@ async function sendWalletTx(provider, from, to, data, opts) {
   // opts.viaServer lets embedded (Privy) wallets co-sign routine run-funding server-side (no MFA).
   return window.FundlineWallet.sendTransaction({ from, to, data, value: "0x0" }, opts);
 }
-async function waitWalletTx(provider, hash) {
-  for (let i = 0; i < 60; i += 1) {
-    await new Promise((r) => setTimeout(r, 3000));
-    const rcpt = await provider.request({ method: "eth_getTransactionReceipt", params: [hash] });
-    if (rcpt) {
-      if (rcpt.status === "0x0") throw new Error("Transaction reverted on-chain.");
-      return rcpt;
-    }
-  }
-  throw new Error("Transaction not confirmed in time.");
+function waitWalletTx(provider, hash) {
+  return window.FundlineWorkflowRuntime.waitForReceipt({
+    request: (method, params) => provider.request({ method, params }),
+    txHash: hash,
+    timeoutMs: 60000,
+    pollMs: 2000,
+  });
 }
 
 // Quote -> approve (if needed) -> fund the escrow from the user's wallet.
@@ -1195,6 +1196,251 @@ async function fundWorkflowRun(slug, statusFn, tier) {
   statusFn("Confirming payment...");
   await waitWalletTx(provider, fundHash);
   return quote.runId;
+}
+
+function buildWorkflowRunInput(opts) {
+  const input = {
+    prompt: opts.prompt,
+    mode: opts.mode,
+    tier: opts.tier || "normal",
+  };
+  if (opts.sources && opts.sources.length) input.sources = opts.sources;
+  if (opts.chain) input.chain = opts.chain;
+  if (opts.token) input.token = opts.token;
+  if (opts.brief && Object.keys(opts.brief).length) input.brief = opts.brief;
+  if (opts.research) input.research = opts.research;
+  return input;
+}
+
+function setDurableWorkflowStatus(text) {
+  const button = document.getElementById("wfRunBtn");
+  if (button) {
+    button.disabled = true;
+    button.textContent = text;
+  }
+}
+
+function showDurableWorkflowResult(record, wf, result) {
+  if (WF_SHOWN_RESULTS.has(record.jobId)) return;
+  WF_SHOWN_RESULTS.add(record.jobId);
+  const output = String(result.output || "");
+  const resultEl = document.getElementById("wfRunResult");
+  if (resultEl) {
+    resultEl.hidden = false;
+    const label = resultEl.querySelector(".wf-run-result-label");
+    if (label) label.textContent = "Result";
+    const message = document.getElementById("wfRunResultMsg");
+    if (message) message.hidden = true;
+    const viewButton = document.getElementById("wfViewResultBtn");
+    if (viewButton) {
+      viewButton.hidden = false;
+      viewButton.onclick = () => openResultModal(output, record.slug, result.cvJson, result.file);
+    }
+  }
+  pushRunHistory({
+    id: record.runId,
+    slug: record.slug,
+    workflow: wf.name,
+    status: "completed",
+    at: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
+    output,
+    releaseTx: result.releaseTx || null,
+    charged: wf.tiers?.[record.tier]?.price || wf.price,
+  });
+  openResultModal(output, record.slug, result.cvJson, result.file);
+}
+
+function showDurableResumeAction(record, wf) {
+  displayRunError(`Payment recovery is ready for run ${record.runId}.`);
+  const resultEl = document.getElementById("wfRunResult");
+  if (!resultEl || document.getElementById("wfResumeDurable")) return;
+  const button = document.createElement("button");
+  button.id = "wfResumeDurable";
+  button.className = "wf-btn-secondary";
+  button.type = "button";
+  button.textContent = "Resume paid run";
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    resumeDurableWorkflow(record, wf).catch((error) => {
+      button.disabled = false;
+      displayRunError(error.message || "Could not resume this run.");
+    });
+  });
+  resultEl.appendChild(button);
+}
+
+async function pollDurableWorkflow(record, wf) {
+  while (true) {
+    const body = await window.FundlineWorkflowRuntime.fetchRunStatus({
+      fetchImpl: window.fetch.bind(window),
+      jobId: record.jobId,
+      recoveryToken: record.recoveryToken,
+      timeoutMs: 10000,
+    });
+    const labels = {
+      queued: "Queued...",
+      processing: "Running...",
+      settlement_pending: "Finalizing payment...",
+      refunding: "Refunding...",
+    };
+    if (labels[body.status]) setDurableWorkflowStatus(labels[body.status]);
+    if (body.result) showDurableWorkflowResult(record, wf, body.result);
+
+    if (body.status === "succeeded") {
+      WF_RECOVERY_STORE.remove(record.jobId);
+      const button = document.getElementById("wfRunBtn");
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Run again";
+      }
+      return body;
+    }
+    if (body.status === "refunded" || body.status === "failed") {
+      WF_RECOVERY_STORE.remove(record.jobId);
+      displayRunError(body.status === "refunded"
+        ? "The workflow did not complete and the escrow payment was refunded."
+        : "The workflow failed before completion.");
+      return body;
+    }
+    if (body.status === "awaiting_payment") {
+      showDurableResumeAction(record, wf);
+      return body;
+    }
+    await new Promise((resolve) => setTimeout(
+      resolve,
+      Math.max(1, Number(body.retryAfterSeconds) || 1) * 1000,
+    ));
+  }
+}
+
+async function resumeDurableWorkflow(record, wf) {
+  setDurableWorkflowStatus("Resuming...");
+  const response = await fetch(`/api/workflows/${record.slug}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      async: true,
+      resume: true,
+      jobId: record.jobId,
+      runId: record.runId,
+      recoveryToken: record.recoveryToken,
+      tier: record.tier,
+      stream: false,
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (response.status !== 200 && response.status !== 202) {
+    throw new Error(body.message || body.error?.message || body.error || "Could not resume this run.");
+  }
+  return pollDurableWorkflow(record, wf);
+}
+
+async function runDurableWorkflow(slug, wf, opts) {
+  const runInput = buildWorkflowRunInput(opts);
+  const status = (text) => setDurableWorkflowStatus(text);
+  status("Checking availability...");
+  const preflight = await fetch(`/api/workflows/${slug}/preflight?tier=${encodeURIComponent(runInput.tier)}`, {
+    headers: { "Accept": "application/json" },
+  }).then((response) => response.json().catch(() => ({}))).catch(() => ({}));
+  if (preflight.ok === false) {
+    throw new Error((preflight.reason || "This workflow is temporarily unavailable.") + " You have not been charged.");
+  }
+
+  const provider = getEthProvider();
+  if (!provider) throw new Error("No wallet found. Install a wallet to pay and run.");
+  let from = window.FundlineWallet ? window.FundlineWallet.getAddress() : "";
+  if (!from) {
+    status("Connecting wallet...");
+    from = window.FundlineWallet ? await window.FundlineWallet.connect() : "";
+    if (!from) throw new Error("Connect your wallet to run this workflow.");
+  }
+  await ensureArcChain(provider);
+
+  status("Getting quote...");
+  const quoteResponse = await fetch(`/api/workflows/${slug}/quote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...runInput, async: true, paymentMode: "escrow" }),
+  });
+  const quote = await quoteResponse.json().catch(() => ({}));
+  if (!quoteResponse.ok) throw new Error(quote.message || quote.error?.message || "Could not get a quote.");
+  const record = {
+    version: 1,
+    jobId: quote.jobId,
+    runId: quote.runId,
+    recoveryToken: quote.recoveryToken,
+    wallet: from,
+    slug,
+    tier: runInput.tier,
+    createdAt: new Date().toISOString(),
+  };
+  WF_RECOVERY_STORE.put(record);
+
+  const amount = BigInt(quote.amount);
+  const allowance = await readAllowance(provider, quote.usdc, from, quote.escrowAddress);
+  if (allowance < amount) {
+    status("Approve USDC in your wallet...");
+    const approveData = ERC20_APPROVE_SELECTOR + encAddr(quote.escrowAddress) + encUint(MAX_UINT256);
+    const approveHash = await sendWalletTx(provider, from, quote.usdc, approveData, { viaServer: true });
+    status("Confirming approval...");
+    try {
+      await waitWalletTx(provider, approveHash);
+    } catch (error) {
+      if (error.code === "transaction_confirmation_timeout") {
+        error.message = `Approval was submitted but confirmation timed out. Transaction: ${approveHash}`;
+      }
+      throw error;
+    }
+  }
+
+  status("Confirm payment in your wallet...");
+  const fundData = ESCROW_FUND_SELECTOR + encBytes32(quote.runId) + encUint(amount);
+  const fundHash = await sendWalletTx(provider, from, quote.escrowAddress, fundData, { viaServer: true });
+  status("Confirming payment...");
+  try {
+    await waitWalletTx(provider, fundHash);
+  } catch (error) {
+    if (error.code === "transaction_confirmation_timeout") {
+      error.message = `Payment was submitted but confirmation timed out. Transaction: ${fundHash}`;
+    }
+    throw error;
+  }
+
+  status("Queueing workflow...");
+  const runResponse = await fetch(`/api/workflows/${slug}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...runInput,
+      async: true,
+      jobId: quote.jobId,
+      runId: quote.runId,
+      recoveryToken: quote.recoveryToken,
+      stream: false,
+    }),
+  });
+  const queued = await runResponse.json().catch(() => ({}));
+  if (runResponse.status !== 200 && runResponse.status !== 202) {
+    throw new Error(queued.message || queued.error?.message || queued.error || "Could not queue the workflow.");
+  }
+  if (queued.result) showDurableWorkflowResult(record, wf, queued.result);
+  return pollDurableWorkflow(record, wf);
+}
+
+function resumeVisibleDurableWorkflow() {
+  if (!WF_CONFIG.workflowAsyncEnabled) return;
+  const route = getRoute();
+  const wallet = currentWallet();
+  if (route.page !== "detail" || !wallet) return;
+  const wf = WORKFLOWS[route.slug];
+  if (!wf) return;
+  const records = WF_RECOVERY_STORE.listForWallet(wallet)
+    .filter((record) => record.slug === route.slug);
+  records.forEach((record) => {
+    pollDurableWorkflow(record, wf).catch((error) => {
+      displayRunError(error.message || "Could not recover this workflow run.");
+    });
+  });
 }
 
 // Show an error in the run result area (funding failures or run failures).
@@ -1495,6 +1741,10 @@ if (typeof document !== "undefined") {
   document.addEventListener("fundline:walletchange", function () {
     try { if (getRoute().page === "runs") render(); } catch (_) {}
     maybeSwitchToArc();
+    window.setTimeout(resumeVisibleDurableWorkflow, 0);
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) resumeVisibleDurableWorkflow();
   });
 }
 
@@ -2071,23 +2321,35 @@ function bindDetail(slug, wf) {
         if (!sources.length) { flashOutline(pasteEl); return; }
       }
       switchToTab("Workflow Steps");
+      const runOptions = {
+        prompt,
+        mode: retrievalMode,
+        sources,
+        tier: activeTier,
+        chain: fieldMap.chain,
+        token: fieldMap.token,
+        brief,
+        research: fieldMap.research,
+      };
 
       if (isBillingEnabled(wf)) {
-        // Pay first: quote -> approve -> fund the escrow, then run with the runId.
         const runBtn = document.getElementById("wfRunBtn");
         const runIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>`;
         runBtn.disabled = true;
         document.getElementById("wfRunResult").hidden = true;
         document.getElementById("wfRunReceipt").hidden = true;
-        fundWorkflowRun(slug, (text) => { runBtn.innerHTML = esc(text); }, activeTier)
-          .then((runId) => runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, runId, tier: activeTier, chain: fieldMap.chain, token: fieldMap.token, brief: brief, research: fieldMap.research }))
+        const execution = WF_CONFIG.workflowAsyncEnabled
+          ? runDurableWorkflow(slug, wf, runOptions)
+          : fundWorkflowRun(slug, (text) => { runBtn.innerHTML = esc(text); }, activeTier)
+            .then((runId) => runWorkflow(slug, wf, { ...runOptions, runId }));
+        execution
           .catch((err) => {
             runBtn.disabled = false;
             runBtn.innerHTML = `${runIcon} Run Workflow`;
             displayRunError(err.message || "Payment was not completed.");
           });
       } else {
-        runWorkflow(slug, wf, { prompt, mode: retrievalMode, sources, tier: activeTier, chain: fieldMap.chain, token: fieldMap.token, brief: brief, research: fieldMap.research });
+        runWorkflow(slug, wf, runOptions);
       }
     });
   }
@@ -2508,12 +2770,17 @@ window.addEventListener("DOMContentLoaded", () => {
   bindSidebarToggles();
   fetch("/api/config")
     .then((r) => r.json())
-    .then((c) => { WF_CONFIG = c || {}; WF_RUNNER_ENABLED = Boolean(c && c.workflowRunnerEnabled); applyFinalModels(); })
+    .then((c) => {
+      WF_CONFIG = c || {};
+      WF_RUNNER_ENABLED = Boolean(c && c.workflowRunnerEnabled);
+      applyFinalModels();
+      maybeSwitchToArc();
+    })
     .catch(() => {})
-    .finally(() => render());
-
-  // If a wallet is already connected on a different network, move it to Arc up front.
-  maybeSwitchToArc();
+    .finally(() => {
+      render();
+      window.setTimeout(resumeVisibleDurableWorkflow, 0);
+    });
 
   // Delegate all data-nav clicks (including dynamically rendered content)
   document.addEventListener("click", (e) => {

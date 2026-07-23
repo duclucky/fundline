@@ -18,8 +18,10 @@ const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, "data");
 const SELLER_PATH = path.join(DATA_DIR, "sellers.json");
 const INVOICE_PATH = path.join(DATA_DIR, "invoices.json");
+const TELEGRAM_LINK_PATH = path.join(DATA_DIR, "telegram-links.json");
 const PORT = 5199;
 const BASE = `http://127.0.0.1:${PORT}`;
+const CHAT_X = "8436047896";
 
 let passed = 0;
 let failed = 0;
@@ -75,6 +77,10 @@ async function getSeller(wallet) {
 }
 
 async function putName(wallet, privateKey, displayName) {
+  return sellerSettingsRequest(wallet, privateKey, "PUT", { displayName });
+}
+
+async function sellerSettingsRequest(wallet, privateKey, method, body) {
   const issuedAt = new Date().toISOString();
   const message = [
     "Sign in to Fundline",
@@ -86,14 +92,14 @@ async function putName(wallet, privateKey, displayName) {
   ].join("\n");
   const signature = await new Wallet(privateKey).signMessage(message);
   const r = await fetch(`${BASE}/api/dashboard/settings`, {
-    method: "PUT",
+    method,
     headers: {
       "Content-Type": "application/json",
       "x-fundline-wallet": wallet,
       "x-fundline-signature": signature,
       "x-fundline-issued-at": issuedAt,
     },
-    body: JSON.stringify({ displayName }),
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
   return { status: r.status, json: await r.json().catch(() => ({})) };
 }
@@ -142,11 +148,45 @@ async function runAssertions() {
   assert(res.json.invoice && res.json.invoice.merchantName === "Bob LLC", "later real name establishes the seller name");
   seller = await getSeller(w2.address);
   assert(seller.json.displayName === "Bob LLC", "seller name established on first real name");
+
+  // Telegram settings expose and preserve the real activation state.
+  let settingsResponse = await sellerSettingsRequest(w1.address, w1.privateKey, "GET");
+  assert(settingsResponse.status === 200, "authenticated settings GET succeeds");
+  assert(settingsResponse.json.telegramLinkStatus === "not_linked", "initial Telegram link is not linked");
+
+  settingsResponse = await sellerSettingsRequest(w1.address, w1.privateKey, "PUT", {
+    telegramChatId: CHAT_X,
+    alerts: { paid: true, failed: true, overdue: true },
+  });
+  assert(settingsResponse.json.telegramLinkStatus === "pending", "new chat ID is pending");
+
+  const linkDb = JSON.parse(fs.readFileSync(TELEGRAM_LINK_PATH, "utf8"));
+  linkDb.links[CHAT_X].status = "active";
+  linkDb.links[CHAT_X].confirmedAt = new Date().toISOString();
+  fs.writeFileSync(TELEGRAM_LINK_PATH, JSON.stringify(linkDb, null, 2) + "\n");
+  const confirmedAt = linkDb.links[CHAT_X].confirmedAt;
+
+  settingsResponse = await sellerSettingsRequest(w1.address, w1.privateKey, "PUT", {
+    telegramChatId: CHAT_X,
+    alerts: { paid: false, failed: true, overdue: true },
+  });
+  assert(settingsResponse.json.telegramLinkStatus === "active", "unchanged active chat stays active");
+  assert(JSON.parse(fs.readFileSync(TELEGRAM_LINK_PATH, "utf8")).links[CHAT_X].confirmedAt === confirmedAt, "active confirmation timestamp is preserved");
+
+  fs.writeFileSync(TELEGRAM_LINK_PATH, JSON.stringify({ links: {} }, null, 2) + "\n");
+  settingsResponse = await sellerSettingsRequest(w1.address, w1.privateKey, "PUT", { telegramChatId: CHAT_X });
+  assert(settingsResponse.json.telegramLinkStatus === "pending", "missing unchanged claim is repaired");
+
+  settingsResponse = await sellerSettingsRequest(w1.address, w1.privateKey, "PUT", { telegramChatId: "" });
+  assert(settingsResponse.json.telegramLinkStatus === "not_linked", "blank chat ID removes the link");
+  const sellerRecord = JSON.parse(fs.readFileSync(SELLER_PATH, "utf8")).sellers[w1.address.toLowerCase()];
+  assert(Object.hasOwn(sellerRecord, "telegramLinkStatus") === false, "derived Telegram status is not persisted");
 }
 
 async function main() {
   const sellerBak = snapshot(SELLER_PATH);
   const invoiceBak = snapshot(INVOICE_PATH);
+  const telegramLinkBak = snapshot(TELEGRAM_LINK_PATH);
 
   const child = spawn("node", ["server.js"], {
     cwd: ROOT,
@@ -172,6 +212,7 @@ async function main() {
     await sleep(300);
     restore(SELLER_PATH, sellerBak);
     restore(INVOICE_PATH, invoiceBak);
+    restore(TELEGRAM_LINK_PATH, telegramLinkBak);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);

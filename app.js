@@ -103,6 +103,7 @@ const state = {
   walletMenuOpen: false,
   walletConnecting: false,
   invoiceSyncStatus: "idle",
+  telegramLinkStatus: "not_linked",
   activeView: "dashboard",
   filter: "all",
 };
@@ -135,6 +136,7 @@ const els = {
   invoiceTotal: document.querySelector("#invoiceTotal"),
   settingsForm: document.querySelector("#settingsForm"),
   sendTelegramTest: document.querySelector("#sendTelegramTest"),
+  telegramLinkStatus: document.querySelector("#telegramLinkStatus"),
   walletSettingsNote: document.querySelector("#walletSettingsNote"),
   exportCsv: document.querySelector("#exportCsv"),
   filters: document.querySelectorAll("[data-filter]"),
@@ -204,6 +206,9 @@ function bindEvents() {
   els.invoiceList?.addEventListener("click", handleInvoiceAction);
   els.settingsForm?.addEventListener("submit", saveSettingsFromForm);
   document.addEventListener("fundline:walletchange", syncWalletFromShared);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && state.activeView === "settings") fetchServerSettings();
+  });
   els.walletButton?.addEventListener("click", handleWalletButton);
   els.walletRefreshBalance?.addEventListener("click", refreshWalletBalance);
   els.walletDisconnect?.addEventListener("click", disconnectWallet);
@@ -256,7 +261,10 @@ function getBatchId() {
 function setView(view) {
   state.activeView = view || "dashboard";
   renderApp();
-  if (state.activeView === "settings") loadApiKeys();
+  if (state.activeView === "settings") {
+    loadApiKeys();
+    fetchServerSettings();
+  }
 }
 
 function renderApp() {
@@ -645,11 +653,16 @@ async function createInvoiceOnServer(invoice) {
 }
 
 async function updateInvoiceOnServer(invoiceId, patch) {
-  const response = await fetch(`/api/invoices/${encodeURIComponent(invoiceId)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
+  const response = await window.FundlinePaymentVerification.fetchWithTimeout(
+    fetch,
+    `/api/invoices/${encodeURIComponent(invoiceId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+    10000,
+  );
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.invoice) throw new Error(payload.error || "Could not update invoice on server");
   return payload.invoice;
@@ -724,6 +737,20 @@ function renderSettings() {
     if (els.settingsForm.elements["alerts.paid"]) els.settingsForm.elements["alerts.paid"].checked = Boolean(state.settings.alerts.paid);
     if (els.settingsForm.elements["alerts.failed"]) els.settingsForm.elements["alerts.failed"].checked = Boolean(state.settings.alerts.failed);
     if (els.settingsForm.elements["alerts.overdue"]) els.settingsForm.elements["alerts.overdue"].checked = Boolean(state.settings.alerts.overdue);
+  }
+  renderTelegramLinkStatus();
+}
+
+function renderTelegramLinkStatus() {
+  if (!els.telegramLinkStatus) return;
+  const status = state.telegramLinkStatus || "not_linked";
+  els.telegramLinkStatus.dataset.status = status;
+  if (status === "active") {
+    els.telegramLinkStatus.textContent = "Telegram bot is active. You can create invoices from the bot.";
+  } else if (status === "pending") {
+    els.telegramLinkStatus.textContent = "Send /start in Telegram to finish linking.";
+  } else {
+    els.telegramLinkStatus.textContent = "Telegram bot is not linked.";
   }
 }
 function seedLineItems() {
@@ -1031,6 +1058,7 @@ async function saveSettingsFromForm(event) {
     return;
   }
 
+  let responseData = {};
   try {
     const sendSettings = (session) =>
       fetch("/api/dashboard/settings", {
@@ -1057,6 +1085,7 @@ async function saveSettingsFromForm(event) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || "Failed to save settings to server");
     }
+    responseData = await res.json().catch(() => ({}));
   } catch (err) {
     if (err.code !== 4001) showToast(err.message);
     return;
@@ -1067,9 +1096,12 @@ async function saveSettingsFromForm(event) {
     ...settings,
     merchantWallet: connected,
   };
+  state.telegramLinkStatus = String(responseData.telegramLinkStatus || "not_linked");
   saveSettings();
   renderSettings();
-  showToast("Settings saved.");
+  showToast(state.telegramLinkStatus === "pending"
+    ? "Settings saved. Send /start in Telegram to finish linking."
+    : "Settings saved.");
 }
 
 function readSettingsDraft() {
@@ -1705,8 +1737,8 @@ async function submitArcPayment(invoice, payerWallet, button) {
   const form = document.querySelector("#paymentVerifyForm");
   if (form?.elements.payerWallet) form.elements.payerWallet.value = payerWallet;
   if (form?.elements.txHash) form.elements.txHash.value = txHash;
-  showToast("Payment submitted. Verification will start in 10 seconds.");
-  setButtonBusy(button, "Waiting 10 seconds...");
+  showToast("Payment submitted. Verification is starting now.");
+  setButtonBusy(button, "Verifying payment...");
   return autoVerifySubmittedPayment(invoice.id, { payerWallet, txHash, button });
 }
 
@@ -1754,37 +1786,44 @@ async function submitArcPaymentWithProgress(invoice, payerWallet, button, progre
   const form = document.querySelector("#paymentVerifyForm");
   if (form?.elements.payerWallet) form.elements.payerWallet.value = payerWallet;
   if (form?.elements.txHash) form.elements.txHash.value = txHash;
-  showToast("Payment submitted. Verification will start in 10 seconds.");
+  showToast("Payment submitted. Verification is starting now.");
   setButtonBusy(button, "Waiting for confirmation...");
-  setProgressStep(progress, "verify", "active", "Waiting 10 s before checking Arcscan...");
+  setProgressStep(progress, "verify", "active", "Checking payment...");
   const verified = await autoVerifyWithProgress(invoice.id, payerWallet, txHash, progress);
   return verified;
 }
 
 // Runs auto-verify loop and drives verify+receipt steps.
 async function autoVerifyWithProgress(id, payerWallet, txHash, progress) {
-  await delay(10000);
   setProgressStep(progress, "verify", "active", "Checking Arcscan...");
-  const attempts = 6;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const verified = await verifyPaymentAndMarkPaid(
-      id,
-      { preventDefault() {} },
-      { payerWallet, txHash, auto: true, showPendingToast: attempt === 1 },
-    );
-    if (verified) {
+  try {
+    const result = await window.FundlinePaymentVerification.pollPaymentVerification({
+      attempt: async (attempt) => {
+        if (attempt > 1) setProgressStep(progress, "verify", "active", `Retry ${attempt}...`);
+        return verifyPaymentAndMarkPaid(
+          id,
+          { preventDefault() {} },
+          { payerWallet, txHash, auto: true, showPendingToast: attempt === 1 },
+        );
+      },
+      retryDelayMs: 2000,
+      deadlineMs: 60000,
+    });
+    if (result.verified) {
       setProgressStep(progress, "verify", "done", "Payment confirmed on Arcscan");
       setProgressStep(progress, "receipt", "done", "Receipt available");
       return true;
     }
-    if (attempt < attempts) {
-      showToast(`Payment not indexed yet. Checking again (${attempt + 1}/${attempts})...`);
-      setProgressStep(progress, "verify", "active", `Retry ${attempt + 1}/${attempts}...`);
-      await delay(10000);
+  } catch (error) {
+    if (error.code === "verification_timeout") {
+      setProgressStep(progress, "verify", "error", "Verification request timed out");
+      showToast("Payment was submitted, but verification timed out. Retry verification with the same transaction hash.");
+      return false;
     }
+    throw error;
   }
   setProgressStep(progress, "verify", "error", "Not yet indexed - press Retry");
-  showToast("Payment submitted, but Arcscan has not indexed it yet. Press Retry on the Verify step.");
+  showToast("Payment submitted, but verification is still pending. Retry with the same transaction hash.");
   return false;
 }
 
@@ -1995,27 +2034,31 @@ async function _retryBridgePay(id, sourceKey, fromStep) {
 
 // Legacy auto-verify used by old submitArcPayment path (bridge flow calls submitArcPaymentWithProgress now).
 async function autoVerifySubmittedPayment(id, { payerWallet, txHash, button }) {
-  await delay(10000);
   setButtonBusy(button, "Verifying payment...");
-  const attempts = 6;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const verified = await verifyPaymentAndMarkPaid(
-      id,
-      { preventDefault() {} },
-      {
-        payerWallet,
-        txHash,
-        auto: true,
-        showPendingToast: attempt === 1,
-      },
-    );
-    if (verified) return true;
-    if (attempt < attempts) {
-      showToast(`Payment not indexed yet. Checking again (${attempt + 1}/${attempts})...`);
-      await delay(10000);
+  try {
+    const result = await window.FundlinePaymentVerification.pollPaymentVerification({
+      attempt: (attempt) => verifyPaymentAndMarkPaid(
+        id,
+        { preventDefault() {} },
+        {
+          payerWallet,
+          txHash,
+          auto: true,
+          showPendingToast: attempt === 1,
+        },
+      ),
+      retryDelayMs: 2000,
+      deadlineMs: 60000,
+    });
+    if (result.verified) return true;
+  } catch (error) {
+    if (error.code === "verification_timeout") {
+      showToast("Payment was submitted, but verification timed out. Retry verification with the same transaction hash.");
+      return false;
     }
+    throw error;
   }
-  showToast("Payment submitted, but Arcscan has not indexed it yet. You can press Verify payment again.");
+  showToast("Payment submitted, but verification is still pending. Retry with the same transaction hash.");
   return false;
 }
 
@@ -2339,34 +2382,48 @@ async function verifyPaymentAndMarkPaid(id, event, options = {}) {
     });
     upsertInvoice(serverInvoice);
     saveInvoices();
-  } catch {
+  } catch (error) {
     invoice.status = previousStatus === "paid" ? "paid" : "open";
     upsertInvoice(invoice);
     saveInvoices();
     showToast("Could not save verification state on server.");
+    if (options.auto && error.code === "verification_timeout") throw error;
     return false;
   }
   try {
-    const response = await fetch("/api/arcscan/verify-payment", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        invoiceId: invoice.id,
-        onchainInvoiceId: invoice.onchainInvoiceId,
-        payerWallet,
-        merchantWallet: invoice.merchantWallet,
-        amount: invoice.total,
-        createdAt: invoice.createdAt,
-        txHash,
-      }),
-    });
+    const response = await window.FundlinePaymentVerification.fetchWithTimeout(
+      fetch,
+      "/api/arcscan/verify-payment",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceId: invoice.id,
+          onchainInvoiceId: invoice.onchainInvoiceId,
+          payerWallet,
+          merchantWallet: invoice.merchantWallet,
+          amount: invoice.total,
+          createdAt: invoice.createdAt,
+          txHash,
+        }),
+      },
+      10000,
+    );
     result = await response.json().catch(() => ({}));
+    if (response.status === 504) {
+      const timeoutError = new Error(result.error?.message || "Payment verification request timed out.");
+      timeoutError.code = "verification_timeout";
+      throw timeoutError;
+    }
     if (!response.ok || !result.verified) {
       invoice.status = previousStatus === "paid" ? "paid" : "open";
       upsertInvoice(invoice);
       saveInvoices();
       updateInvoiceOnServer(invoice.id, { status: invoice.status }).catch(() => {});
-      if (!options.auto || options.showPendingToast) showToast(result.error || "No valid Arc payment found yet.");
+      const errorMessage = typeof result.error === "string"
+        ? result.error
+        : result.error?.message;
+      if (!options.auto || options.showPendingToast) showToast(errorMessage || "No valid Arc payment found yet.");
       return false;
     }
   } catch (error) {
@@ -2374,7 +2431,12 @@ async function verifyPaymentAndMarkPaid(id, event, options = {}) {
     upsertInvoice(invoice);
     saveInvoices();
     updateInvoiceOnServer(invoice.id, { status: invoice.status }).catch(() => {});
-    if (!options.auto || options.showPendingToast) showToast(error?.message || "Arcscan verification failed.");
+    if (!options.auto || options.showPendingToast) {
+      showToast(error?.code === "verification_timeout"
+        ? "Payment was submitted, but verification timed out. Retry verification with the same transaction hash."
+        : (error?.message || "Arcscan verification failed."));
+    }
+    if (options.auto && error.code === "verification_timeout") throw error;
     return false;
   } finally {
     if (verifyButton) {
@@ -2435,7 +2497,7 @@ async function sendTelegramTestAlert(event) {
     showToast("Add Telegram chat ID first.");
     return;
   }
-  // "Verify Telegram" sends the friendly welcome/connected message, not a fake paid alert.
+  // This confirms message delivery only. The user must send /start to activate the bot link.
   try {
     const response = await fetch("/api/telegram/verify-alert", {
       method: "POST",
@@ -2444,12 +2506,12 @@ async function sendTelegramTestAlert(event) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      showToast(`Telegram verify failed: ${data.error || `HTTP ${response.status}`}`);
+      showToast(`Telegram test failed: ${data.error || `HTTP ${response.status}`}`);
       return;
     }
-    showToast("Welcome message sent to Telegram.");
+    showToast("Test message delivered to Telegram.");
   } catch (error) {
-    showToast(`Telegram verify failed: ${error?.message || "Network error"}`);
+    showToast(`Telegram test failed: ${error?.message || "Network error"}`);
   }
 }
 
@@ -3115,6 +3177,7 @@ async function fetchServerSettings() {
     });
     if (res.ok) {
       const data = await res.json();
+      state.telegramLinkStatus = String(data.telegramLinkStatus || "not_linked");
       if (data.settings) {
         state.settings.telegramChatId = data.settings.telegramChatId || "";
         if (data.settings.alerts) {
