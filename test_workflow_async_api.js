@@ -72,11 +72,15 @@ async function main() {
 
   const claimed = store.claimNext({ workerId: "test-worker", leaseMs: 60000 });
   assert.equal(claimed.jobId, JOB_ID);
-  store.storeResult(JOB_ID, { output: "# Durable result", steps: [] });
-  store.transition(JOB_ID, ["processing"], "settlement_pending", {});
+  const lease = {
+    workerId: claimed.execution.workerId,
+    leaseToken: claimed.execution.leaseToken,
+  };
+  store.storeResult(JOB_ID, { output: "# Durable result", steps: [] }, lease);
+  store.transition(JOB_ID, ["processing"], "settlement_pending", {}, lease);
   store.transition(JOB_ID, ["settlement_pending"], "succeeded", {
     completedAt: new Date().toISOString(),
-  });
+  }, lease);
   const terminal = serverModule.buildWorkflowJobResponse(store, store.getJob(JOB_ID));
   assert.equal(terminal.statusCode, 200);
   assert.equal(terminal.body.result.output, "# Durable result");

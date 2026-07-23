@@ -167,6 +167,21 @@ function createWorkflowJobStore(config) {
     });
   }
 
+  function assertLease(job, lease) {
+    const workerId = String(lease && lease.workerId || "");
+    const leaseToken = String(lease && lease.leaseToken || "");
+    const execution = job && job.execution || {};
+    if (!workerId || execution.workerId !== workerId) {
+      throw new Error("Workflow job lease owner mismatch");
+    }
+    if (!leaseToken || !safeEqualHex(execution.leaseToken, leaseToken)) {
+      throw new Error("Workflow job lease token mismatch");
+    }
+    if (!execution.leaseUntil || Number(execution.leaseUntil) <= now()) {
+      throw new Error("Workflow job lease expired");
+    }
+  }
+
   function listJobs() {
     return fs.readdirSync(baseDir)
       .filter((name) => /^[0-9a-f]{64}\.json$/.test(name))
@@ -258,11 +273,14 @@ function createWorkflowJobStore(config) {
     });
   }
 
-  function transition(jobId, allowedStatuses, nextStatus, patch) {
+  function transition(jobId, allowedStatuses, nextStatus, patch, lease) {
     const allowed = new Set(allowedStatuses || []);
     return mutate(jobId, (job) => {
       if (TERMINAL.has(job.status)) throw new Error("Workflow job is terminal");
       if (!allowed.has(job.status)) throw new Error("Workflow job state precondition failed");
+      if (["processing", "settlement_pending", "failed", "refunding"].includes(job.status)) {
+        assertLease(job, lease);
+      }
       if (!TRANSITIONS[job.status] || !TRANSITIONS[job.status].has(nextStatus)) {
         throw new Error("Invalid workflow job transition");
       }
@@ -276,10 +294,13 @@ function createWorkflowJobStore(config) {
     });
   }
 
-  function update(jobId, allowedStatuses, patch) {
+  function update(jobId, allowedStatuses, patch, lease) {
     const allowed = new Set(allowedStatuses || []);
     return mutate(jobId, (job) => {
       if (!allowed.has(job.status)) throw new Error("Workflow job state precondition failed");
+      if (["processing", "settlement_pending", "failed", "refunding"].includes(job.status)) {
+        assertLease(job, lease);
+      }
       if (patch && Object.hasOwn(patch, "status")) {
         throw new Error("Status must be changed through transition");
       }
@@ -332,6 +353,7 @@ function createWorkflowJobStore(config) {
                 ? Number(job.execution && job.execution.attempts || 0) + 1
                 : Number(job.execution && job.execution.attempts || 0),
               workerId,
+              leaseToken: randomBytes(16).toString("hex"),
               leaseUntil: now() + leaseMs,
               claimedAt: timestamp,
             }),
@@ -345,12 +367,10 @@ function createWorkflowJobStore(config) {
     return null;
   }
 
-  function renewLease(jobId, workerId, leaseMs) {
+  function renewLease(jobId, workerId, leaseToken, leaseMs) {
     return mutate(jobId, (job) => {
       if (TERMINAL.has(job.status)) throw new Error("Workflow job is terminal");
-      if (!job.execution || job.execution.workerId !== workerId) {
-        throw new Error("Workflow job lease owner mismatch");
-      }
+      assertLease(job, { workerId, leaseToken });
       return {
         ...job,
         updatedAt: new Date(now()).toISOString(),
@@ -359,12 +379,13 @@ function createWorkflowJobStore(config) {
     });
   }
 
-  function storeResult(jobId, result) {
+  function storeResult(jobId, result, lease) {
     const paths = pathsFor(jobId);
     return withLock(paths.lock, () => {
       const job = readJson(paths.metadata);
       if (!job) throw new Error("Workflow job not found");
       if (TERMINAL.has(job.status)) throw new Error("Workflow job is terminal");
+      assertLease(job, lease);
       atomicWriteJson(paths.result, clone(result));
       job.execution = mergePatch(job.execution, { resultStored: true });
       job.updatedAt = new Date(now()).toISOString();
@@ -393,6 +414,7 @@ function createWorkflowJobStore(config) {
     if (output.request) delete output.request.input;
     if (output.execution) {
       delete output.execution.workerId;
+      delete output.execution.leaseToken;
       delete output.execution.exception;
       delete output.execution.internalError;
       delete output.execution.stack;

@@ -74,8 +74,12 @@ clock += 1001;
 const recovered = store.claimNext({ workerId: "worker-b", leaseMs: 1000 });
 assert.equal(recovered.jobId, quote.job.jobId);
 assert.equal(recovered.execution.workerId, "worker-b");
+const recoveredLease = {
+  workerId: recovered.execution.workerId,
+  leaseToken: recovered.execution.leaseToken,
+};
 
-store.storeResult(quote.job.jobId, { output: "# Durable", steps: [] });
+store.storeResult(quote.job.jobId, { output: "# Durable", steps: [] }, recoveredLease);
 assert.equal(store.getResult(quote.job.jobId).output, "# Durable");
 assert.equal(store.getJob(quote.job.jobId).execution.resultStored, true);
 assert.throws(() => store.getJob("../../.env"), /Invalid job ID/);
@@ -84,17 +88,41 @@ const publicJob = store.publicJob(store.getJob(quote.job.jobId));
 assert.equal(Object.hasOwn(publicJob, "owner"), false);
 assert.equal(Object.hasOwn(publicJob.request, "input"), false);
 assert.equal(Object.hasOwn(publicJob.execution, "workerId"), false);
+assert.equal(Object.hasOwn(publicJob.execution, "leaseToken"), false);
 
-store.transition(quote.job.jobId, ["processing"], "settlement_pending", {});
+store.transition(quote.job.jobId, ["processing"], "settlement_pending", {}, recoveredLease);
 assert.equal(store.claimNext({ workerId: "worker-c", leaseMs: 1000 }), null);
 clock += 1001;
-assert.equal(store.claimNext({ workerId: "worker-c", leaseMs: 1000 }).jobId, quote.job.jobId);
+const settlementClaim = store.claimNext({ workerId: "worker-c", leaseMs: 1000 });
+assert.equal(settlementClaim.jobId, quote.job.jobId);
 store.transition(quote.job.jobId, ["settlement_pending"], "succeeded", {
   completedAt: new Date(clock).toISOString(),
+}, {
+  workerId: settlementClaim.execution.workerId,
+  leaseToken: settlementClaim.execution.leaseToken,
 });
 assert.throws(
   () => store.transition(quote.job.jobId, ["succeeded"], "queued", {}),
   /terminal/
+);
+
+const fencedJobId = "0x" + "44".repeat(32);
+store.createQuote({
+  jobId: fencedJobId,
+  request: { slug: "client-research", tier: "normal", input: { prompt: "Fence" } },
+  payment: { mode: "escrow", reference: fencedJobId, amount: "10000" },
+});
+store.transition(fencedJobId, ["awaiting_payment"], "queued", {});
+const staleClaim = store.claimNext({ workerId: "stale-worker", leaseMs: 1000 });
+clock += 1001;
+const activeClaim = store.claimNext({ workerId: "active-worker", leaseMs: 1000 });
+assert.equal(activeClaim.jobId, fencedJobId);
+assert.throws(
+  () => store.storeResult(fencedJobId, { output: "stale", steps: [] }, {
+    workerId: "stale-worker",
+    leaseToken: staleClaim.execution.leaseToken,
+  }),
+  /lease/i
 );
 
 clock += 2000;

@@ -825,6 +825,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (isPrivateStaticPath(url.pathname)) {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
+
   const requested = resolveRequestPath(url.pathname);
   const filePath = path.normalize(path.join(ROOT, requested));
 
@@ -862,6 +868,11 @@ function resolveRequestPath(pathname) {
   if (pathname.startsWith("/batch/")) return "/app.html";
   if (pathname === "/workflows" || pathname === "/workflows/" || pathname.startsWith("/workflows/")) return "/workflows.html";
   return pathname;
+}
+
+function isPrivateStaticPath(pathname) {
+  const value = String(pathname || "");
+  return value === "/docs/superpowers" || value.startsWith("/docs/superpowers/");
 }
 
 const HOST = process.env.HOST || "0.0.0.0";
@@ -925,6 +936,7 @@ module.exports = {
   buildWorkflowJobResponse,
   workflowJobAuthorized,
   queueAsyncWorkflowRun,
+  isPrivateStaticPath,
   TELEGRAM_LINK_DB_PATH,
   TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
@@ -1866,8 +1878,7 @@ async function settleDurableWorkflowJob(job, result, hooks) {
       steps: (result.steps || []).map((step) => ({ name: step.name, model: step.model })),
     })
     : null;
-  workflowJobStore.storeResult(job.jobId, {
-    ...result,
+  Object.assign(result, {
     releaseTx: settled.txHash || null,
     explorerUrl: settled.txHash ? ARCSCAN_EXPLORER_BASE + "/tx/" + settled.txHash : null,
     memo,
@@ -1897,7 +1908,7 @@ async function refundDurableWorkflowJob(job, hooks) {
     if (limiterKey) {
       workflowLimiter.rollbackReserve({ ...workflowLimiterPaths(), ipKey: limiterKey, kind: "run" });
     }
-    workflowJobStore.update(job.jobId, ["refunding"], {
+    hooks.updateJob({
       owner: { reservation: { ...reservation, active: false } },
     });
   }

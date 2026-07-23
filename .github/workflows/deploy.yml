@@ -47,6 +47,7 @@ jobs:
             **/.claude/**
             **/CLAUDE.md
             **/docs-internal/**
+            **/docs/superpowers/**
             **/node_modules/**
             wallet-privy/**
             **/.env

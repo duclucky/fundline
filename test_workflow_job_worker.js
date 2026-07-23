@@ -42,9 +42,10 @@ async function testSuccessfulExecutionOrder() {
       hooks.onProgress();
       return { output: "done", steps: [] };
     },
-    settleJob: async (_job, _result, hooks) => {
+    settleJob: async (_job, result, hooks) => {
       events.push(store.getResult(jobId) ? "settle-after-result" : "settle-before-result");
       hooks.onSubmitted("0x" + "44".repeat(32));
+      result.releaseTx = "0x" + "44".repeat(32);
       return { txHash: "0x" + "44".repeat(32), confirmed: true };
     },
     refundJob: async () => {
@@ -56,6 +57,7 @@ async function testSuccessfulExecutionOrder() {
   assert.deepEqual(events, ["execute", "settle-after-result"]);
   assert.equal(store.getJob(jobId).status, "succeeded");
   assert.equal(store.getJob(jobId).settlement.status, "confirmed");
+  assert.equal(store.getResult(jobId).releaseTx, "0x" + "44".repeat(32));
 }
 
 async function testSettlementRetryState() {
@@ -102,6 +104,7 @@ async function testExecutionFailureRefundOrder() {
     },
     refundJob: async (job, hooks) => {
       events.push("refund-observed:" + job.status);
+      hooks.updateJob({ owner: { rollbackRecorded: true } });
       hooks.onSubmitted("0x" + "55".repeat(32));
       return { txHash: "0x" + "55".repeat(32), confirmed: true };
     },
@@ -116,14 +119,19 @@ async function testExecutionFailureRefundOrder() {
   ]);
   assert.equal(store.getJob(jobId).status, "refunded");
   assert.equal(store.getJob(jobId).execution.errorCode, "provider_failed");
+  assert.equal(store.getJob(jobId).owner.rollbackRecorded, true);
 }
 
 async function testRecoverySkipsExecution() {
   const store = createStore();
   const jobId = createQueuedJob(store, "0x" + "66".repeat(32));
-  store.claimNext({ workerId: "crashed-worker", leaseMs: 60000 });
-  store.storeResult(jobId, { output: "already durable", steps: [] });
-  store.transition(jobId, ["processing"], "settlement_pending", {});
+  const crashedClaim = store.claimNext({ workerId: "crashed-worker", leaseMs: 60000 });
+  const crashedLease = {
+    workerId: crashedClaim.execution.workerId,
+    leaseToken: crashedClaim.execution.leaseToken,
+  };
+  store.storeResult(jobId, { output: "already durable", steps: [] }, crashedLease);
+  store.transition(jobId, ["processing"], "settlement_pending", {}, crashedLease);
   store.advanceClock(60001);
   let executions = 0;
   let settlements = 0;
@@ -193,6 +201,37 @@ async function testSchedulerSurvivesScanError() {
   worker.stop();
 }
 
+async function testHeartbeatPreventsSecondWorkerClaim() {
+  const store = createStore();
+  const jobId = createQueuedJob(store, "0x" + "aa".repeat(32));
+  const heartbeatCallbacks = [];
+  let contenderClaim = "not-checked";
+  const worker = createWorkflowJobWorker({
+    store,
+    workerId: "heartbeat-worker",
+    leaseMs: 1000,
+    heartbeatMs: 300,
+    setInterval: (callback) => {
+      heartbeatCallbacks.push(callback);
+      return callback;
+    },
+    clearInterval: () => {},
+    executeJob: async () => {
+      store.advanceClock(800);
+      heartbeatCallbacks[0]();
+      store.advanceClock(300);
+      contenderClaim = store.claimNext({ workerId: "contender", leaseMs: 1000 });
+      return { output: "single execution", steps: [] };
+    },
+    settleJob: async () => ({ txHash: "0x" + "bb".repeat(32), confirmed: true }),
+    refundJob: async () => ({ txHash: "", confirmed: true }),
+  });
+
+  assert.equal(await worker.runOnce(), true);
+  assert.equal(contenderClaim, null);
+  assert.equal(store.getJob(jobId).status, "succeeded");
+}
+
 async function main() {
   await testSuccessfulExecutionOrder();
   await testSettlementRetryState();
@@ -200,6 +239,7 @@ async function main() {
   await testRecoverySkipsExecution();
   await testExpiredProcessingRestartsExecution();
   await testSchedulerSurvivesScanError();
+  await testHeartbeatPreventsSecondWorkerClaim();
   console.log("PASS: workflow job worker");
 }
 
