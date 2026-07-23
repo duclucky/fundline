@@ -1016,6 +1016,22 @@ function pushRunHistory(entry) {
   try { sessionStorage.setItem(RUN_HISTORY_KEY, JSON.stringify(RUN_HISTORY.slice(0, 50))); } catch (_) {}
 }
 
+function historyWorkflowFile(file) {
+  if (!file || !file.url) return null;
+  return {
+    format: file.format || "",
+    filename: file.filename || "workflow-deliverable",
+    mimeType: file.mimeType || "application/octet-stream",
+    url: file.url,
+  };
+}
+
+function historyWorkflowArtifacts(artifacts) {
+  return (Array.isArray(artifacts) ? artifacts : [])
+    .map(historyWorkflowFile)
+    .filter(Boolean);
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function esc(str) {
@@ -1244,6 +1260,9 @@ function showDurableWorkflowResult(record, wf, result) {
     status: "completed",
     at: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
     output,
+    cvJson: result.cvJson || null,
+    file: historyWorkflowFile(result.file),
+    artifacts: historyWorkflowArtifacts(result.artifacts),
     releaseTx: result.releaseTx || null,
     charged: wf.tiers?.[record.tier]?.price || wf.price,
   });
@@ -1570,8 +1589,11 @@ function slugifyForFile(str) {
   return String(str || "workflow").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "workflow";
 }
 
-// Decode a server-returned base64 file (e.g. the PDF from proposal-doc/report-doc) into a
-// Blob and trigger a browser download. Pure client-side, no network call.
+function workflowFileAvailable(file) {
+  return !!(file && (file.url || file.base64));
+}
+
+// Open a persisted workflow file or decode a legacy base64 response into a browser download.
 function downloadWorkflowFile(file) {
   if (!file) return;
   // Preferred: the server returns a link to the stored PDF; open it to read.
@@ -1644,10 +1666,10 @@ function openResultModal(markdown, slug, cvJson, file) {
       viewCvBtn.onclick = null;
     }
   }
-  // Show the "Download PDF" button when this run produced a rendered file (proposal-doc, report-doc).
+  // Every successful workflow should expose a PDF deliverable.
   const downloadFileBtn = document.getElementById("wfModalDownloadFile");
   if (downloadFileBtn) {
-    if (file && file.base64) {
+    if (workflowFileAvailable(file)) {
       downloadFileBtn.hidden = false;
       downloadFileBtn.textContent = file.format === "pdf" ? "Download PDF" : "Download file";
       downloadFileBtn.onclick = () => downloadWorkflowFile(file);
@@ -2547,6 +2569,9 @@ function runWorkflow(slug, wf, opts) {
       status: "completed",
       at: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }),
       output: output,
+      cvJson: data.cvJson || null,
+      file: historyWorkflowFile(data.file),
+      artifacts: historyWorkflowArtifacts(data.artifacts),
       releaseTx: data.releaseTx || null,
       charged: tierPrice,
     });
@@ -2591,9 +2616,8 @@ function runWorkflow(slug, wf, opts) {
       document.getElementById("wfReceiptBody").appendChild(cvBtn);
     }
 
-    // Document-generation workflows (proposal-doc, report-doc) return a rendered file;
-    // offer a direct client-side download of the exact PDF that was generated.
-    if (data.file && data.file.base64) {
+    // Offer the same backend PDF deliverable returned to MCP and API clients.
+    if (workflowFileAvailable(data.file)) {
       const fileBtn = document.createElement("button");
       fileBtn.type = "button";
       fileBtn.className = "wf-btn-run";
@@ -2695,7 +2719,7 @@ function bindRuns() {
   document.querySelectorAll(".wf-receipt-btn[data-idx]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const run = runs[parseInt(btn.dataset.idx, 10)];
-      if (run && run.output) openResultModal(run.output, run.slug);
+      if (run && run.output) openResultModal(run.output, run.slug, run.cvJson, run.file);
     });
   });
 }
