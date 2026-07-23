@@ -117,6 +117,7 @@ const workflowJobStore = createWorkflowJobStore({
 const V98STORE_API_KEY = String(process.env.V98STORE_API_KEY || "").trim();
 const V98STORE_BASE_URL = String(process.env.V98STORE_BASE_URL || "https://v98store.com/v1").trim();
 const V98STORE_GROUP_RATIO = Number(process.env.V98STORE_GROUP_RATIO || 1) || 1;
+const V98STORE_TIMEOUT_MS = Number(process.env.V98STORE_TIMEOUT_MS || 300000) || 300000;
 // GPT-5.6 models for the FINAL content node of every workflow. All workflow models use
 // the shared v98store connection above, while deployments may override each model id.
 const WORKFLOW_FINAL_MODELS = {
@@ -127,6 +128,7 @@ const WORKFLOW_FINAL_MODELS = {
 const workflowModelProvider = createWorkflowModelProvider({
   apiKey: V98STORE_API_KEY,
   baseUrl: V98STORE_BASE_URL,
+  timeoutMs: V98STORE_TIMEOUT_MS,
   models: WORKFLOW_FINAL_MODELS,
   callChat: v98Client.callV98Chat,
 });
@@ -1154,7 +1156,7 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
   const modelId = v98Models.resolveModelId(WORKFLOW_BUILD_PROMPT_MODEL);
   try {
     const result = await v98Client.callV98Chat(
-      { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL },
+      { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL, timeoutMs: V98STORE_TIMEOUT_MS },
       {
         model: modelId,
         maxTokens: 600,

@@ -12,8 +12,10 @@ assert.equal(serverSource.includes("cheapkeyai.shop"), false);
 assert.equal(serverSource.includes("WORKFLOW_FINAL_API_KEY"), false);
 assert.equal(serverSource.includes("WORKFLOW_FINAL_BASE_URL"), false);
 assert.equal((serverSource.match(/workflowModelProvider\.callModel/g) || []).length, 2);
+assert.equal(serverSource.includes("timeoutMs: V98STORE_TIMEOUT_MS"), true);
 assert.equal(envExample.includes("cheapkeyai.shop"), false);
 assert.equal(envExample.includes("WORKFLOW_FINAL_API_KEY"), false);
+assert.equal(envExample.includes("V98STORE_TIMEOUT_MS=300000"), true);
 
 const { createWorkflowModelProvider } = require("./workflow-model-provider");
 
@@ -22,6 +24,7 @@ async function main() {
   const provider = createWorkflowModelProvider({
     apiKey: "v98-test-key",
     baseUrl: "https://v98store.com/v1",
+    timeoutMs: 300000,
     models: {
       normal: "gpt-5.6-luna",
       plus: "gpt-5.6-terra",
@@ -47,6 +50,7 @@ async function main() {
   assert.deepEqual(calls[0].config, {
     apiKey: "v98-test-key",
     baseUrl: "https://v98store.com/v1",
+    timeoutMs: 300000,
   });
   assert.equal(calls[0].request.model, "gpt-5.6-luna");
 

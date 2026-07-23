@@ -23,6 +23,10 @@ function sleep(ms) {
 function postChat(config, body) {
   return new Promise((resolve, reject) => {
     const { hostname, port, basePath } = parseBaseUrl(config.baseUrl);
+    const configuredTimeoutMs = Number(config.timeoutMs);
+    const timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+      ? configuredTimeoutMs
+      : 60000;
     const payload = JSON.stringify(body);
     const request = https.request(
       {
@@ -45,7 +49,7 @@ function postChat(config, body) {
         });
       },
     );
-    request.setTimeout(60000, () => {
+    request.setTimeout(timeoutMs, () => {
       request.destroy(new Error("v98store request timed out"));
     });
     request.on("error", reject);

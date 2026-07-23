@@ -4,6 +4,7 @@ function createWorkflowModelProvider(options = {}) {
   const config = Object.freeze({
     apiKey: String(options.apiKey || "").trim(),
     baseUrl: String(options.baseUrl || "").trim(),
+    timeoutMs: Number(options.timeoutMs) || 60000,
   });
   const models = { ...(options.models || {}) };
   const callChat = options.callChat;
