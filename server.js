@@ -10,6 +10,11 @@ const v98Models = require("./v98-models");
 const workflowLimiter = require("./workflow-limiter");
 const workflowResearch = require("./workflow-research");
 const workflowEngine = require("./workflow-engine");
+const { executeWorkflowDefinition } = require("./workflow-execution");
+const { createWorkflowJobStore } = require("./workflow-job-store");
+const { createWorkflowJobWorker } = require("./workflow-job-worker");
+const { createWorkflowJobSettlement } = require("./workflow-job-settlement");
+const workflowMcp = require("./workflow-mcp-tools");
 const tavilyClient = require("./tavily-client");
 const workflowDefs = require("./workflow-defs");
 const runEscrowClient = require("./run-escrow-client");
@@ -99,6 +104,15 @@ const ARC_TREASURY_ADDRESS = normalizeAddress(process.env.ARC_TREASURY_ADDRESS |
 // stays on the frontend mock. Turn on locally to test live v98store calls.
 // See .claude/workflow-rate-limit-spec.md and the v98store-api skill.
 const WORKFLOW_RATE_LIMIT_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.WORKFLOW_RATE_LIMIT_ENABLED || ""));
+const WORKFLOW_MCP_ASYNC_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.WORKFLOW_MCP_ASYNC_ENABLED || ""));
+const WORKFLOW_JOB_RESULT_TTL_HOURS = Number(process.env.WORKFLOW_JOB_RESULT_TTL_HOURS || 168) || 168;
+const WORKFLOW_JOB_METADATA_TTL_HOURS = Number(process.env.WORKFLOW_JOB_METADATA_TTL_HOURS || 720) || 720;
+const WORKFLOW_JOB_LEASE_MS = Number(process.env.WORKFLOW_JOB_LEASE_MS || 900000) || 900000;
+const WORKFLOW_JOB_POLL_MS = Number(process.env.WORKFLOW_JOB_POLL_MS || 1000) || 1000;
+const workflowJobStore = createWorkflowJobStore({
+  baseDir: path.join(DATA_DIR, "workflow-jobs"),
+  lockLeaseMs: WORKFLOW_JOB_LEASE_MS,
+});
 const V98STORE_API_KEY = String(process.env.V98STORE_API_KEY || "").trim();
 const V98STORE_BASE_URL = String(process.env.V98STORE_BASE_URL || "https://v98store.com/v1").trim();
 const V98STORE_GROUP_RATIO = Number(process.env.V98STORE_GROUP_RATIO || 1) || 1;
@@ -380,6 +394,17 @@ const runEscrow = runEscrowClient.createRunEscrowClient({
   rpcUrl: ARC_RPC_URL,
   treasuryKey: ARC_TREASURY_PRIVATE_KEY,
   usdcAddress: ARC_USDC_TOKEN_ADDRESS,
+});
+const workflowJobSettlement = createWorkflowJobSettlement({
+  runEscrow,
+  buildMemo: (job, result) => {
+    const def = WORKFLOW_RUN_DEFS[job.request.slug];
+    return fundlineMemo.buildWorkflowMemoText({
+      workflowName: def ? def.name : job.request.slug,
+      steps: (result.steps || []).map((step) => ({ name: step.name, model: step.model })),
+    });
+  },
+  markX402Refunded: markRunPaymentRefunded,
 });
 // Billing is active only when the escrow is deployed AND the treasury can sign.
 const WORKFLOW_BILLING_ENABLED = Boolean(ARC_RUN_ESCROW_ADDRESS && ARC_USDC_TOKEN_ADDRESS && ARC_TREASURY_PRIVATE_KEY);
@@ -734,6 +759,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  const workflowRunDetailMatch = url.pathname.match(/^\/api\/workflows\/runs\/(0x[0-9a-fA-F]{64})$/);
+  if (workflowRunDetailMatch) {
+    handleWorkflowJobStatus(req, res, workflowRunDetailMatch[1]);
+    return;
+  }
+
   if (url.pathname === "/api/workflows/runs") {
     handleWorkflowRunHistory(req, res);
     return;
@@ -846,7 +877,10 @@ if (!process.env.FUNDLINE_NO_LISTEN) {
     console.log(`Fundline running at http://${HOST}:${PORT}`);
     startTelegramPolling();
     startOverdueJob();
+    startWorkflowJobSystem();
   });
+  process.once("SIGTERM", stopWorkflowJobSystem);
+  process.once("SIGINT", stopWorkflowJobSystem);
 }
 
 module.exports = {
@@ -888,6 +922,9 @@ module.exports = {
   hostnameIsBlocked,
   normalizeWebhookUrl,
   requiredModelsForRun,
+  buildWorkflowJobResponse,
+  workflowJobAuthorized,
+  queueAsyncWorkflowRun,
   TELEGRAM_LINK_DB_PATH,
   TELEGRAM_SESSION_DB_PATH,
   SELLER_DB_PATH,
@@ -1058,7 +1095,8 @@ function recordWorkflowRun(wallet, entry) {
   const key = normalizeAddress(wallet);
   if (!key) return;
   const db = readWorkflowRuns();
-  const list = Array.isArray(db.runs[key]) ? db.runs[key] : [];
+  let list = Array.isArray(db.runs[key]) ? db.runs[key] : [];
+  if (entry && entry.jobId) list = list.filter((item) => item.jobId !== entry.jobId);
   list.unshift(entry);
   db.runs[key] = list.slice(0, RUN_HISTORY_MAX);
   try {
@@ -1144,44 +1182,7 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
 // run workflows. Payment is the agent's OWN wallet via x402 (Fundline holds no agent
 // funds). Tool handlers call this server's own HTTP endpoints in process, forwarding
 // the caller's API key. See .claude/remote-mcp-spec.md.
-const MCP_TOOLS = [
-  {
-    name: "list_workflows",
-    description: "Discover Fundline workflows with the per-run USDC price for every tier (normal, plus, pro), returned as structured JSON so you do not need to run one to learn its price. Optional keyword search on slug or name.",
-    inputSchema: { type: "object", properties: { query: { type: "string", description: "Optional keyword filter (e.g. 'research')." } } },
-  },
-  {
-    name: "run_workflow",
-    description: "Run a Fundline workflow and return its output. Pay-per-call via x402: call with no payment to get the price and treasury address, transfer the USDC from your own wallet, then call again with payment={payerWallet,txHash}.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        slug: { type: "string", description: "Workflow slug from list_workflows." },
-        tier: { type: "string", enum: ["normal", "plus", "pro"], description: "Quality/price tier. Default normal." },
-        prompt: { type: "string", description: "The workflow input." },
-        payment: {
-          type: "object",
-          description: "x402 payment proof after you transferred USDC to the treasury.",
-          properties: { payerWallet: { type: "string" }, txHash: { type: "string" } },
-        },
-      },
-      required: ["slug", "prompt"],
-    },
-  },
-  {
-    name: "list_runs",
-    description: "List your own past paid runs. Identity is your wallet: sign the message 'Sign in to Fundline\\n\\nThis signature proves you control this wallet.\\nIt does not move funds or create an on-chain transaction.\\n\\nIssued at: <issuedAt>' with the same wallet you paid from, then pass wallet, signature and issuedAt (ISO-8601, valid 24h).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        wallet: { type: "string", description: "Your wallet address (the one you paid runs from)." },
-        signature: { type: "string", description: "Signature of the standard Fundline sign-in message." },
-        issuedAt: { type: "string", description: "ISO-8601 timestamp embedded in the signed message; must be within the last 24h." },
-      },
-      required: ["wallet", "signature", "issuedAt"],
-    },
-  },
-];
+const MCP_TOOLS = workflowMcp.MCP_TOOLS;
 
 // GET /llms.txt - a machine-readable guide so an AI agent told "go to fundline.xyz"
 // can self-onboard: what Fundline is, how to discover workflows, and how to pay per
@@ -1232,10 +1233,20 @@ function handleLlmsTxt(req, res) {
     "",
     "## Model Context Protocol (recommended for agents)",
     "MCP endpoint (Streamable HTTP): POST " + base + "/mcp",
-    "Tools: list_workflows({query}), run_workflow({slug,tier,prompt,payment}).",
+    "Tools: list_workflows({query}), run_workflow({slug,tier,prompt,payment}),",
+    "get_run({jobId,recoveryToken}), list_runs({wallet,signature,issuedAt}).",
     "Optional header: Authorization: Bearer <Fundline API key> (not required for x402).",
     "Auto-discovery: " + base + "/.well-known/mcp.json declares this MCP server so an agent",
     "given only the domain can connect without manual setup.",
+    "",
+    "## Durable MCP run flow (recommended)",
+    "1. Call run_workflow without payment -> jobId, runId, exact price, escrow address,",
+    "   and recoveryToken.",
+    "2. Approve and fund runId through FundlineRunEscrow.",
+    "3. Call run_workflow with payment={jobId,runId,recoveryToken} -> queued immediately.",
+    "4. Call get_run with jobId and recoveryToken until succeeded, refunded, or failed.",
+    "5. Keep the recovery token private. A runId or txHash alone cannot read the output.",
+    "Successful results remain retrievable for seven days by default.",
     "",
     "## Pay per run with x402 (no account)",
     "1. POST " + base + "/api/workflows/<slug>/run  with JSON {tier, prompt} and header",
@@ -1245,7 +1256,8 @@ function handleLlmsTxt(req, res) {
     "   Arc (chainId " + ARC_CHAIN_ID + ", USDC " + ARC_USDC_TOKEN_ADDRESS + ").",
     "3. Retry the same request with header X-PAYMENT set to base64 of",
     "   {\"payerWallet\":\"0xYou\",\"txHash\":\"0xYourTransfer\"}. You get the workflow output.",
-    "A failed run is refunded to the payer. Each payment settles one run.",
+    "A failed run is refunded to the payer. Each payment settles one run. This direct",
+    "x402 flow remains available for compatibility; escrow is recommended for long runs.",
     "",
     "## Alternative: escrow (contract-guaranteed refund)",
     "POST " + base + "/api/workflows/<slug>/quote -> {runId, amount, escrowAddress}.",
@@ -1307,7 +1319,7 @@ function handleWellKnownAiPlugin(req, res) {
       "Discover and run Fundline AI workflows, paying per run in USDC on the Arc blockchain",
       "from the caller's own wallet. There is no sign-in, account, or API key for runs.",
       "Prefer the Model Context Protocol server at " + base + "/mcp (tools: list_workflows,",
-      "run_workflow, list_runs). Over plain HTTP: GET " + base + "/api/workflows to list",
+      "run_workflow, get_run, list_runs). Over plain HTTP: GET " + base + "/api/workflows to list",
       "workflows and per-tier prices (tiers are normal, plus, pro; default normal; there is",
       "no 'standard' tier). POST " + base + "/api/workflows/{slug}/run with {tier, prompt};",
       "an unpaid call returns HTTP 402 with a howToPay field and a price quote. If a request",
@@ -1330,7 +1342,7 @@ async function handleMcp(req, res) {
     sendJson(res, 200, {
       name: "fundline", transport: "streamable-http",
       tools: MCP_TOOLS.map((t) => t.name),
-      note: "POST JSON-RPC (MCP) with header Authorization: Bearer <Fundline API key>.",
+      note: "POST JSON-RPC (MCP). A Bearer Fundline API key is optional for workflow runs.",
     });
     return;
   }
@@ -1374,93 +1386,18 @@ async function handleMcp(req, res) {
     if (authHeader) h.Authorization = authHeader; else if (apiKeyHeader) h["X-API-Key"] = apiKeyHeader;
     return h;
   }
+  const callTool = workflowMcp.createWorkflowMcpCallHandler({
+    selfBase,
+    forwardHeaders: fwdHeaders,
+    fetchImpl: fetch,
+    asyncEnabled: WORKFLOW_MCP_ASYNC_ENABLED,
+  });
 
   const mcp = new Server({ name: "fundline", version: "1.0.0" }, { capabilities: { tools: {} } });
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: MCP_TOOLS }));
-  mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const name = request.params.name;
-    const args = request.params.arguments || {};
-    try {
-      if (name === "list_workflows") {
-        const r = await fetch(selfBase + "/api/workflows" + (args.query ? "?q=" + encodeURIComponent(args.query) : ""));
-        const j = await r.json();
-        // Keep every tier the workflow actually has (normal, plus, pro), with both the
-        // decimal USDC price and the raw base units, so an agent can pick a tier by price
-        // without having to trigger a 402 quote. Missing tiers are simply omitted.
-        const workflows = (j.workflows || []).map((w) => {
-          const tiers = {};
-          ["normal", "plus", "pro"].forEach((t) => {
-            if (w.tiers && w.tiers[t]) tiers[t] = { usdc: w.tiers[t].usdc, units: w.tiers[t].units };
-          });
-          return { slug: w.slug, name: w.name, tiers };
-        });
-        const payload = {
-          count: workflows.length,
-          currency: "USDC",
-          chainId: j.chainId,
-          usdc: j.usdc,
-          billingEnabled: j.billingEnabled,
-          workflows,
-        };
-        // A readable summary listing all tier prices (for LLM-driven callers), plus the
-        // full structured JSON in structuredContent and as a plain-JSON content block
-        // (for programmatic callers that parse rather than read).
-        const summary = workflows.map((w) => {
-          const priced = ["normal", "plus", "pro"]
-            .filter((t) => w.tiers[t])
-            .map((t) => t + " " + w.tiers[t].usdc)
-            .join(" / ");
-          return "- " + w.slug + " (" + w.name + "): " + (priced ? priced + " USDC" : "price at quote");
-        }).join("\n");
-        return {
-          content: [
-            { type: "text", text: workflows.length + " workflows (USDC per run, by tier):\n" + summary },
-            { type: "text", text: JSON.stringify(payload) },
-          ],
-          structuredContent: payload,
-        };
-      }
-      if (name === "run_workflow") {
-        if (!args.slug || !args.prompt) throw new Error("slug and prompt are required");
-        const headers = fwdHeaders();
-        if (args.payment && args.payment.txHash) {
-          headers["X-PAYMENT"] = Buffer.from(JSON.stringify({ payerWallet: args.payment.payerWallet, txHash: args.payment.txHash })).toString("base64");
-        }
-        const r = await fetch(selfBase + "/api/workflows/" + encodeURIComponent(args.slug) + "/run", {
-          method: "POST", headers, body: JSON.stringify({ tier: args.tier || "normal", prompt: args.prompt }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (r.status === 402 && j.accepts) {
-          const q = j.accepts[0];
-          return { content: [{ type: "text", text: "Payment required: transfer " + q.maxAmountRequired + " USDC (base units) to " + q.payTo + " on " + q.network + " from your wallet, then call run_workflow again with payment={payerWallet, txHash}." }] };
-        }
-        if (r.status !== 200) {
-          return { content: [{ type: "text", text: "Run failed: " + (j.message || j.error || r.status) }], isError: true };
-        }
-        return { content: [{ type: "text", text: "Charged " + (j.priceUsdc || "") + " USDC; settlement " + (j.releaseTx || "(none)") + ".\n\n" + String(j.output || "") }] };
-      }
-      if (name === "list_runs") {
-        if (!args.wallet || !args.signature || !args.issuedAt) throw new Error("wallet, signature and issuedAt are required");
-        const r = await fetch(selfBase + "/api/workflows/runs", {
-          headers: {
-            "Accept": "application/json",
-            "x-fundline-wallet": String(args.wallet),
-            "x-fundline-signature": String(args.signature),
-            "x-fundline-issued-at": String(args.issuedAt),
-          },
-        });
-        const j = await r.json().catch(() => ({}));
-        if (r.status !== 200) {
-          return { content: [{ type: "text", text: "Could not list runs: " + (j.error || r.status) }], isError: true };
-        }
-        const rows = (j.runs || []).map((x) => "- " + x.at + "  " + x.slug + " [" + x.tier + "]  " + x.priceUsdc + " USDC  " + (x.explorerUrl || x.settlementTx || "")).join("\n");
-        return { content: [{ type: "text", text: (j.count || 0) + " runs for " + j.wallet + ":\n" + rows }] };
-      }
-      throw new Error("Unknown tool: " + name);
-    } catch (error) {
-      return { content: [{ type: "text", text: "Error: " + error.message }], isError: true };
-    }
-  });
+  mcp.setRequestHandler(CallToolRequestSchema, async (request) => (
+    callTool(request.params.name, request.params.arguments || {})
+  ));
 
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on("close", () => { try { transport.close(); } catch (_) {} try { mcp.close(); } catch (_) {} });
@@ -1682,6 +1619,39 @@ function handleDocFile(req, res, id) {
   res.end(doc.buffer);
 }
 
+// GET /api/workflows/runs/:jobId - recover a durable result after a disconnect.
+// The original API-key fingerprint or one-time recovery credential scopes access.
+function handleWorkflowJobStatus(req, res, jobId) {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED || !WORKFLOW_MCP_ASYNC_ENABLED) {
+    sendJson(res, 404, { error: "Not found" });
+    return;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
+    return;
+  }
+  const agentAuth = optionalAgentApiKey(req);
+  if (agentAuth.present && !agentAuth.ok) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
+    return;
+  }
+  const job = workflowJobStore.getJob(jobId);
+  if (!job) {
+    sendJson(res, 404, { error: "run_not_found" });
+    return;
+  }
+  const recoveryToken = String(req.headers["x-fundline-recovery-token"] || "");
+  if (!workflowJobAuthorized(workflowJobStore, job, {
+    rateKey: agentAuth.ok ? agentAuth.rateKey : "",
+    recoveryToken,
+  })) {
+    sendJson(res, 403, { error: "run_forbidden" });
+    return;
+  }
+  const response = buildWorkflowJobResponse(workflowJobStore, job);
+  sendJson(res, response.statusCode, response.body);
+}
+
 // GET /api/workflows/runs - an agent pulls its own paid-run history. Identity is the
 // wallet: the agent signs the standard Fundline message with the same wallet it paid
 // from, and we return the runs recorded under that address. All of this is public on
@@ -1701,6 +1671,284 @@ function handleWorkflowRunHistory(req, res) {
     runs,
     explorerBase: ARCSCAN_EXPLORER_BASE,
   });
+}
+
+function workflowJobAuthorized(store, job, credentials) {
+  return Boolean(store && job && store.authorize(job, credentials || {}));
+}
+
+function workflowJobRequestInput(input) {
+  const clean = JSON.parse(JSON.stringify(input || {}));
+  ["async", "jobId", "runId", "recoveryToken", "payment", "paymentMode"].forEach((key) => {
+    delete clean[key];
+  });
+  return clean;
+}
+
+function buildWorkflowJobResponse(store, job) {
+  if (!job) return { statusCode: 404, body: { error: "run_not_found" } };
+  const body = store.publicJob(job);
+  if (job.status === "succeeded") {
+    const result = store.getResult(job.jobId);
+    if (result) body.result = result;
+    else body.resultExpired = true;
+    return { statusCode: 200, body };
+  }
+  if (job.status === "refunded") return { statusCode: 200, body };
+  body.retryAfterSeconds = Math.max(1, Math.ceil(WORKFLOW_JOB_POLL_MS / 1000));
+  return { statusCode: 202, body };
+}
+
+async function queueAsyncWorkflowRun(options) {
+  const store = options.store;
+  let job;
+  try {
+    job = store.getJob(options.jobId);
+  } catch (_) {
+    return { statusCode: 400, body: { error: "invalid_job_id" }, duplicate: false };
+  }
+  if (!job) return { statusCode: 404, body: { error: "run_not_found" }, duplicate: false };
+  if (!workflowJobAuthorized(store, job, {
+    rateKey: options.ownerRateKey,
+    recoveryToken: options.recoveryToken,
+  })) {
+    return { statusCode: 403, body: { error: "run_forbidden" }, duplicate: false };
+  }
+
+  const request = options.request || {};
+  if (job.request.slug !== request.slug || job.request.tier !== request.tier
+    || JSON.stringify(job.request.input || {}) !== JSON.stringify(request.input || {})) {
+    return { statusCode: 409, body: { error: "quote_request_mismatch" }, duplicate: false };
+  }
+
+  const payment = options.payment || {};
+  const quotedPayment = job.payment || {};
+  const mode = String(payment.mode || "").toLowerCase();
+  const reference = String(payment.reference || "").toLowerCase();
+  if (!mode || !reference
+    || mode !== String(quotedPayment.mode || "").toLowerCase()
+    || String(payment.amount || "") !== String(quotedPayment.amount || "")
+    || (quotedPayment.reference
+      && reference !== String(quotedPayment.reference).toLowerCase())) {
+    return { statusCode: 409, body: { error: "quote_payment_mismatch" }, duplicate: false };
+  }
+
+  const paymentOwner = store.findByPayment(mode, reference);
+  if (paymentOwner && paymentOwner.jobId !== job.jobId) {
+    return { statusCode: 409, body: { error: "payment_already_bound" }, duplicate: false };
+  }
+  if (job.status !== "awaiting_payment") {
+    const response = buildWorkflowJobResponse(store, job);
+    return { ...response, duplicate: true };
+  }
+
+  let reservation = job.owner && job.owner.reservation;
+  if (!reservation || !reservation.active) {
+    const reserved = options.reserve();
+    if (!reserved.ok) {
+      return {
+        statusCode: reserved.status || 429,
+        body: {
+          error: reserved.error || "rate_limited",
+          remaining: 0,
+          resetsAt: reserved.resetsAt || null,
+        },
+        duplicate: false,
+        refundRequired: true,
+      };
+    }
+    reservation = {
+      active: true,
+      remaining: reserved.remaining,
+      resetsAt: reserved.resetsAt,
+    };
+    job = store.update(job.jobId, ["awaiting_payment"], {
+      owner: { limiterKey: options.limiterKey || options.ownerRateKey || "", reservation },
+    });
+  }
+
+  store.bindPayment(job.jobId, payment);
+  job = store.transition(job.jobId, ["awaiting_payment"], "queued", {});
+  const response = buildWorkflowJobResponse(store, job);
+  response.body.remaining = reservation.remaining;
+  response.body.resetsAt = reservation.resetsAt;
+  return { ...response, duplicate: false };
+}
+
+async function executeDurableWorkflowJob(job, hooks) {
+  const request = job.request || {};
+  const input = request.input || {};
+  const slug = request.slug;
+  const tier = request.tier;
+  const def = WORKFLOW_RUN_DEFS[slug];
+  const tierDef = def && def.tiers && def.tiers[tier];
+  const graph = workflowDefs.getGraph(slug);
+  if (!def || !tierDef) {
+    const error = new Error("Workflow definition is unavailable");
+    error.code = "workflow_unavailable";
+    throw error;
+  }
+
+  const query = String(input.prompt || input.query || "").trim().slice(0, 20000);
+  const mode = input.mode === "paste" ? "paste" : "search";
+  const v98config = { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL };
+  const finalConfig = { apiKey: WORKFLOW_FINAL_API_KEY, baseUrl: WORKFLOW_FINAL_BASE_URL };
+  const finalModelId = finalModelForTier(tier);
+  const searchWeb = TAVILY_API_KEY && mode !== "paste"
+    ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 5 }).then((r) => r.results)
+    : null;
+  const callModel = (modelId, messages, maxTokens) => {
+    const usePremium = Boolean(WORKFLOW_FINAL_API_KEY) && WORKFLOW_FINAL_MODEL_SET.has(modelId);
+    return v98Client.callV98Chat(usePremium ? finalConfig : v98config, {
+      model: modelId,
+      messages,
+      maxTokens,
+    }).then((response) => ({ content: response.content, usage: response.usage }));
+  };
+  const result = await executeWorkflowDefinition({
+    def,
+    tierDef,
+    finalModelId,
+    input,
+    query,
+    graph,
+    mode,
+    pastedSources: input.sources,
+    searchWeb,
+    cryptoSearchWeb: TAVILY_API_KEY
+      ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 6 }).then((r) => r.results)
+      : null,
+    groupRatio: V98STORE_GROUP_RATIO,
+    today: new Date().toISOString().slice(0, 10),
+    jsearchKey: JSEARCH_API_KEY,
+    jsearchAvailable: jsearchUnderCap(),
+    callModel,
+    fetchGigs: (options) => gigSources.fetchGigs(options),
+    fetchData: (options) => cryptoData.fetchTokenData(options),
+    searchToken: (q, chainSlug) => cryptoData.searchToken(q, chainSlug && cryptoData.chainInfo(chainSlug) ? cryptoData.chainInfo(chainSlug).dsChain : ""),
+    onJsearchUsed: bumpJsearchUsage,
+    persistDocument: (file) => {
+      try {
+        const docId = docStore.putDoc(Buffer.from(file.base64, "base64"), file.filename);
+        return { format: file.format, filename: file.filename, url: getPublicBaseUrl() + "/d/" + docId };
+      } catch (error) {
+        console.error("[DocGen] async store error:", error.message);
+        return null;
+      }
+    },
+    executors: { engine: workflowEngine, cvGig, cryptoDd, docGen },
+    onProgress: hooks.onProgress,
+  });
+
+  const limiterKey = job.owner && job.owner.limiterKey;
+  if (limiterKey) {
+    workflowLimiter.recordCost({
+      ...workflowLimiterPaths(),
+      ipKey: limiterKey,
+      costMicros: result.totalCostMicros,
+    });
+  }
+  const reservation = job.owner && job.owner.reservation || {};
+  return {
+    output: result.report,
+    steps: (result.steps || []).map((step) => ({ name: step.name, model: step.model })),
+    cvJson: result.cvJson || null,
+    riskJson: result.riskJson || null,
+    file: result.file || null,
+    priceUsdc: unitsToUsdcString(job.payment.amount),
+    releaseTx: null,
+    explorerUrl: null,
+    memo: null,
+    runId: job.payment.mode === "escrow" ? job.payment.reference : null,
+    remaining: reservation.remaining,
+    resetsAt: reservation.resetsAt,
+  };
+}
+
+async function settleDurableWorkflowJob(job, result, hooks) {
+  const settled = await workflowJobSettlement.settle(job, result, hooks);
+  const jobDef = WORKFLOW_RUN_DEFS[job.request.slug];
+  const workflowName = jobDef ? jobDef.name : job.request.slug;
+  const memo = job.payment.mode === "escrow"
+    ? fundlineMemo.buildWorkflowMemoText({
+      workflowName,
+      steps: (result.steps || []).map((step) => ({ name: step.name, model: step.model })),
+    })
+    : null;
+  workflowJobStore.storeResult(job.jobId, {
+    ...result,
+    releaseTx: settled.txHash || null,
+    explorerUrl: settled.txHash ? ARCSCAN_EXPLORER_BASE + "/tx/" + settled.txHash : null,
+    memo,
+  });
+  const payer = job.payment && job.payment.payer;
+  if (payer) {
+    recordWorkflowRun(payer, {
+      jobId: job.jobId,
+      at: new Date().toISOString(),
+      slug: job.request.slug,
+      name: workflowName,
+      tier: job.request.tier,
+      priceUsdc: result.priceUsdc,
+      mode: job.payment.mode,
+      runId: job.payment.mode === "escrow" ? job.payment.reference : null,
+      settlementTx: settled.txHash || null,
+      explorerUrl: settled.txHash ? ARCSCAN_EXPLORER_BASE + "/tx/" + settled.txHash : null,
+    });
+  }
+  return settled;
+}
+
+async function refundDurableWorkflowJob(job, hooks) {
+  const reservation = job.owner && job.owner.reservation;
+  if (reservation && reservation.active) {
+    const limiterKey = job.owner.limiterKey;
+    if (limiterKey) {
+      workflowLimiter.rollbackReserve({ ...workflowLimiterPaths(), ipKey: limiterKey, kind: "run" });
+    }
+    workflowJobStore.update(job.jobId, ["refunding"], {
+      owner: { reservation: { ...reservation, active: false } },
+    });
+  }
+  return workflowJobSettlement.refund(workflowJobStore.getJob(job.jobId), hooks);
+}
+
+let workflowJobWorker = null;
+let workflowJobSweepTimer = null;
+function sweepWorkflowJobs() {
+  try {
+    workflowJobStore.sweep({
+      resultTtlMs: WORKFLOW_JOB_RESULT_TTL_HOURS * 60 * 60 * 1000,
+      metadataTtlMs: WORKFLOW_JOB_METADATA_TTL_HOURS * 60 * 60 * 1000,
+    });
+  } catch (error) {
+    console.error("[Workflow] job cleanup error:", error.message);
+  }
+}
+
+function startWorkflowJobSystem() {
+  if (!WORKFLOW_RATE_LIMIT_ENABLED || !WORKFLOW_MCP_ASYNC_ENABLED || workflowJobWorker) return;
+  sweepWorkflowJobs();
+  workflowJobWorker = createWorkflowJobWorker({
+    store: workflowJobStore,
+    workerId: "server-" + process.pid,
+    leaseMs: WORKFLOW_JOB_LEASE_MS,
+    pollMs: WORKFLOW_JOB_POLL_MS,
+    executeJob: executeDurableWorkflowJob,
+    settleJob: settleDurableWorkflowJob,
+    refundJob: refundDurableWorkflowJob,
+    onError: (error) => console.error("[Workflow] async worker error:", error.message),
+  });
+  workflowJobWorker.start();
+  workflowJobSweepTimer = setInterval(sweepWorkflowJobs, 60 * 60 * 1000);
+  if (workflowJobSweepTimer.unref) workflowJobSweepTimer.unref();
+}
+
+function stopWorkflowJobSystem() {
+  if (workflowJobWorker) workflowJobWorker.stop();
+  workflowJobWorker = null;
+  if (workflowJobSweepTimer) clearInterval(workflowJobSweepTimer);
+  workflowJobSweepTimer = null;
 }
 
 // POST /api/workflows/:slug/quote - issue a high-entropy runId + the fixed price so
@@ -1740,6 +1988,56 @@ async function handleWorkflowQuote(req, res, slug) {
     return;
   }
   const runId = `0x${crypto.randomBytes(32).toString("hex")}`;
+  if (WORKFLOW_MCP_ASYNC_ENABLED && quoteInput.async === true) {
+    const paymentMode = String(quoteInput.paymentMode || "escrow").toLowerCase();
+    if (paymentMode !== "escrow" && paymentMode !== "x402") {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "paymentMode must be escrow or x402" } });
+      return;
+    }
+    if (paymentMode === "x402" && !ARC_TREASURY_ADDRESS) {
+      sendJson(res, 503, { error: "billing_unconfigured", message: "Treasury is not configured." });
+      return;
+    }
+    const quote = workflowJobStore.createQuote({
+      jobId: runId,
+      ownerRateKey: quoteAuth.ok ? quoteAuth.rateKey : "",
+      request: {
+        slug,
+        tier: quoteTier,
+        input: workflowJobRequestInput(quoteInput),
+      },
+      payment: {
+        mode: paymentMode,
+        reference: paymentMode === "escrow" ? runId : "",
+        amount: String(tierDef.priceUnits),
+      },
+    });
+    const response = {
+      jobId: runId,
+      recoveryToken: quote.recoveryToken,
+      status: quote.job.status,
+      tier: quoteTier,
+      paymentMode,
+      amount: String(tierDef.priceUnits),
+      amountUsdc: (tierDef.priceUnits / 1000000).toFixed(6),
+      usdc: ARC_USDC_TOKEN_ADDRESS,
+      chainId: ARC_CHAIN_ID,
+    };
+    if (paymentMode === "escrow") {
+      response.runId = runId;
+      response.escrowAddress = ARC_RUN_ESCROW_ADDRESS;
+    } else {
+      response.accepts = [{
+        scheme: "exact",
+        network: "eip155:" + ARC_CHAIN_ID,
+        maxAmountRequired: String(tierDef.priceUnits),
+        asset: ARC_USDC_TOKEN_ADDRESS,
+        payTo: ARC_TREASURY_ADDRESS,
+      }];
+    }
+    sendJson(res, 200, response);
+    return;
+  }
   sendJson(res, 200, {
     runId,
     tier: quoteTier,
@@ -1809,6 +2107,32 @@ async function handleWorkflowRun(req, res, slug) {
     const validTiers = tierListForDef(def);
     sendJson(res, 400, { error: { code: "INVALID_TIER", message: "Unknown tier \"" + tier + "\". Valid tiers: " + validTiers.map((t) => t.tier).join(", ") + ".", validTiers } });
     return;
+  }
+
+  // Authentication is optional, but a supplied invalid key is always rejected.
+  // Resolve it before payment so an idempotent async retry can return its stored state.
+  const agentAuth = optionalAgentApiKey(req);
+  if (agentAuth.present && !agentAuth.ok) {
+    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
+    return;
+  }
+  const asyncRequested = input.async === true && WORKFLOW_MCP_ASYNC_ENABLED;
+  const requestedJobId = String(input.jobId || input.runId || "").toLowerCase();
+  if (asyncRequested && /^0x[0-9a-f]{64}$/.test(requestedJobId)) {
+    const existingJob = workflowJobStore.getJob(requestedJobId);
+    if (existingJob && existingJob.status !== "awaiting_payment") {
+      const authorized = workflowJobAuthorized(workflowJobStore, existingJob, {
+        rateKey: agentAuth.ok ? agentAuth.rateKey : "",
+        recoveryToken: String(input.recoveryToken || req.headers["x-fundline-recovery-token"] || ""),
+      });
+      if (!authorized) {
+        sendJson(res, 403, { error: "run_forbidden" });
+        return;
+      }
+      const existingResponse = buildWorkflowJobResponse(workflowJobStore, existingJob);
+      sendJson(res, existingResponse.statusCode, existingResponse.body);
+      return;
+    }
   }
 
   // Billing. When on, there are three payment modes:
@@ -2027,11 +2351,6 @@ async function handleWorkflowRun(req, res, slug) {
   // Agent auth is OPTIONAL here: the browser calls this with no key (IP-limited, SSE),
   // an AI agent calls it with an API key (key-limited, single JSON response). A key
   // that is present but invalid/revoked is rejected.
-  const agentAuth = optionalAgentApiKey(req);
-  if (agentAuth.present && !agentAuth.ok) {
-    sendJson(res, 401, { error: { code: "UNAUTHORIZED", message: "Invalid or revoked API key" } });
-    return;
-  }
   // x402, Gateway, and API-key agents get a single JSON response; the browser keeps SSE.
   const jsonMode = agentAuth.ok || x402 || gateway || input.stream === false;
 
@@ -2042,6 +2361,59 @@ async function handleWorkflowRun(req, res, slug) {
   else if (gateway) { ipKey = "gw:" + gatewayPayer; runLimits = WORKFLOW_KEY_LIMITS; }
   else if (agentAuth.ok) { ipKey = agentAuth.rateKey; runLimits = WORKFLOW_KEY_LIMITS; }
   else { ipKey = workflowClientIpKey(req); runLimits = WORKFLOW_LIMITS; }
+
+  if (asyncRequested) {
+    if (!billing) {
+      sendJson(res, 409, { error: "async_billing_required" });
+      return;
+    }
+    if (gateway) {
+      sendJson(res, 409, { error: "gateway_async_unsupported" });
+      return;
+    }
+    if (!/^0x[0-9a-f]{64}$/.test(requestedJobId)) {
+      sendJson(res, 400, { error: { code: "BAD_REQUEST", message: "A quoted jobId is required for async runs" } });
+      return;
+    }
+    const resolvedPayment = x402
+      ? { mode: "x402", reference: x402TxHash, payer: x402Payer, amount: String(priceUnits) }
+      : { mode: "escrow", reference: runId, payer: escrowPayer, amount: String(priceUnits) };
+    const queued = await queueAsyncWorkflowRun({
+      store: workflowJobStore,
+      jobId: requestedJobId,
+      recoveryToken: String(input.recoveryToken || req.headers["x-fundline-recovery-token"] || ""),
+      ownerRateKey: agentAuth.ok ? agentAuth.rateKey : "",
+      limiterKey: ipKey,
+      payment: resolvedPayment,
+      request: { slug, tier, input: workflowJobRequestInput(input) },
+      reserve: () => workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: runLimits }),
+    });
+    if (!queued.duplicate && queued.statusCode === 202 && x402) {
+      consumeRunPayment(x402TxHash, {
+        slug,
+        tier,
+        payer: x402Payer,
+        amount: String(priceUnits),
+        jobId: requestedJobId,
+      });
+    }
+    if (queued.refundRequired) {
+      try {
+        if (x402) {
+          consumeRunPayment(x402TxHash, { slug, tier, payer: x402Payer, amount: String(priceUnits), jobId: requestedJobId });
+          const refundTx = await runEscrow.transferUsdc(x402Payer, priceUnits);
+          markRunPaymentRefunded(x402TxHash, refundTx);
+        } else {
+          await runEscrow.refund(runId);
+        }
+      } catch (error) {
+        console.error("[Workflow] async rate-limit refund error:", error.message);
+      }
+    }
+    sendJson(res, queued.statusCode, queued.body);
+    return;
+  }
+
   const reserve = workflowLimiter.checkAndReserve({ ...paths, ipKey, kind: "run", limits: runLimits });
   if (!reserve.ok) {
     if (x402) {
@@ -2089,87 +2461,45 @@ async function handleWorkflowRun(req, res, slug) {
       .then((r) => ({ content: r.content, usage: r.usage }));
   };
   try {
-    let result;
-    if (def.type === "cvgig") {
-      result = await cvGig.runCvGigWorkflow({
-        input: query,
-        topGigs: 8,
-        remoteOnly: !!input.remoteOnly,
-        profileModel: tierDef.models.FAST,
-        cvModel: tierDef.models.STRONG,
-        rankModel: finalModelId || tierDef.models.STRONG,
-        groupRatio: V98STORE_GROUP_RATIO,
-        jsearchKey: JSEARCH_API_KEY,
-        jsearchAvailable: jsearchUnderCap(),
-        callModel,
-        fetchGigs: (o) => gigSources.fetchGigs(o),
-        onProgress: (evt) => sendSSE("progress", evt),
-      });
-      // Count a JSearch call toward the monthly cap only if it actually ran.
-      if (result.meta && result.meta.sourceCounts && ("JSearch" in result.meta.sourceCounts)) {
-        bumpJsearchUsage();
-      }
-    } else if (def.type === "cryptodd") {
-      // Crypto due-diligence always wants live web search for the news node,
-      // regardless of the paste/search toggle other workflows use.
-      const cryptoSearchWeb = TAVILY_API_KEY
+    const result = await executeWorkflowDefinition({
+      def,
+      tierDef,
+      finalModelId,
+      input,
+      query,
+      graph,
+      mode,
+      pastedSources,
+      searchWeb,
+      cryptoSearchWeb: TAVILY_API_KEY
         ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 6 }).then((r) => r.results)
-        : null;
-      result = await cryptoDd.runCryptoDdWorkflow({
-        input: query,
-        chain: input.chain,
-        address: input.token || input.address,
-        intakeModel: tierDef.models.FAST,
-        newsModel: tierDef.models.FAST,
-        writerModel: finalModelId || tierDef.models.STRONG,
-        verifierModel: tierDef.models.VERIFY || tierDef.models.STRONG,
-        groupRatio: V98STORE_GROUP_RATIO,
-        callModel,
-        fetchData: (o) => cryptoData.fetchTokenData(o),
-        searchToken: (q, chainSlug) => cryptoData.searchToken(q, chainSlug && cryptoData.chainInfo(chainSlug) ? cryptoData.chainInfo(chainSlug).dsChain : ""),
-        searchWeb: cryptoSearchWeb,
-        onProgress: (evt) => sendSSE("progress", evt),
-      });
-    } else if (def.type === "docgen") {
-      result = await docGen.runDocGenWorkflow({
-        docType: def.docType || input.docType || "proposal",
-        input: query,
-        brief: (input.brief && typeof input.brief === "object") ? input.brief : {},
-        research: !!input.research,
-        format: "pdf",
-        writerModel: finalModelId || tierDef.models.STRONG,
-        groupRatio: V98STORE_GROUP_RATIO,
-        today: new Date().toISOString().slice(0, 10),
-        callModel,
-        searchWeb,
-        onProgress: (evt) => sendSSE("progress", evt),
-      });
-      // Persist the PDF and hand back an unguessable link (the agent passes it to its owner
-      // to read); the machine-readable markdown stays in `output`. No base64 in the response.
-      if (result && result.file && result.file.base64) {
+        : null,
+      groupRatio: V98STORE_GROUP_RATIO,
+      today: new Date().toISOString().slice(0, 10),
+      jsearchKey: JSEARCH_API_KEY,
+      jsearchAvailable: jsearchUnderCap(),
+      callModel,
+      fetchGigs: (o) => gigSources.fetchGigs(o),
+      fetchData: (o) => cryptoData.fetchTokenData(o),
+      searchToken: (q, chainSlug) => cryptoData.searchToken(q, chainSlug && cryptoData.chainInfo(chainSlug) ? cryptoData.chainInfo(chainSlug).dsChain : ""),
+      onJsearchUsed: bumpJsearchUsage,
+      persistDocument: (file) => {
         try {
-          const docId = docStore.putDoc(Buffer.from(result.file.base64, "base64"), result.file.filename);
-          result.file = { format: result.file.format, filename: result.file.filename, url: getRequestBaseUrl(req) + "/d/" + docId };
+          const docId = docStore.putDoc(Buffer.from(file.base64, "base64"), file.filename);
+          return { format: file.format, filename: file.filename, url: getRequestBaseUrl(req) + "/d/" + docId };
         } catch (storeErr) {
           console.error("[DocGen] store error:", storeErr.message);
-          result.file = null;
+          return null;
         }
-      }
-    } else {
-      result = await workflowEngine.runWorkflowGraph({
-        graph,
-        tierModels: tierDef.models,
-        finalModelId,
-        input: query,
-        mode,
-        pastedSources,
-        searchWeb,
-        groupRatio: V98STORE_GROUP_RATIO,
-        today: new Date().toISOString().slice(0, 10),
-        callModel,
-        onProgress: (evt) => sendSSE("progress", evt),
-      });
-    }
+      },
+      executors: {
+        engine: workflowEngine,
+        cvGig,
+        cryptoDd,
+        docGen,
+      },
+      onProgress: (evt) => sendSSE("progress", evt),
+    });
     // Record the real v98 cost (in micro-USD) for the rate-limit + budget caps.
     // This is OUR provider cost, separate from the USDC the user paid via escrow.
     workflowLimiter.recordCost({ ...paths, ipKey, costMicros: result.totalCostMicros });

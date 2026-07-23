@@ -1,0 +1,112 @@
+"use strict";
+
+const assert = require("assert");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { createWorkflowJobStore } = require("./workflow-job-store");
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "fundline-jobs-"));
+let clock = Date.parse("2026-07-23T00:00:00.000Z");
+const store = createWorkflowJobStore({
+  baseDir: root,
+  now: () => clock,
+  randomBytes: () => Buffer.alloc(32, 7),
+  lockLeaseMs: 1000,
+});
+
+const quote = store.createQuote({
+  jobId: "0x" + "11".repeat(32),
+  ownerRateKey: "key:test",
+  request: {
+    slug: "client-research",
+    tier: "normal",
+    input: { prompt: "Acme" },
+  },
+  payment: {
+    mode: "escrow",
+    reference: "0x" + "11".repeat(32),
+    amount: "10000",
+  },
+});
+
+assert.equal(quote.job.status, "awaiting_payment");
+assert.equal(quote.recoveryToken.length, 64);
+assert.equal(JSON.stringify(store.getJob(quote.job.jobId)).includes(quote.recoveryToken), false);
+assert.equal(store.authorize(quote.job, { rateKey: "key:test" }), true);
+assert.equal(store.authorize(quote.job, { recoveryToken: quote.recoveryToken }), true);
+assert.equal(store.authorize(quote.job, { recoveryToken: "wrong" }), false);
+
+store.bindPayment(quote.job.jobId, {
+  mode: "escrow",
+  reference: quote.job.jobId,
+  payer: "0x" + "22".repeat(20),
+});
+assert.equal(store.findByPayment("escrow", quote.job.jobId).jobId, quote.job.jobId);
+
+const second = store.createQuote({
+  jobId: "0x" + "33".repeat(32),
+  request: {
+    slug: "client-research",
+    tier: "normal",
+    input: { prompt: "Beta" },
+  },
+  payment: {
+    mode: "escrow",
+    reference: "0x" + "33".repeat(32),
+    amount: "10000",
+  },
+});
+assert.throws(
+  () => store.bindPayment(second.job.jobId, {
+    mode: "escrow",
+    reference: quote.job.jobId,
+  }),
+  /already bound/
+);
+
+store.transition(quote.job.jobId, ["awaiting_payment"], "queued", {});
+const first = store.claimNext({ workerId: "worker-a", leaseMs: 1000 });
+assert.equal(first.jobId, quote.job.jobId);
+assert.equal(store.claimNext({ workerId: "worker-b", leaseMs: 1000 }), null);
+
+clock += 1001;
+const recovered = store.claimNext({ workerId: "worker-b", leaseMs: 1000 });
+assert.equal(recovered.jobId, quote.job.jobId);
+assert.equal(recovered.execution.workerId, "worker-b");
+
+store.storeResult(quote.job.jobId, { output: "# Durable", steps: [] });
+assert.equal(store.getResult(quote.job.jobId).output, "# Durable");
+assert.equal(store.getJob(quote.job.jobId).execution.resultStored, true);
+assert.throws(() => store.getJob("../../.env"), /Invalid job ID/);
+
+const publicJob = store.publicJob(store.getJob(quote.job.jobId));
+assert.equal(Object.hasOwn(publicJob, "owner"), false);
+assert.equal(Object.hasOwn(publicJob.request, "input"), false);
+assert.equal(Object.hasOwn(publicJob.execution, "workerId"), false);
+
+store.transition(quote.job.jobId, ["processing"], "settlement_pending", {});
+assert.equal(store.claimNext({ workerId: "worker-c", leaseMs: 1000 }), null);
+clock += 1001;
+assert.equal(store.claimNext({ workerId: "worker-c", leaseMs: 1000 }).jobId, quote.job.jobId);
+store.transition(quote.job.jobId, ["settlement_pending"], "succeeded", {
+  completedAt: new Date(clock).toISOString(),
+});
+assert.throws(
+  () => store.transition(quote.job.jobId, ["succeeded"], "queued", {}),
+  /terminal/
+);
+
+clock += 2000;
+const firstSweep = store.sweep({ resultTtlMs: 1000, metadataTtlMs: 10000 });
+assert.equal(firstSweep.resultsDeleted, 1);
+assert.equal(store.getResult(quote.job.jobId), null);
+assert.notEqual(store.getJob(quote.job.jobId), null);
+
+clock += 9000;
+const secondSweep = store.sweep({ resultTtlMs: 1000, metadataTtlMs: 10000 });
+assert.equal(secondSweep.metadataDeleted, 1);
+assert.equal(store.getJob(quote.job.jobId), null);
+assert.notEqual(store.getJob(second.job.jobId), null);
+
+console.log("PASS: workflow job store");

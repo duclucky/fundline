@@ -28,10 +28,15 @@ function createRunEscrowClient(config) {
   let treasuryContract = null;
   let treasuryUsdc = null;
 
+  function ensureProvider() {
+    if (!rpcUrl) throw new Error("Run escrow RPC is not configured.");
+    if (!provider) provider = new JsonRpcProvider(rpcUrl);
+    return provider;
+  }
+
   function ensureRead() {
     if (!escrowAddress || !rpcUrl) throw new Error("Run escrow is not configured (address or RPC).");
-    if (!provider) provider = new JsonRpcProvider(rpcUrl);
-    if (!readContract) readContract = new Contract(escrowAddress, ESCROW_ABI, provider);
+    if (!readContract) readContract = new Contract(escrowAddress, ESCROW_ABI, ensureProvider());
     return readContract;
   }
 
@@ -62,16 +67,24 @@ function createRunEscrowClient(config) {
       };
     },
 
-    async release(runId, memoText) {
+    async release(runId, memoText, onSubmitted) {
       const tx = await ensureTreasury().release(runId, toUtf8Bytes(String(memoText || "")));
+      if (typeof onSubmitted === "function") onSubmitted(tx.hash);
       await tx.wait(1);
       return tx.hash;
     },
 
-    async refund(runId) {
+    async refund(runId, onSubmitted) {
       const tx = await ensureTreasury().refund(runId);
+      if (typeof onSubmitted === "function") onSubmitted(tx.hash);
       await tx.wait(1);
       return tx.hash;
+    },
+
+    async getTransactionStatus(txHash) {
+      const receipt = await ensureProvider().getTransactionReceipt(String(txHash || ""));
+      if (!receipt) return "pending";
+      return Number(receipt.status) === 1 ? "confirmed" : "failed";
     },
 
     // Treasury-signed plain USDC transfer. Used only to refund an x402 run payer
@@ -79,7 +92,7 @@ function createRunEscrowClient(config) {
     // to auto-refund). The treasury holds no other user's funds and cannot pull from
     // any wallet; this only sends the treasury's own USDC back to the payer.
     canTransfer() { return Boolean(escrowAddress && rpcUrl && treasuryKey && usdcAddress); },
-    async transferUsdc(to, amount) {
+    async transferUsdc(to, amount, onSubmitted) {
       if (!usdcAddress) throw new Error("USDC address is not configured.");
       if (!treasuryKey) throw new Error("Treasury key is not configured.");
       ensureRead();
@@ -88,6 +101,7 @@ function createRunEscrowClient(config) {
         treasuryUsdc = new Contract(usdcAddress, USDC_ABI, new Wallet(key, provider));
       }
       const tx = await treasuryUsdc.transfer(to, BigInt(amount));
+      if (typeof onSubmitted === "function") onSubmitted(tx.hash);
       await tx.wait(1);
       return tx.hash;
     },

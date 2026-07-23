@@ -739,9 +739,9 @@ console.log("Paid", amount, "USDC:", data.output);</code></pre>
           <p>
             Fundline also speaks the Model Context Protocol at <code>POST /mcp</code>, so an MCP
             client (Claude, Cursor, and autonomous agents like Hermes Agent or OpenClaw) can connect
-            by URL and use Fundline workflows as tools. Authenticate with your API key; pay per run
-            from your own wallet via x402 (Fundline holds no funds). Tools: <code>list_workflows</code>,
-            <code>run_workflow</code>, and <code>list_runs</code> (your run history, signed by wallet).
+            by URL and use Fundline workflows as tools. A Fundline API key is optional for workflow
+            runs and raises the available rate limit. Tools: <code>list_workflows</code>,
+            <code>run_workflow</code>, <code>get_run</code>, and <code>list_runs</code>.
           </p>
           <div class="code-card">
             <div class="code-head"><span>MCP client config</span><button data-copy="#mcp-config" type="button">Copy</button></div>
@@ -752,11 +752,20 @@ console.log("Paid", amount, "USDC:", data.output);</code></pre>
   }
 }</code></pre>
           </div>
+          <h4>Durable asynchronous runs</h4>
+          <ol>
+            <li>Call <code>run_workflow</code> without payment. It returns a <code>jobId</code>, <code>runId</code>, exact price, escrow address, and <code>recoveryToken</code>.</li>
+            <li>Approve and fund the quoted <code>runId</code> through <code>FundlineRunEscrow</code>.</li>
+            <li>Call <code>run_workflow</code> again with <code>payment.jobId</code>, <code>payment.runId</code>, and <code>payment.recoveryToken</code>. The tool returns <code>queued</code> immediately.</li>
+            <li>Call <code>get_run</code> with the <code>jobId</code> and <code>recoveryToken</code> until the status is <code>succeeded</code>, <code>refunded</code>, or <code>failed</code>.</li>
+            <li>Keep the recovery token private. A run ID or transaction hash alone cannot read the output.</li>
+          </ol>
           <p>
-            The agent calls <code>run_workflow</code> with no payment to get the price and treasury
-            address, transfers the USDC from its own wallet, then calls again with
-            <code>payment</code> (payer wallet + tx hash). Some clients reach remote MCP servers
-            through a local bridge such as <code>mcp-remote</code>.
+            Successful results remain retrievable for seven days by default, so a client can recover
+            after a timeout or lost connection without paying for another run. Direct x402 payment
+            remains available for compatibility by passing a payer wallet and transaction hash without
+            job credentials, but escrow is the recommended path for long-running MCP work. Some clients
+            reach remote MCP servers through a local bridge such as <code>mcp-remote</code>.
           </p>
         </section>
 

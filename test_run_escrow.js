@@ -89,5 +89,15 @@ const lowerSrc = source.toLowerCase().replace(/\s+/g, "");
 check("release transfers to treasury", /transfer\(treasury,/.test(source));
 check("refund transfers to payer", /transfer\(payer, amount\)/.test(source) || /transfer\(run\.payer/.test(source));
 
+// The server client must durably expose a submitted hash before waiting for a receipt.
+const clientSource = fs.readFileSync(path.join(ROOT, "run-escrow-client.js"), "utf8");
+check("client release supports submission callback", /async release\(runId, memoText, onSubmitted\)/.test(clientSource));
+check("client refund supports submission callback", /async refund\(runId, onSubmitted\)/.test(clientSource));
+check("client transfer supports submission callback", /async transferUsdc\(to, amount, onSubmitted\)/.test(clientSource));
+check("client can reconcile transaction receipts", /async getTransactionStatus\(txHash\)/.test(clientSource));
+const callbackIndex = clientSource.indexOf("onSubmitted(tx.hash)");
+const waitIndex = clientSource.indexOf("await tx.wait(1)", callbackIndex);
+check("client records submitted hash before receipt wait", callbackIndex >= 0 && waitIndex > callbackIndex);
+
 console.log(`\nrun escrow surface test: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
