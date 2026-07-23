@@ -35,7 +35,9 @@ async function main() {
   assert.equal(rendered.format, "pdf");
   assert.equal(rendered.mimeType, "application/pdf");
   assert.match(rendered.filename, /^client-research-2026-07-23-abababab\.pdf$/);
-  assert.equal(Buffer.from(rendered.base64, "base64").subarray(0, 5).toString("latin1"), "%PDF-");
+  const renderedBuffer = Buffer.from(rendered.base64, "base64");
+  assert.equal(renderedBuffer.subarray(0, 5).toString("latin1"), "%PDF-");
+  assert.equal((renderedBuffer.toString("latin1").match(/\/Type\s*\/Page\b/g) || []).length, 1);
 
   let renders = 0;
   const persistDocument = async (file) => ({

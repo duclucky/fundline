@@ -18,7 +18,7 @@ const THEME = {
   stripe: "#f5f5f5",
 };
 
-const PAGE = { size: "A4", margin: 64 };
+const PAGE = { size: "A4", margin: 64, bottomMargin: 92 };
 
 // renderProposalPdf(spec) -> Promise<Buffer>. Also used for reports (same block grammar).
 function renderDocumentPdf(spec, opts) {
@@ -31,7 +31,12 @@ function renderDocumentPdf(spec, opts) {
       const theme = Object.assign({}, THEME, (spec && spec.theme) || {});
       const doc = new PDFDocument({
         size: PAGE.size,
-        margins: { top: PAGE.margin, bottom: PAGE.margin, left: PAGE.margin, right: PAGE.margin },
+        margins: {
+          top: PAGE.margin,
+          bottom: PAGE.bottomMargin,
+          left: PAGE.margin,
+          right: PAGE.margin,
+        },
         bufferPages: true,
         info: {
           Title: (spec && spec.meta && spec.meta.title) || "Document",
@@ -211,8 +216,11 @@ function addFooters(doc, theme, footerText) {
     const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const y = doc.page.height - 40;
     const label = (footerText ? footerText + "   " : "") + "Page " + (i + 1) + " of " + range.count;
+    const bottomMargin = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc.font("Helvetica").fontSize(8).fillColor(theme.muted)
       .text(label, doc.page.margins.left, y, { width, align: "center", lineBreak: false });
+    doc.page.margins.bottom = bottomMargin;
   }
 }
 
