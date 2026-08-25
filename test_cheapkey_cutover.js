@@ -56,4 +56,14 @@ const activeSource = activeFiles.concat(optionalLocalScripts.filter((file) => fs
   "test_v98_cost.js",
 ].forEach((file) => assert.equal(fs.existsSync(file), false, `${file} should be removed`));
 
+const guidanceFiles = [
+  "AGENTS.md",
+  ".agents/skills/create-workflow/SKILL.md",
+  ".agents/skills/cheapkeyai-api/SKILL.md",
+];
+guidanceFiles.forEach((file) => assert(fs.existsSync(file), `${file} should exist`));
+const guidance = guidanceFiles.map((file) => fs.readFileSync(file, "utf8")).join("\n");
+assert(guidance.includes("CheapKeyAI"));
+assert.equal(/v98store|V98STORE_|v98Models|v98-client|v98-models/i.test(guidance), false);
+
 console.log("PASS: server configuration uses only CheapKeyAI");
