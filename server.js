@@ -175,7 +175,7 @@ const WORKFLOW_LIMITS = {
   dailyBudgetMicros: Math.round(WORKFLOW_DAILY_BUDGET_USD * 1000000),
 };
 // Per-API-key limits for authenticated agent runs. In beta the run is paid in
-// TESTNET USDC (no real cost to the caller) while the v98 provider cost is real USD,
+// TESTNET USDC (no real cost to the caller) while the model provider cost is real USD,
 // so a single key must NOT be able to drain the shared global daily budget. The
 // per-key spend cap is therefore set WELL BELOW WORKFLOW_DAILY_BUDGET_USD (it takes
 // several distinct keys, each a wallet-signed mint, to approach the global cap). On
@@ -295,7 +295,7 @@ Object.entries(WORKFLOW_BANDS).forEach(([slug, [name, band]]) => {
 });
 
 // Measured per-run prices (priceUnits, 6-decimal USDC), from running each
-// workflow's tuned chain once per mode with real v98 calls (see
+// workflow's tuned chain once per mode with real provider calls (see
 // run-workflow-once.js) and rounding the real cost down to a clean value. These
 // override the rough band prices as each workflow is measured and finalized.
 const WORKFLOW_PRICE_OVERRIDES = {
@@ -335,7 +335,7 @@ Object.entries(WORKFLOW_PRICE_OVERRIDES).forEach(([slug, p]) => {
 // CV + Freelance Gig Match. type "cvgig" -> a custom executor (workflow-cvgig.js),
 // NOT the generic node-graph engine (it fetches real gigs from external APIs and
 // returns a structured cvJson). FAST = profile extract, STRONG = CV writer + gig
-// ranking. Prices set from a live measurement pass 2026-06-30 (real v98 cost
+// ranking. Prices set from a live measurement pass 2026-06-30 (real provider cost
 // normal $0.004 / plus $0.007 / pro $0.030), rounded to clean monotonic USDC.
 WORKFLOW_RUN_DEFS["cv-gig-match"] = {
   type: "cvgig",
@@ -354,7 +354,7 @@ WORKFLOW_RUN_DEFS["cv-gig-match"] = {
 // VERIFY is a separate model from STRONG: the adversarial verifier needs a reliable
 // instruction-follower (a live measure showed deepseek over-flags), so normal/plus use
 // gpt-4.1-mini for verification while the writer can stay cheaper. Prices set from the
-// live measure 2026-07-05 (real v98 cost normal ~$0.003 / plus ~$0.004 / pro ~$0.015).
+// live measure 2026-07-05 (real provider cost normal ~$0.003 / plus ~$0.004 / pro ~$0.015).
 WORKFLOW_RUN_DEFS["crypto-dd"] = {
   type: "cryptodd",
   name: "Crypto Due-Diligence Pack",
@@ -2608,7 +2608,7 @@ async function handleWorkflowRun(req, res, slug) {
       },
       onProgress: (evt) => sendSSE("progress", evt),
     });
-    // Record the real v98 cost (in micro-USD) for the rate-limit + budget caps.
+    // Record the real provider cost (in micro-USD) for the rate-limit + budget caps.
     // This is OUR provider cost, separate from the USDC the user paid via escrow.
     workflowLimiter.recordCost({ ...paths, ipKey, costMicros: result.totalCostMicros });
 

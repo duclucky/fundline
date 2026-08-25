@@ -10,7 +10,7 @@
 // EVM chains only in v1. Data sources are free + keyless; only news uses Tavily.
 // Returns { report, riskJson, steps, sources, totalCostMicros, meta }.
 
-const v98Models = require("./v98-models");
+const cheapkeyModels = require("./cheapkey-models");
 const modelCost = require("./model-cost");
 const cryptoData = require("./crypto-data");
 
@@ -308,10 +308,10 @@ function buildReport(ctx) {
 // }
 async function runCryptoDdWorkflow(opts) {
   const groupRatio = opts.groupRatio || 1;
-  const intakeModel = v98Models.resolveModelId(opts.intakeModel || "gpt-4o-mini");
-  const newsModel = v98Models.resolveModelId(opts.newsModel || "gpt-4o-mini");
-  const writerModel = v98Models.resolveModelId(opts.writerModel || "gpt-4.1-mini");
-  const verifierModel = v98Models.resolveModelId(opts.verifierModel || "gpt-4.1-mini");
+  const intakeModel = cheapkeyModels.resolveModelId(opts.intakeModel || "gpt-4o-mini");
+  const newsModel = cheapkeyModels.resolveModelId(opts.newsModel || "gpt-4o-mini");
+  const writerModel = cheapkeyModels.resolveModelId(opts.writerModel || "gpt-4.1-mini");
+  const verifierModel = cheapkeyModels.resolveModelId(opts.verifierModel || "gpt-4.1-mini");
   const callModel = opts.callModel;
   const fetchData = opts.fetchData;
   const searchWeb = typeof opts.searchWeb === "function" ? opts.searchWeb : null;

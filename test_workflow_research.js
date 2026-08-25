@@ -46,12 +46,14 @@ check("context includes url", R.aggregateContext([{ title: "T", url: "http://u",
 (async () => {
   // Search mode: 4 callModel calls (role, plan, search model, writer).
   let calls = 0;
+  const calledModels = [];
   const usageRole   = { prompt_tokens: 50,  completion_tokens: 20  };
   const usagePlan   = { prompt_tokens: 30,  completion_tokens: 15  };
   const usageSearch = { prompt_tokens: 800, completion_tokens: 1200 };
   const usageWrite  = { prompt_tokens: 500, completion_tokens: 300  };
   function fakeCall(modelId, messages, maxTokens) {
     calls += 1;
+    calledModels.push(modelId);
     if (calls === 1) return Promise.resolve({ content: '{"server":"\u{1F4B0} Finance Agent","agent_role_prompt":"You are a finance analyst."}', usage: usageRole });
     if (calls === 2) return Promise.resolve({ content: '["q1","q2","q3"]', usage: usagePlan });
     if (calls === 3) return Promise.resolve({ content: "Web findings: Acme Corp is a tech company ([acme.com](http://acme.com))", usage: usageSearch });
@@ -64,7 +66,6 @@ check("context includes url", R.aggregateContext([{ title: "T", url: "http://u",
     query: "Research Acme Corp for a partnership",
     mode: "search",
     cheapModel: "gpt-4o-mini",
-    searchModel: "grok-3-deepsearch",
     writerModel: "deepseek-v3.2",
     groupRatio: 1,
     today: "2026-06-28",
@@ -76,13 +77,14 @@ check("context includes url", R.aggregateContext([{ title: "T", url: "http://u",
   eq("persona resolved + emoji stripped", res.persona.server, "Finance Agent");
   eq("queries parsed", res.queries.length, 3);
   eq("step count (role, plan, web, writer)", res.steps.length, 4);
+  eq("default search model", calledModels[2], "deepseek-r1");
   // progress: 4 steps x 2 events (running + done) = 8
   eq("onProgress events", progressEvents.length, 8);
   check("first event is role_analysis running", progressEvents[0].step === "role_analysis" && progressEvents[0].status === "running");
   check("last event is report_writer done", progressEvents[7].step === "report_writer" && progressEvents[7].status === "done");
   // cost: role(gpt-4o-mini) 50*0.15+20*0.60=20; plan(gpt-4o-mini) 30*0.15+15*0.60=14;
-  //        search(grok-3-deepsearch) 800*3.00+1200*15.00=20400; write(deepseek-v3.2) 500*0.27+300*1.10=465; total 20899
-  eq("total cost micros", res.totalCostMicros, 20899);
+  //        search(deepseek-r1) 800*4.00+1200*16.00=22400; write(deepseek-v3.2) 500*2.00+300*3.00=1900; total 24334
+  eq("total cost micros", res.totalCostMicros, 24334);
 
   // Paste mode: 3 callModel calls (role, plan, writer) -- search model not called.
   let calls2 = 0;

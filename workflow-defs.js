@@ -14,7 +14,7 @@
 //   CODE      - code review and PR review
 //   FORMATTER - final Markdown + JSON assembly
 // A node picks the alias that fits its function; the tier decides the concrete
-// model. See .claude/skills/v98store-api for the id map.
+// model. See the cheapkeyai-api skill for the id map.
 
 const research = require("./workflow-research");
 

@@ -25,4 +25,35 @@ assert(env.includes("CHEAPKEYAI_TIMEOUT_MS=300000"));
 assert.equal(env.includes("V98STORE_"), false);
 assert.equal(provider.includes("v98"), false);
 
+const activeFiles = [
+  "server.js",
+  "model-cost.js",
+  "workflow-engine.js",
+  "workflow-research.js",
+  "workflow-cvgig.js",
+  "workflow-cryptodd.js",
+  "workflow-docgen.js",
+  "workflow-defs.js",
+];
+const optionalLocalScripts = [
+  "estimate-workflow-cost.js",
+  "measure-all.js",
+  "measure-cryptodd.js",
+  "measure-cvgig.js",
+  "measure-real-cost.js",
+  "run-workflow-once.js",
+];
+const activeSource = activeFiles.concat(optionalLocalScripts.filter((file) => fs.existsSync(file)))
+  .map((file) => fs.readFileSync(file, "utf8"))
+  .join("\n");
+["v98store", "V98STORE_", "v98Client", "v98Models", "callV98", "listV98", "getV98"].forEach((pattern) => {
+  assert.equal(activeSource.includes(pattern), false, `active source still contains ${pattern}`);
+});
+[
+  "v98-client.js",
+  "v98-models.js",
+  "test_v98_client_timeout.js",
+  "test_v98_cost.js",
+].forEach((file) => assert.equal(fs.existsSync(file), false, `${file} should be removed`));
+
 console.log("PASS: server configuration uses only CheapKeyAI");

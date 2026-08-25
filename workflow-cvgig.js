@@ -9,7 +9,7 @@
 // Returns { report, cvJson, gigs, steps, totalCostMicros }. See
 // .claude/workflow-cv-gigmatch-spec.md.
 
-const v98Models = require("./v98-models");
+const cheapkeyModels = require("./cheapkey-models");
 const modelCost = require("./model-cost");
 
 // --- JSON extraction helpers ---
@@ -239,9 +239,9 @@ async function runCvGigWorkflow(opts) {
   if (!input) throw new Error("Freelancer background is required");
   const topGigs = opts.topGigs || 8;
   const groupRatio = opts.groupRatio || 1;
-  const profileModel = v98Models.resolveModelId(opts.profileModel || "gpt-4o-mini");
-  const cvModel = v98Models.resolveModelId(opts.cvModel || "gpt-4.1-mini");
-  const rankModel = v98Models.resolveModelId(opts.rankModel || "gpt-4.1-mini");
+  const profileModel = cheapkeyModels.resolveModelId(opts.profileModel || "gpt-4o-mini");
+  const cvModel = cheapkeyModels.resolveModelId(opts.cvModel || "gpt-4.1-mini");
+  const rankModel = cheapkeyModels.resolveModelId(opts.rankModel || "gpt-4.1-mini");
   const callModel = opts.callModel;
   const fetchGigs = opts.fetchGigs;
   const minBeforeJSearch = opts.minGigsBeforeJSearch != null ? opts.minGigsBeforeJSearch : 5;

@@ -9,7 +9,6 @@
 // See .claude/workflow-doc-gen-spec.md.
 
 const docRender = require("./doc-render");
-const v98Models = require("./v98-models");
 const modelCost = require("./model-cost");
 
 const DOC_TYPES = { proposal: "proposal", report: "report" };

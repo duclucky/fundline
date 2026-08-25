@@ -4,9 +4,9 @@
 // role select -> plan queries -> web retrieve -> write cited report.
 // Prompts kept close to the originals (see .claude/workflow-gpt-researcher.md).
 // The orchestrator takes injected callModel/searchWeb so it is testable without
-// network. Cost is summed in integer micro-USD via v98-models.
+// network. Cost is summed in integer micro-USD via cheapkey-models.
 
-const v98Models = require("./v98-models");
+const cheapkeyModels = require("./cheapkey-models");
 
 // --- pure helpers (unit tested directly) ---
 
@@ -130,7 +130,7 @@ function buildPlannerMessages(query, maxQueries, today) {
   return [{ role: "user", content }];
 }
 
-// Messages for a search-capable model (e.g. grok-3-deepsearch, deepseek-r1-searching).
+// Messages for a research-capable model such as deepseek-r1.
 // The model is expected to perform real web retrieval and return findings with source URLs.
 function buildSearchMessages(query, queries, today) {
   const angles = queries.map((q, i) => `${i + 1}. ${q}`).join("\n");
@@ -174,9 +174,9 @@ async function runResearchWorkflow(opts) {
   const query = String(opts.query || "").trim();
   if (!query) throw new Error("A research query is required");
   const mode = opts.mode === "paste" ? "paste" : "search";
-  const cheapModel = v98Models.resolveModelId(opts.cheapModel || "gpt-4o-mini");
-  const searchModel = v98Models.resolveModelId(opts.searchModel || "grok-3-deepsearch");
-  const writerModel = v98Models.resolveModelId(opts.writerModel || "deepseek-v3.2");
+  const cheapModel = cheapkeyModels.resolveModelId(opts.cheapModel || "gpt-4o-mini");
+  const searchModel = cheapkeyModels.resolveModelId(opts.searchModel || "deepseek-r1");
+  const writerModel = cheapkeyModels.resolveModelId(opts.writerModel || "deepseek-v3.2");
   const groupRatio = opts.groupRatio || 1;
   const today = opts.today || new Date().toISOString().slice(0, 10);
   const maxQueries = opts.maxQueries || 3;
@@ -187,7 +187,7 @@ async function runResearchWorkflow(opts) {
   const steps = [];
   let totalCostMicros = 0;
   function account(name, modelId, usage) {
-    const cost = v98Models.computeCostMicros(modelId, usage.prompt_tokens, usage.completion_tokens, groupRatio) || 0;
+    const cost = cheapkeyModels.computeCostMicros(modelId, usage.prompt_tokens, usage.completion_tokens, groupRatio) || 0;
     totalCostMicros += cost;
     steps.push({ name, model: modelId, costMicros: cost });
     return cost;

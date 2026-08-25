@@ -1,7 +1,7 @@
 "use strict";
 
 // Generic node-graph workflow engine (hybrid DAG scheduler). A workflow is a set
-// of nodes; each node runs a v98store model (its alias is resolved to a real model
+// of nodes; each node runs a CheapKeyAI model (its alias is resolved to a real model
 // id from the active tier), a local JS step, or a retrieval step (web search or
 // pasted sources). Nodes read prior node outputs explicitly (via out(ctx, id) in
 // their prompt builder), so the set of ids a node reads IS its dependency set.
@@ -15,7 +15,7 @@
 //
 // It mirrors the shape of the original research executor: it takes an injected
 // callModel so it is testable without network, emits onProgress per node for the
-// SSE canvas animation, sums cost in integer micro-USD via v98-models, and
+// SSE canvas animation, sums cost in integer micro-USD via cheapkey-models, and
 // returns { report, steps, totalCostMicros, outputs }.
 //
 // Node shape (see workflow-defs.js):
@@ -25,7 +25,7 @@
 // ctx = { input, today, mode, pastedSources, maxQueries, totalWords,
 //         outputs:{id->content}, parsed:{id->value} }
 
-const v98Models = require("./v98-models");
+const cheapkeyModels = require("./cheapkey-models");
 const modelCost = require("./model-cost");
 const research = require("./workflow-research");
 
@@ -201,7 +201,7 @@ async function runWorkflowGraph(opts) {
       const useFinal = node.isFinal && opts.finalModelId;
       const label = tierModels[node.alias];
       if (!label && !useFinal) throw new Error("No model configured for alias " + node.alias);
-      const modelId = useFinal ? opts.finalModelId : v98Models.resolveModelId(label);
+      const modelId = useFinal ? opts.finalModelId : cheapkeyModels.resolveModelId(label);
       const messages = node.build(ctx);
       const res = await callModel(modelId, messages, node.maxTokens || 1024);
       account(index, node.name, modelId, res.usage);
