@@ -8,22 +8,21 @@ const root = __dirname;
 const serverSource = fs.readFileSync(path.join(root, "server.js"), "utf8");
 const envExample = fs.readFileSync(path.join(root, ".env.example"), "utf8");
 
-assert.equal(serverSource.includes("cheapkeyai.shop"), false);
-assert.equal(serverSource.includes("WORKFLOW_FINAL_API_KEY"), false);
+assert.equal(serverSource.includes("WORKFLOW_FINAL_API_KEY"), true);
 assert.equal(serverSource.includes("WORKFLOW_FINAL_BASE_URL"), false);
 assert.equal((serverSource.match(/workflowModelProvider\.callModel/g) || []).length, 2);
-assert.equal(serverSource.includes("timeoutMs: V98STORE_TIMEOUT_MS"), true);
-assert.equal(envExample.includes("cheapkeyai.shop"), false);
-assert.equal(envExample.includes("WORKFLOW_FINAL_API_KEY"), false);
-assert.equal(envExample.includes("V98STORE_TIMEOUT_MS=300000"), true);
+assert.equal(serverSource.includes("timeoutMs: CHEAPKEYAI_TIMEOUT_MS"), true);
+assert.equal(serverSource.includes("cheapkeyai.shop"), true);
+assert.equal(envExample.includes("WORKFLOW_FINAL_API_KEY"), true);
+assert.equal(envExample.includes("CHEAPKEYAI_TIMEOUT_MS=300000"), true);
 
 const { createWorkflowModelProvider } = require("./workflow-model-provider");
 
 async function main() {
   const calls = [];
   const provider = createWorkflowModelProvider({
-    apiKey: "v98-test-key",
-    baseUrl: "https://v98store.com/v1",
+    apiKey: "cheapkey-test-key",
+    baseUrl: "https://cheapkeyai.shop/v1",
     timeoutMs: 300000,
     models: {
       normal: "gpt-5.6-luna",
@@ -48,20 +47,20 @@ async function main() {
   );
   assert.deepEqual(result, { content: "ok", usage: { total_tokens: 3 } });
   assert.deepEqual(calls[0].config, {
-    apiKey: "v98-test-key",
-    baseUrl: "https://v98store.com/v1",
+    apiKey: "cheapkey-test-key",
+    baseUrl: "https://cheapkeyai.shop/v1",
     timeoutMs: 300000,
   });
   assert.equal(calls[0].request.model, "gpt-5.6-luna");
 
   const disabled = createWorkflowModelProvider({
     apiKey: "",
-    baseUrl: "https://v98store.com/v1",
+    baseUrl: "https://cheapkeyai.shop/v1",
     models: { normal: "gpt-5.6-luna" },
     callChat: async () => ({ content: "", usage: {} }),
   });
   assert.equal(disabled.finalModelForTier("normal"), "");
-  console.log("PASS: workflow model provider uses v98store");
+  console.log("PASS: workflow model provider uses CheapKeyAI");
 }
 
 main().catch((error) => {

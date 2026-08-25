@@ -5,8 +5,9 @@ const path = require("path");
 const crypto = require("crypto");
 const dns = require("dns");
 const { ethers } = require("ethers");
-const v98Client = require("./v98-client");
-const v98Models = require("./v98-models");
+const cheapkeyClient = require("./cheapkey-client");
+const cheapkeyModels = require("./cheapkey-models");
+const modelCost = require("./model-cost");
 const workflowLimiter = require("./workflow-limiter");
 const workflowResearch = require("./workflow-research");
 const workflowEngine = require("./workflow-engine");
@@ -109,10 +110,10 @@ const MAX_BATCH_RECIPIENTS = 256; // must match FundlineBatchRouter.MAX_BATCH
 const ARC_RUN_ESCROW_ADDRESS = normalizeAddress(process.env.ARC_RUN_ESCROW_ADDRESS || "");
 const ARC_TREASURY_ADDRESS = normalizeAddress(process.env.ARC_TREASURY_ADDRESS || "");
 
-// --- AI workflow runner (v98store) + free-run rate limiting (phase 1) ---
+// --- AI workflow runner (CheapKeyAI) + free-run rate limiting (phase 1) ---
 // Master switch: when off, the workflow run endpoints are not served, so prod
-// stays on the frontend mock. Turn on locally to test live v98store calls.
-// See .claude/workflow-rate-limit-spec.md and the v98store-api skill.
+// stays on the frontend mock. Turn on locally to test live provider calls.
+// See .claude/workflow-rate-limit-spec.md and the cheapkeyai-api skill.
 const WORKFLOW_RATE_LIMIT_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.WORKFLOW_RATE_LIMIT_ENABLED || ""));
 const WORKFLOW_MCP_ASYNC_ENABLED = /^(1|true|yes|on)$/i.test(String(process.env.WORKFLOW_MCP_ASYNC_ENABLED || ""));
 const WORKFLOW_JOB_RESULT_TTL_HOURS = Number(process.env.WORKFLOW_JOB_RESULT_TTL_HOURS || 168) || 168;
@@ -131,23 +132,27 @@ const workflowJobStore = createWorkflowJobStore({
   baseDir: path.join(DATA_DIR, "workflow-jobs"),
   lockLeaseMs: WORKFLOW_JOB_LEASE_MS,
 });
-const V98STORE_API_KEY = String(process.env.V98STORE_API_KEY || "").trim();
-const V98STORE_BASE_URL = String(process.env.V98STORE_BASE_URL || "https://v98store.com/v1").trim();
-const V98STORE_GROUP_RATIO = Number(process.env.V98STORE_GROUP_RATIO || 1) || 1;
-const V98STORE_TIMEOUT_MS = Number(process.env.V98STORE_TIMEOUT_MS || 300000) || 300000;
+const CHEAPKEYAI_API_KEY = String(
+  process.env.CHEAPKEYAI_API_KEY || process.env.WORKFLOW_FINAL_API_KEY || "",
+).trim();
+const CHEAPKEYAI_BASE_URL = String(
+  process.env.CHEAPKEYAI_BASE_URL || "https://cheapkeyai.shop/v1",
+).trim();
+const CHEAPKEYAI_GROUP_RATIO = Number(process.env.CHEAPKEYAI_GROUP_RATIO || 1) || 1;
+const CHEAPKEYAI_TIMEOUT_MS = Number(process.env.CHEAPKEYAI_TIMEOUT_MS || 300000) || 300000;
 // GPT-5.6 models for the FINAL content node of every workflow. All workflow models use
-// the shared v98store connection above, while deployments may override each model id.
+// the shared CheapKeyAI connection above, while deployments may override each model id.
 const WORKFLOW_FINAL_MODELS = {
   normal: String(process.env.WORKFLOW_FINAL_MODEL_NORMAL || "gpt-5.6-luna").trim(),
   plus: String(process.env.WORKFLOW_FINAL_MODEL_PLUS || "gpt-5.6-terra").trim(),
   pro: String(process.env.WORKFLOW_FINAL_MODEL_PRO || "gpt-5.6-sol").trim(),
 };
 const workflowModelProvider = createWorkflowModelProvider({
-  apiKey: V98STORE_API_KEY,
-  baseUrl: V98STORE_BASE_URL,
-  timeoutMs: V98STORE_TIMEOUT_MS,
+  apiKey: CHEAPKEYAI_API_KEY,
+  baseUrl: CHEAPKEYAI_BASE_URL,
+  timeoutMs: CHEAPKEYAI_TIMEOUT_MS,
   models: WORKFLOW_FINAL_MODELS,
-  callChat: v98Client.callV98Chat,
+  callChat: cheapkeyClient.callCheapKeyChat,
 });
 const { finalModelForTier } = workflowModelProvider;
 // JSearch (OpenWeb Ninja) gig API for the CV + Gig Match workflow. On-demand only:
@@ -188,7 +193,7 @@ const WORKFLOW_KEY_LIMITS = {
 // can use different search providers or writers depending on their data needs.
 // priceUnits: fixed USDC base units (6 decimals; 50000 = 0.05 USDC).
 // Per-tier alias -> model matrix. Each workflow lists the aliases its graph uses
-// (see workflow-defs.js); the tier decides the concrete v98store model so quality
+// (see workflow-defs.js); the tier decides the concrete CheapKeyAI model so quality
 // and cost scale up from Normal to Pro. The FORMATTER alias stays cheap on every
 // tier (it only assembles prior outputs).
 const WORKFLOW_TIER_MODELS = {
@@ -221,7 +226,7 @@ const WORKFLOW_RUN_DEFS = {
   "client-research": {
     name: "Client Research",
     // Each tier owns its own model set and price. Models map node ALIASES to real
-    // v98store ids (the graph in workflow-defs.js references aliases, not ids):
+    // CheapKeyAI ids (the graph in workflow-defs.js references aliases, not ids):
     // - FAST: inexpensive model for role + plan steps (shared across tiers)
     // - RESEARCH: the real-time web retrieval model (quality scales with tier)
     // - STRONG: the report synthesis model (quality scales with tier)
@@ -1029,9 +1034,9 @@ function handlePublicConfig(req, res) {
     walletPrivyPolicyEnabled: WALLET_PRIVY_POLICY_ENABLED && privyServerClient.available(),
     workflowRunnerEnabled: WORKFLOW_RATE_LIMIT_ENABLED,
     workflowAsyncEnabled: WORKFLOW_MCP_ASYNC_ENABLED,
-    // Final-node models per tier, so the UI can show the real v98store model on the final
-    // step. Null when v98store is not configured (UI keeps the normal labels).
-    workflowFinalModels: V98STORE_API_KEY ? { ...WORKFLOW_FINAL_MODELS } : null,
+    // Final-node models per tier, so the UI can show the real provider model on the final
+    // step. Null when CheapKeyAI is not configured (UI keeps the normal labels).
+    workflowFinalModels: CHEAPKEYAI_API_KEY ? { ...WORKFLOW_FINAL_MODELS } : null,
     workflowFreeRunsPerDay: WORKFLOW_RUNS_PER_IP_PER_DAY,
     workflowGenPromptsPerDay: WORKFLOW_GEN_PROMPTS_PER_IP_PER_DAY,
     workflowBetaNotice: WORKFLOW_BETA_NOTICE,
@@ -1152,7 +1157,7 @@ function listWorkflowRuns(wallet) {
 }
 
 // POST /api/workflows/:slug/build-prompt - turn a short description into a polished
-// prompt with one v98store call. Free, but has its own per-IP daily quota (genCount)
+// prompt with one CheapKeyAI call. Free, but has its own per-IP daily quota (genCount)
 // and still counts against the per-IP spend cap and the global daily budget.
 async function handleWorkflowBuildPrompt(req, res, slug) {
   if (!WORKFLOW_RATE_LIMIT_ENABLED) {
@@ -1163,7 +1168,7 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
     sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
-  if (!V98STORE_API_KEY) {
+  if (!CHEAPKEYAI_API_KEY) {
     sendJson(res, 503, { error: "service_unconfigured", message: "Workflow provider is not configured." });
     return;
   }
@@ -1193,10 +1198,10 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
     return;
   }
 
-  const modelId = v98Models.resolveModelId(WORKFLOW_BUILD_PROMPT_MODEL);
+  const modelId = cheapkeyModels.resolveModelId(WORKFLOW_BUILD_PROMPT_MODEL);
   try {
-    const result = await v98Client.callV98Chat(
-      { apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL, timeoutMs: V98STORE_TIMEOUT_MS },
+    const result = await cheapkeyClient.callCheapKeyChat(
+      { apiKey: CHEAPKEYAI_API_KEY, baseUrl: CHEAPKEYAI_BASE_URL, timeoutMs: CHEAPKEYAI_TIMEOUT_MS },
       {
         model: modelId,
         maxTokens: 600,
@@ -1207,7 +1212,12 @@ async function handleWorkflowBuildPrompt(req, res, slug) {
         ],
       },
     );
-    const cost = v98Models.computeCostMicros(modelId, result.usage.prompt_tokens, result.usage.completion_tokens, V98STORE_GROUP_RATIO);
+    const cost = modelCost.costMicros(
+      modelId,
+      result.usage.prompt_tokens,
+      result.usage.completion_tokens,
+      CHEAPKEYAI_GROUP_RATIO,
+    );
     workflowLimiter.recordCost({ ...paths, ipKey, costMicros: cost || 0 });
     sendJson(res, 200, { prompt: result.content, remaining: reserve.remaining, resetsAt: reserve.resetsAt });
   } catch (error) {
@@ -1486,28 +1496,36 @@ function requiredModelsForRun(def, tier) {
 // Free provider health caches (no token cost). Shared across all callers/IPs so a burst of
 // preflights makes at most one upstream call per window (bounds cost and abuse).
 const PREFLIGHT_CACHE_MS = 60000;
-let _v98ModelsCache = { ids: null, at: 0, ok: false, error: "" };
-let _v98BillingCache = { data: null, at: 0 };
+let _cheapkeyModelsCache = { ids: null, at: 0, ok: false, error: "" };
+let _cheapkeyBalanceCache = { data: null, at: 0 };
 const _preflightCache = new Map(); // key `${slug}|${tier}` -> { at, result }
 
-async function getV98ModelSet() {
+async function getCheapKeyModelSet() {
   const now = Date.now();
-  if (_v98ModelsCache.ids && now - _v98ModelsCache.at < PREFLIGHT_CACHE_MS) return _v98ModelsCache;
+  if (_cheapkeyModelsCache.ids && now - _cheapkeyModelsCache.at < PREFLIGHT_CACHE_MS) return _cheapkeyModelsCache;
   try {
-    const ids = await v98Client.listV98Models({ apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL });
-    _v98ModelsCache = { ids: new Set(ids), at: now, ok: true, error: "" };
+    const ids = await cheapkeyClient.listCheapKeyModels({
+      apiKey: CHEAPKEYAI_API_KEY,
+      baseUrl: CHEAPKEYAI_BASE_URL,
+      timeoutMs: CHEAPKEYAI_TIMEOUT_MS,
+    });
+    _cheapkeyModelsCache = { ids: new Set(ids), at: now, ok: true, error: "" };
   } catch (error) {
-    _v98ModelsCache = { ids: null, at: now, ok: false, error: error.message || "unreachable" };
+    _cheapkeyModelsCache = { ids: null, at: now, ok: false, error: error.message || "unreachable" };
   }
-  return _v98ModelsCache;
+  return _cheapkeyModelsCache;
 }
 
-async function getV98BillingCached() {
+async function getCheapKeyBalanceCached() {
   const now = Date.now();
-  if (_v98BillingCache.data && now - _v98BillingCache.at < PREFLIGHT_CACHE_MS) return _v98BillingCache.data;
+  if (_cheapkeyBalanceCache.data && now - _cheapkeyBalanceCache.at < PREFLIGHT_CACHE_MS) return _cheapkeyBalanceCache.data;
   try {
-    const data = await v98Client.getV98Billing({ apiKey: V98STORE_API_KEY, baseUrl: V98STORE_BASE_URL });
-    _v98BillingCache = { data, at: now };
+    const data = await cheapkeyClient.getCheapKeyBalance({
+      apiKey: CHEAPKEYAI_API_KEY,
+      baseUrl: CHEAPKEYAI_BASE_URL,
+      timeoutMs: CHEAPKEYAI_TIMEOUT_MS,
+    });
+    _cheapkeyBalanceCache = { data, at: now };
     return data;
   } catch (_) {
     return null; // billing is a soft signal; do not hard-block if it is unreachable
@@ -1549,14 +1567,14 @@ async function handleWorkflowPreflight(req, res, slug, url) {
   const checks = [];
 
   // 1. Provider configured.
-  if (!V98STORE_API_KEY) {
+  if (!CHEAPKEYAI_API_KEY) {
     checks.push({ name: "provider", ok: false, detail: "Workflow provider is not configured." });
   }
 
   // 2. Provider reachable + every model this run needs still exists.
   let modelsOk = true;
-  if (V98STORE_API_KEY) {
-    const ms = await getV98ModelSet();
+  if (CHEAPKEYAI_API_KEY) {
+    const ms = await getCheapKeyModelSet();
     if (!ms.ok) {
       modelsOk = false;
       checks.push({ name: "provider", ok: false, detail: "Model provider is unreachable right now." });
@@ -1569,8 +1587,8 @@ async function handleWorkflowPreflight(req, res, slug, url) {
   }
 
   // 3. Provider credit (soft: only fails when we can positively read that it is empty).
-  if (V98STORE_API_KEY) {
-    const bill = await getV98BillingCached();
+  if (CHEAPKEYAI_API_KEY) {
+    const bill = await getCheapKeyBalanceCached();
     if (bill && Number.isFinite(bill.remainingUsd)) {
       const creditOk = bill.remainingUsd > 0.05;
       checks.push({ name: "credit", ok: creditOk, detail: creditOk ? "Provider credit available" : "Provider credit is exhausted." });
@@ -1887,7 +1905,7 @@ async function executeDurableWorkflowJob(job, hooks) {
     cryptoSearchWeb: TAVILY_API_KEY
       ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 6 }).then((r) => r.results)
       : null,
-    groupRatio: V98STORE_GROUP_RATIO,
+    groupRatio: CHEAPKEYAI_GROUP_RATIO,
     today: new Date().toISOString().slice(0, 10),
     jsearchKey: JSEARCH_API_KEY,
     jsearchAvailable: jsearchUnderCap(),
@@ -2139,7 +2157,7 @@ async function handleWorkflowRun(req, res, slug) {
     sendJson(res, 405, { error: { code: "METHOD_NOT_ALLOWED", message: "Method not allowed" } });
     return;
   }
-  if (!V98STORE_API_KEY) {
+  if (!CHEAPKEYAI_API_KEY) {
     sendJson(res, 503, { error: "service_unconfigured", message: "Workflow provider is not configured." });
     return;
   }
@@ -2535,7 +2553,7 @@ async function handleWorkflowRun(req, res, slug) {
     try { res.write("event: " + name + "\ndata: " + JSON.stringify(data) + "\n\n"); } catch (_) {}
   }
 
-  const finalModelId = finalModelForTier(tier); // "" when v98store is not configured
+  const finalModelId = finalModelForTier(tier); // "" when CheapKeyAI is not configured
   // Real web search for retrieval nodes (Tavily). Null in paste mode or when no key.
   const searchWeb = (TAVILY_API_KEY && mode !== "paste")
     ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 5 }).then((r) => r.results)
@@ -2558,7 +2576,7 @@ async function handleWorkflowRun(req, res, slug) {
       cryptoSearchWeb: TAVILY_API_KEY
         ? (q) => tavilyClient.searchTavily({ apiKey: TAVILY_API_KEY }, { query: q, maxResults: 6 }).then((r) => r.results)
         : null,
-      groupRatio: V98STORE_GROUP_RATIO,
+      groupRatio: CHEAPKEYAI_GROUP_RATIO,
       today: new Date().toISOString().slice(0, 10),
       jsearchKey: JSEARCH_API_KEY,
       jsearchAvailable: jsearchUnderCap(),
