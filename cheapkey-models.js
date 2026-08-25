@@ -13,6 +13,8 @@ const CHEAPKEY_MODELS = {
   "gpt-5.6-luna": { inputPer1M: 0.20, outputPer1M: 1.20 },
   "gpt-5.6-terra": { inputPer1M: 2.00, outputPer1M: 12.00 },
   "gpt-5.6-sol": { inputPer1M: 5.00, outputPer1M: 30.00 },
+  "cheap-5.6-terra": { inputPer1M: 2.00, outputPer1M: 12.00 },
+  "cheap-5.6-sol": { inputPer1M: 5.00, outputPer1M: 30.00 },
   "claude-3-haiku-20240307": { inputPer1M: 0.25, outputPer1M: 1.25 },
   "claude-3-5-sonnet-20241022": { inputPer1M: 3.00, outputPer1M: 15.00 },
 };

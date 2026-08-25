@@ -1288,6 +1288,15 @@ function showDurableResumeAction(record, wf) {
   resultEl.appendChild(button);
 }
 
+function applyTerminalRunButtonState(status) {
+  const state = window.FundlineWorkflowRuntime.terminalRunButtonState(status);
+  if (!state) return;
+  const button = document.getElementById("wfRunBtn");
+  if (!button) return;
+  button.disabled = state.disabled;
+  button.textContent = state.text;
+}
+
 async function pollDurableWorkflow(record, wf) {
   while (true) {
     const body = await window.FundlineWorkflowRuntime.fetchRunStatus({
@@ -1307,15 +1316,12 @@ async function pollDurableWorkflow(record, wf) {
 
     if (body.status === "succeeded") {
       WF_RECOVERY_STORE.remove(record.jobId);
-      const button = document.getElementById("wfRunBtn");
-      if (button) {
-        button.disabled = false;
-        button.textContent = "Run again";
-      }
+      applyTerminalRunButtonState(body.status);
       return body;
     }
     if (body.status === "refunded" || body.status === "failed") {
       WF_RECOVERY_STORE.remove(record.jobId);
+      applyTerminalRunButtonState(body.status);
       displayRunError(body.status === "refunded"
         ? "The workflow did not complete and the escrow payment was refunded."
         : "The workflow failed before completion.");

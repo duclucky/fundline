@@ -15,6 +15,8 @@ const expectedPrices = {
   "gpt-5.6-luna": [0.20, 1.20],
   "gpt-5.6-terra": [2.00, 12.00],
   "gpt-5.6-sol": [5.00, 30.00],
+  "cheap-5.6-terra": [2.00, 12.00],
+  "cheap-5.6-sol": [5.00, 30.00],
 };
 
 Object.entries(expectedPrices).forEach(([id, [inputPer1M, outputPer1M]]) => {
@@ -32,6 +34,8 @@ assert.equal(cheapkeyModels.computeCostMicros("gpt-4.1-mini", 1000000, 0, 2), 80
 assert.equal(cheapkeyModels.computeCostMicros("unknown-model", 10, 10, 1), null);
 assert.equal(modelCost.costMicros("gpt-5.6-luna", 1000000, 0, 1), 200000);
 assert.equal(modelCost.costMicros("gpt-5.6-sol", 0, 1000000, 1), 30000000);
+assert.equal(modelCost.costMicros("cheap-5.6-terra", 1000, 500, 1), 8000);
+assert.equal(modelCost.costMicros("cheap-5.6-sol", 1000, 500, 1), 20000);
 assert.equal(modelCost.costMicros("unknown-model", 10, 10, 1), 0);
 
 console.log("PASS: CheapKeyAI model prices and cost accounting");

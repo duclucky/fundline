@@ -149,6 +149,14 @@
     };
   }
 
+  function terminalRunButtonState(status) {
+    if (status === "succeeded") return { disabled: false, text: "Run again" };
+    if (status === "refunded" || status === "failed") {
+      return { disabled: false, text: "Try again" };
+    }
+    return null;
+  }
+
   async function fetchRunStatus(options = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(1, Number(options.timeoutMs) || 10000));
@@ -185,6 +193,7 @@
     createRpcReadProvider,
     waitForReceipt,
     createRecoveryStore,
+    terminalRunButtonState,
     fetchRunStatus,
   };
 });

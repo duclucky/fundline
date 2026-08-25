@@ -143,9 +143,9 @@ const CHEAPKEYAI_TIMEOUT_MS = Number(process.env.CHEAPKEYAI_TIMEOUT_MS || 300000
 // GPT-5.6 models for the FINAL content node of every workflow. All workflow models use
 // the shared CheapKeyAI connection above, while deployments may override each model id.
 const WORKFLOW_FINAL_MODELS = {
-  normal: String(process.env.WORKFLOW_FINAL_MODEL_NORMAL || "gpt-5.6-luna").trim(),
-  plus: String(process.env.WORKFLOW_FINAL_MODEL_PLUS || "gpt-5.6-terra").trim(),
-  pro: String(process.env.WORKFLOW_FINAL_MODEL_PRO || "gpt-5.6-sol").trim(),
+  normal: String(process.env.WORKFLOW_FINAL_MODEL_NORMAL || "cheap-5.6-sol").trim(),
+  plus: String(process.env.WORKFLOW_FINAL_MODEL_PLUS || "cheap-5.6-terra").trim(),
+  pro: String(process.env.WORKFLOW_FINAL_MODEL_PRO || "cheap-5.6-sol").trim(),
 };
 const workflowModelProvider = createWorkflowModelProvider({
   apiKey: CHEAPKEYAI_API_KEY,

@@ -25,9 +25,9 @@ async function main() {
     baseUrl: "https://cheapkeyai.shop/v1",
     timeoutMs: 300000,
     models: {
-      normal: "gpt-5.6-luna",
-      plus: "gpt-5.6-terra",
-      pro: "gpt-5.6-sol",
+      normal: "cheap-5.6-sol",
+      plus: "cheap-5.6-terra",
+      pro: "cheap-5.6-sol",
     },
     callChat: async (config, request) => {
       calls.push({ config, request });
@@ -35,13 +35,13 @@ async function main() {
     },
   });
 
-  assert.equal(provider.finalModelForTier("normal"), "gpt-5.6-luna");
-  assert.equal(provider.finalModelForTier("plus"), "gpt-5.6-terra");
-  assert.equal(provider.finalModelForTier("pro"), "gpt-5.6-sol");
+  assert.equal(provider.finalModelForTier("normal"), "cheap-5.6-sol");
+  assert.equal(provider.finalModelForTier("plus"), "cheap-5.6-terra");
+  assert.equal(provider.finalModelForTier("pro"), "cheap-5.6-sol");
   assert.equal(provider.finalModelForTier("unknown"), "");
 
   const result = await provider.callModel(
-    "gpt-5.6-luna",
+    "cheap-5.6-sol",
     [{ role: "user", content: "test" }],
     32
   );
@@ -51,12 +51,12 @@ async function main() {
     baseUrl: "https://cheapkeyai.shop/v1",
     timeoutMs: 300000,
   });
-  assert.equal(calls[0].request.model, "gpt-5.6-luna");
+  assert.equal(calls[0].request.model, "cheap-5.6-sol");
 
   const disabled = createWorkflowModelProvider({
     apiKey: "",
     baseUrl: "https://cheapkeyai.shop/v1",
-    models: { normal: "gpt-5.6-luna" },
+    models: { normal: "cheap-5.6-sol" },
     callChat: async () => ({ content: "", usage: {} }),
   });
   assert.equal(disabled.finalModelForTier("normal"), "");

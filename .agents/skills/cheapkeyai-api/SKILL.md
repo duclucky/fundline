@@ -46,8 +46,10 @@ The authoritative registry is `cheapkey-models.js`. Current workflow model IDs a
 - `gpt-5.6-luna`
 - `gpt-5.6-terra`
 - `gpt-5.6-sol`
+- `cheap-5.6-terra`
+- `cheap-5.6-sol`
 
-Before adding a model, verify the exact ID through `GET /models`, then add its price in one place in `cheapkey-models.js`. Do not duplicate model prices in workflow executors.
+The default final-node routing is `cheap-5.6-sol` for Normal and Pro, and `cheap-5.6-terra` for Plus. Before adding a model, verify the exact ID through `GET /models` and confirm that the production key group has a working route for it. Then add its price in one place in `cheapkey-models.js`. Do not duplicate model prices in workflow executors.
 
 ## Cost and safety
 

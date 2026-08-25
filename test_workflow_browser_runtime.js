@@ -8,6 +8,20 @@ function response(status, body) {
 }
 
 async function main() {
+  assert.deepEqual(runtime.terminalRunButtonState("succeeded"), {
+    disabled: false,
+    text: "Run again",
+  });
+  assert.deepEqual(runtime.terminalRunButtonState("refunded"), {
+    disabled: false,
+    text: "Try again",
+  });
+  assert.deepEqual(runtime.terminalRunButtonState("failed"), {
+    disabled: false,
+    text: "Try again",
+  });
+  assert.equal(runtime.terminalRunButtonState("processing"), null);
+
   assert.deepEqual(runtime.normalizeRpcUrls({
     rpcUrl: "https://primary.test",
     rpcFallbackUrls: ["https://fallback.test", "https://primary.test"],
